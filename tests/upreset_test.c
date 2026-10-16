@@ -133,12 +133,13 @@ int main(void)
     *up_rec(17) = r;
     up_rec(17)->ver = UP_VER + 2u;
     bad += check("record with another version -> empty", !up_used(17));
-    up_rec(17)->ver = 3u;
-    bad += check("a version 3 record (a drum grid) -> empty", !up_used(17));
-    up_rec(17)->ver = UP_VER + 1u;
-    bad += check("a version 5 record (a packed drum grid) -> empty", !up_used(17));
+    for (i = 1; i <= 5; i++) {
+        up_rec(17)->ver = (uint8_t)i;
+        ok = !up_used(17);
+        bad += check("a Felucca record (ver 1..5) -> empty", ok);
+    }
     up_rec(17)->ver = UP_VER;
-    bad += check("  the same record as version 4 is used", up_used(17));
+    bad += check("  the same record as UP_VER (0x40) is used", up_used(17));
     up_rec(17)->engine = NENGINES;
     bad += check("a record of engine NENGINES (a retired one) -> empty", !up_used(17));
     up_rec(17)->engine = 0xFFu;
@@ -147,7 +148,7 @@ int main(void)
     *up_rec(16) = r;                                        /* a bank read: a retired engine number, a grid record */
     up_rec(16)->engine = 9u;
     *up_rec(18) = r;
-    up_rec(18)->ver = 3u;
+    up_rec(18)->ver = 4u;
     st_save(OBJ_UPRESET0 + 1, &up_bank[1], sizeof up_bank[1]);
     memset(up_bank, 0, sizeof up_bank);
     up_bank_check(1, st_load(OBJ_UPRESET0 + 1, &up_bank[1], sizeof up_bank[1]));
@@ -205,37 +206,6 @@ int main(void)
     for (i = 0; i < 8u; i++)
         ok &= v[P_E0 + i] == (int16_t)(P_E0 - 2u + i);
     bad += check("np < P_COUNT: mapped by count", ok);
-    /* a record saved before the SLICER (P_COUNT 53, P_E0 45): the four SLICER parameters (just
-     * before P_E0) take their defaults, everything else keeps its id */
-    r.ver = 2;
-    r.np = 53;
-    for (i = 0; i < 53u; i++)
-        r.p[i] = (int16_t)(2000 + i);
-    up_params(&r, v, def);
-    ok = P_SLCR == 45 && P_SLDEPTH + 1 == P_M1SRC && P_M4AMT + 1 == P_FM1_ATK && P_FM4_LEVEL + 1 == P_CHRD &&
-         P_VOIC + 1 == P_RSV_LN && P_RSV_LN_END + 1 == P_LSYNC && P_SQNT + 1 == P_SPRD && P_SPRD + 1 == P_ITYPE &&
-         P_IMIX + 1 == P_FTYPE && P_ESYNC + 1 == P_E0 && P_E0 == 103 && P_COUNT == 111;
-    for (i = 0; i < 45u; i++)
-        ok &= v[i] == (int16_t)(2000 + i);
-    for (i = P_SLCR; i < P_E0; i++)
-        ok &= v[i] == def[i];
-    for (i = 0; i < 8u; i++)
-        ok &= v[P_E0 + i] == (int16_t)(2000 + 45 + i);
-    bad += check("old record (np 53): SLICER and matrix defaults, E0..E7 kept", ok);
-    /* a record saved before the modulation matrix (P_COUNT 57, P_E0 49): the twelve matrix parameters (just
-     * before P_E0) take their defaults (every slot OFF), the SLICER and everything else keep their ids */
-    r.np = 57;
-    for (i = 0; i < 57u; i++)
-        r.p[i] = (int16_t)(3000 + i);
-    up_params(&r, v, def);
-    ok = 1;
-    for (i = 0; i < 49u; i++)
-        ok &= v[i] == (int16_t)(3000 + i);
-    for (i = P_M1SRC; i <= P_M4AMT; i++)
-        ok &= v[i] == def[i];
-    for (i = 0; i < 8u; i++)
-        ok &= v[P_E0 + i] == (int16_t)(3000 + 49 + i);
-    bad += check("old record (np 57): SLICER kept, matrix defaults, E0..E7 kept", ok);
     /* records of version 4 (packed bytes) saved before the DRUM lane levels (1.0.x: P_COUNT 91,
      * P_E0 83), before the chord keys (89, P_E0 81) and before the FM operator ENVs (69, P_E0 61): their engine
      * values land on today's E0..E7 (91..98), the lane levels (100 %) and the chord keys their defaults (OFF, CLOSE), the
@@ -309,20 +279,6 @@ int main(void)
         memset(&up_bank[1], 0, sizeof up_bank[1]);
         up_bank_check(1, st_load(OBJ_UPRESET0 + 1, &up_bank[1], sizeof up_bank[1]));
         bad += check("category: kept through the bank on flash", up_used(17) && up_cat_of(up_rec(17)) == CAT_KEYS);
-        memset(&r, 0, sizeof r);
-        r.used = UP_USED; r.ver = 2; r.engine = ENGI_ACID; r.np = 60;
-        memcpy(r.name, "OLD2", 4);
-        for (i = 0; i < 60u; i++) r.p[i] = (int16_t)(i * 3u) - 64;
-        r.note[0] = 0x81; r.flags[0] = 0x80;
-        got = r;
-        up_set_cat(&got, CAT_FX);
-        ok = up_valid(&r) && got.ver == UP_VER && up_cat_of(&got) == CAT_FX && got.note[0] == 0x81 && up_valid(&got);
-        for (i = 0; i < 60u; i++) ok &= up_value(&got, i) == r.p[i];
-        r.p[7] = 200;                                   /* a value a byte cannot hold: stays version 2, no category */
-        got = r;
-        up_set_cat(&got, CAT_FX);
-        bad += check("category: a version 2 record -> 4 with it, values kept; one that cannot be packed keeps none",
-                     ok && got.ver == 2u && up_cat_of(&got) == cat_of_engine(ENGI_ACID) && !memcmp(&got, &r, sizeof r));
     }
     printf("%s\n", bad ? "USER PRESET TEST FAILED" : "user preset test passed");
     return bad != 0;

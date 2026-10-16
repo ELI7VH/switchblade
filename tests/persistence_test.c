@@ -305,7 +305,6 @@ int main(void)
     uint32_t before;
     persist_t p;
     project_store_t old, got;
-    project_v5_t v5;
     up_bank_t bank;
     up_rec_t r;
     reset();
@@ -509,27 +508,22 @@ int main(void)
         proj_slot[0] = old;
         st_save(OBJ_PROJECT0, &proj_slot[0], sizeof proj_slot[0]);
     }
-    {   /* an older format (FUN5) with values FUN7 cannot pack still loads, bounded */
+    {   /* a Felucca project (FUN5 magic, valid hash) is refused; a FOR4 save packs a step inside its fields */
         uint32_t i;
-        memset(&v5, 0, sizeof v5);
-        v5.magic = PROJ_MAGIC_V5;
-        v5.size = sizeof v5;
-        for (i = 0; i < G_COUNT; i++)
-            v5.g[i] = GP[i].def;
-        for (i = 0; i < NTRK; i++) {
-            v5.t[i].engine = trk[i].engine;
-            memcpy(v5.t[i].p, trk[i].p, sizeof v5.t[i].p);
-        }
-        v5.t[0].p[P_LEVEL] = 900;                                  /* out of range */
-        v5.t[0].step[0] = (step10_t){{255, 128, 160, 200}, 255, 255, 0, 96, 255, 5};
-        v5.sum = proj_hash(&v5, sizeof v5 - 4u);
-        st_save(OBJ_PROJECT0 + 3u, &v5, sizeof v5);
+        memset(&old, 0, sizeof old);
+        ((uint32_t *)old.raw)[0] = 0x46554E35u;
+        ((uint32_t *)old.raw)[1] = 3352u;
+        st_save(OBJ_PROJECT0 + 3u, &old, 3352u);
         memset(proj_slot[3].raw, 0, 4);
+        ui.msg[0] = 0;
         project_load(3);
-        bad += check("FUN5 load bounds steps and clears the retired grid's bytes", trk[0].step[0].n == 4u &&
-                      trk[0].step[0].time == ST_REST && trk[0].step[0].note[0] == 127u &&
-                      !trk[0].step[0].note[1] && !trk[0].step[0].hit && !trk[0].step[0].acc && project_used(3));
-        bad += check("FUN5 load clamps a parameter into its range", trk[0].p[P_LEVEL] == TP[P_LEVEL].max);
+        bad += check("a Felucca project (FUN5) is refused: EMPTY SLOT", !strcmp(ui.msg, "EMPTY SLOT") && !project_used(3));
+        trk[0].step[0] = (step_t){{255, 128, 160, 200}, 4, ST_NOTE, 0, 255};
+        project_save(3);
+        project_load(3);
+        bad += check("FOR4 save bounds steps and clears the retired grid's bytes", trk[0].step[0].n == 4u &&
+                      trk[0].step[0].note[0] == 127u && trk[0].step[0].note[1] == 127u &&
+                      !trk[0].step[0].hit && !trk[0].step[0].acc && trk[0].step[0].vel == 127u && project_used(3));
         for (i = 0; i < P_COUNT; i++) {
             uint32_t e;
             for (e = 0; e < NENGINES; e++)
@@ -559,7 +553,7 @@ int main(void)
     bad += check("preset initial save", up_put(3, &r) == 0 && up_used(3));
     bank = up_bank[0];
     before = up_gen;
-    r.p[0] = 77;
+    up_set_value(&r, 0, 77);
     fail_after = 1;
     ok = up_put(3, &r) == 2;
     fail_after = -1;

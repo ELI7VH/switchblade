@@ -35,7 +35,6 @@ static void fl_plain_window_init(void) {}
 #include "../firmware/src/storage.c"
 #include "../firmware/src/upreset.c"
 #include "../firmware/src/project.c"
-#include "old_pack.h"
 
 enum { ED_BACKUP_LIST = 65, ED_BACKUP_GET, ED_BACKUP_PUT };
 static uint8_t rep[4096];
@@ -171,7 +170,7 @@ int main(void)
     int bad = 0;
     uint32_t len = 0, crc = 0, before;
     static project_store_t st;
-    static project_v6_t v6;
+    static project_store_t v6;
     persist_t ps;
 
     reset();
@@ -283,49 +282,26 @@ int main(void)
     bad += check("a FUN10 project restores into slot 3 (flash and RAM)",
                  put_all(4, &st, sizeof st, st_crc32(&st, sizeof st)) == 0 && project_used(2) &&
                  !memcmp(&proj_slot[2], &st, sizeof st) && st_load(OBJ_PROJECT0 + 2, &proj_wire, sizeof proj_wire) == (int)sizeof st);
-    {   /* FUN8 of 1.0.x (3584 bytes, 91 parameters) and FUN9 of 1.1 (3648, 99): restore as FUN10, E0 at P_E0, the
-         * reserved block (the retired lane levels) at 127 for FUN8, the four 1.2 parameters at their defaults; a FUN9
-         * with 64 motion records keeps them all */
-        static uint8_t v8[3584], v9[3648];
-        uint32_t k, ok;
-        trk[2].p[P_E0] = 2;
-        trk[2].p[P_RSV_LN + 3] = 90;                   /* (the retired lane levels' ids: reserved, still stored) */
+    {   /* every Felucca project object is refused (nothing written, the slot as it was): FUN9 (3648 bytes), FUN8
+         * (3584), FUN7 (3388), FUN10 (3840, "FUNA") with a valid hash */
+        static uint8_t fel[3840];
+        static const uint32_t LEN[4] = {3648u, 3584u, 3388u, 3840u}, MAG[4] = {0x46554E39u, 0x46554E38u, 0x46554E37u, 0x46554E41u};
+        uint32_t k, ok = 1, sum;
         project_capture(&proj_scratch);
-        proj_scratch.t[2].p[P_RSV_LN + 3] = 127;       /* (FUN8 had no lane levels) */
-        bad += check("a FUN8 project (1.0.x) restores as FUN10 into slot 2, E0 at P_E0, the reserved block's default",
-                     old_pack(v8, &proj_scratch, OLD_FUN8, 91u) == sizeof v8 &&
-                     put_all(3, v8, sizeof v8, st_crc32(v8, sizeof v8)) == 0 && ((uint32_t *)proj_slot[1].raw)[0] == PROJ_MAGIC &&
-                     proj_import(&proj_scratch, &proj_slot[1], sizeof st) && proj_scratch.t[2].p[P_E0] == 2 &&
-                     proj_scratch.t[2].p[P_RSV_LN + 3] == 127 && proj_scratch.t[1].step[3].note[0] == 64u);
-        project_capture(&proj_scratch);
-        for (k = 0; k < 64u; k++)
-            proj_scratch.motion.event[k] = (motion_event_t){(uint8_t)(1u << 6 | k), P_REV, (int8_t)k};
-        proj_scratch.motion.count = 64;
-        proj_scratch.motion.on = 2;
-        ok = old_pack(v9, &proj_scratch, OLD_FUN9, 99u) == sizeof v9 &&
-             put_all(4, v9, sizeof v9, st_crc32(v9, sizeof v9)) == 0 && ((uint32_t *)proj_slot[2].raw)[0] == PROJ_MAGIC &&
-             proj_import(&proj_scratch, &proj_slot[2], sizeof st) && proj_scratch.t[2].p[P_E0] == 2 &&
-             proj_scratch.t[2].p[P_RSV_LN + 3] == 90 && proj_scratch.motion.count == 64u && proj_scratch.motion.event[63].value == 63 &&
-             proj_scratch.t[0].p[P_LSYNC] == 0 && proj_scratch.t[0].p[P_LTRIG] == 0 && proj_scratch.t[0].p[P_LPOL] == 0 &&
-             proj_scratch.t[0].p[P_SQNT] == 1;
-        bad += check("a FUN9 project (1.1) restores as FUN10 into slot 3: its 64 records, the reserved block, LFO 2 / QUANTIZE defaults", ok);
+        proj_pack(&v6, &proj_scratch);
+        memcpy(&st, &proj_slot[2], sizeof st);
+        before = erases;
+        for (k = 0; k < 4u; k++) {
+            memcpy(fel, v6.raw, sizeof fel);
+            memcpy(fel, &MAG[k], 4); memcpy(fel + 4, &LEN[k], 4);
+            sum = st_crc32(fel, LEN[k]);
+            memcpy(fel + LEN[k] - 4u, &(uint32_t){proj_hash(fel, LEN[k] - 4u)}, 4);
+            ok &= put_all(4, fel, LEN[k], st_crc32(fel, LEN[k])) != 0u;
+            (void)sum;
+        }
+        bad += check("Felucca project objects (FUN7..FUN10) are refused: nothing written, the slot kept",
+                     ok && erases == before && !memcmp(&proj_slot[2], &st, sizeof st));
     }
-    memset(&v6, 0, sizeof v6);                           /* FUN6: 69 parameters, steps out of range */
-    v6.magic = PROJ_MAGIC_V6;
-    v6.size = sizeof v6;
-    for (uint32_t i = 0; i < G_COUNT; i++)
-        v6.g[i] = GP[i].def;
-    for (uint32_t i = 0; i < NTRK; i++)
-        v6.t[i].engine = trk[i].engine;
-    v6.t[0].step[0] = (step10_t){{255, 72}, 9, 7, 0, 96, 0, 0};
-    v6.t[0].p[61] = 3;                                   /* old E0 */
-    memset(&v6.chain, 0, sizeof v6.chain);
-    v6.sum = proj_hash(&v6, sizeof v6 - 4u);
-    bad += check("a FUN6 project restores as FUN10, bounded, its E0 at P_E0",
-                 put_all(5, &v6, sizeof v6, st_crc32(&v6, sizeof v6)) == 0 && ((uint32_t *)proj_slot[3].raw)[0] == PROJ_MAGIC &&
-                 proj_import(&proj_scratch, &proj_slot[3], sizeof st) && proj_scratch.t[0].step[0].n == 4u &&
-                 proj_scratch.t[0].step[0].note[0] == 127u && proj_scratch.t[0].p[P_E0] ==
-                 clamp(3, param_desc_of(trk[0].engine, P_E0)->min, param_desc_of(trk[0].engine, P_E0)->max));
     {   /* the retired ids (8 the FM6 bank, 9 the user presets' FM6 patches, 32..34 the user sample slots) and any
          * other past 7: refused at begin (1), nothing written */
         static const uint8_t RETIRED[] = {8, 9, 10, 32, 33, 34, 127};
@@ -372,7 +348,7 @@ int main(void)
         b.r[4].used = UP_USED;
         b.r[4].ver = 99;                                 /* a future record */
         memcpy(b.r[4].name, "Future", 7);
-        b.r[4].p[0] = 55;
+        b.r[4].packed[0] = 55;
         bad += check("a bank with a future record version restores byte for byte",
                      put_all(6, &b, sizeof b, st_crc32(&b, sizeof b)) == 0 &&
                      st_load(OBJ_UPRESET0, &proj_wire, sizeof proj_wire) == (int)sizeof b &&

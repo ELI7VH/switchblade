@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* Shared PER4 layout: each feature updates only its own fields, preserving
+/* Shared FOR4 settings layout (FM1-Four): each feature updates only its own fields, preserving
  * the other feature's saved preferences when either is built independently.
- * PER1/PER2 are upstream; PER3 added bold; PER4 added favorites.
+ * Felucca's PER1..PER4 objects are refused, not imported: the settings start from their defaults.
  * palette: UI_PAL_TAG + index; an old id (below 20, earlier firmware) is migrated on import.
  * bold: no longer used (one font weight); kept as it was saved, unless it holds the HOLD setting (panel.c).
  * zoom: no longer used (the large readout); kept as it was saved, unless it holds the LEDS setting (panel.c).
@@ -24,24 +24,12 @@ typedef struct {
     uint32_t bold;
     struct { uint8_t factory[16][32]; uint32_t user, filter; } favorites;
 } persist_t;
-#define PERSIST_MAGIC 0x50455234u
+#define PERSIST_MAGIC 0x34524F46u            /* "FOR4" (a separate object from the project) */
 
-/* Normalize in place; 1 = current, 2 = migrated, 0 = invalid. */
+/* Normalize in place; 1 = current, 0 = invalid (any Felucca PER1..PER4 object is refused: the caller keeps defaults). */
 static int settings_import(persist_t *p, int n)
 {
-    int current = n == (int)sizeof *p && p->magic == PERSIST_MAGIC;
-    int old3 = n == (int)(sizeof *p - sizeof p->favorites) && p->magic == 0x50455233u;
-    int old2 = n == (int)(sizeof *p - sizeof p->favorites - sizeof p->bold) && p->magic == 0x50455232u;
-    int old1 = n == (int)(8u + sizeof(panel_t)) && p->magic == 0x50455231u;
-    if (!(current || old3 || old2 || old1)) return 0;
-    if (old1) {
-        panel_t old;
-        memcpy(&old, (uint8_t *)p + 8, sizeof old);
-        p->panel = old;
-        p->lowcut = p->zoom = 0;
-    }
-    if (old1 || old2) p->bold = 0;
-    if (!current) memset(&p->favorites, 0, sizeof p->favorites);
+    if (n != (int)sizeof *p || p->magic != PERSIST_MAGIC) return 0;
     if (p->favorites.factory[15][29] > 1u)        /* STYLE (ui.c ui_style): 2, the retired PIXEL = LINE; unknown = FLAT */
         p->favorites.factory[15][29] = p->favorites.factory[15][29] == 2u ? 1u : 0u;
     {   /* CLICK, CLICK LEVEL, COUNT-IN (ui.c ui_rec_prefs): two bits each, 3 is no value: the default (0) */
@@ -78,7 +66,7 @@ static int settings_import(persist_t *p, int n)
     favorites.filter = favorites.filter == 1u;
 #endif
     if (p->panel.magic == PANEL_MAGIC) panel = p->panel;
-    return current ? 1 : 2;
+    return 1;
 }
 
 /* Start with the last imported/saved object, including fields owned by a

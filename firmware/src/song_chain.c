@@ -71,22 +71,6 @@ static int chain_valid(const chain_config_t *c)
     }
     return 1;
 }
-/* the chain of FUN6..FUN9 (rows {slot, repeat}) -> today's: each row a section with the four tracks on its slot. 0: not
- * a valid one (as chain_valid then) */
-static int chain_from_v9(chain_config_t *c, const chain_v9_t *o)
-{
-    uint32_t i;
-    chain_defaults(c);
-    if (o->count > CHAIN_ROWS)
-        return 0;
-    for (i = 0; i < o->count; i++) {
-        if (o->row[i].slot >= 4u || !o->row[i].repeat || o->row[i].repeat > 16u)
-            return 0;
-        c->row[i] = chain_row_of(o->row[i].slot, o->row[i].repeat);
-    }
-    c->count = o->count;
-    return 1;
-}
 /* the track whose loops count section r's length: the first one not silent; every track silent: track 1 (a bar) */
 static uint32_t chain_clock(const chain_row_t *r)
 {

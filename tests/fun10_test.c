@@ -20,7 +20,7 @@
  * Built and run by tests/run_tests.sh. */
 #define UI_TEST_NO_MAIN 1
 #include "ui_test.c"
-#include "old_pack.h"
+
 
 /* ---------------------------------------------------------------- LFO 2 --- */
 /* the LFO's phase over `blocks` blocks, in cycles (wraps + the phase) */
@@ -493,51 +493,15 @@ static int formats(void)
         motion_set_event(&trk[i % 4u], (i / 4u) % NSTEP, i / 4u < NSTEP ? P_REV : P_PAN, (int16_t)(i / 4u < NSTEP ? i / 4u : -(int32_t)(i % 60u)));
     motion_set_lock(&trk[2], 9, P_E0 + 3, 7);
     project_capture(&a);
-    ok = motion.count == MOTION_MAX && proj_pack(&st, &a) && ((uint32_t *)st.raw)[0] == 0x46554E41u &&
+    ok = motion.count == MOTION_MAX && proj_pack(&st, &a) && ((uint32_t *)st.raw)[0] == PROJ_MAGIC &&
          ((uint32_t *)st.raw)[1] == 3840u && st.raw[66] == P_COUNT && proj_import(&b, &st, sizeof st) && !memcmp(&a, &b, sizeof a);
     ok &= step_nudge(&b.t[0].step[0]) == -8 && step_nudge(&b.t[0].step[1]) == 7 && step_nudge(&b.t[0].step[2]) == -1 &&
           step_ratchet(&b.t[0].step[3]) == 4u && step_nudge(&b.t[0].step[3]) == 1 && step_chance(&b.t[0].step[3]) == 33u;
     ok &= b.t[0].p[P_LSYNC] == 8 && b.t[0].p[P_LTRIG] == 1 && b.t[0].p[P_LPOL] == 1 && b.t[0].p[P_SQNT] == 0;
     ok &= !(st.raw[68u + P_COUNT + 2u] & 0x80u) && (st.raw[68u + P_COUNT + 2u + 3u] & 0x80u) &&   /* -8: bit 3 only */
           (st.raw[68u + P_COUNT + 2u + 9u] & 0x80u) && !(st.raw[68u + P_COUNT + 2u + 12u] & 0x80u);   /* +7: bits 0..2 */
-    bad += check("FUN10 round trip: 3840 bytes, nudges (bit 7 of the note bytes), 128 records, LFO 2, QUANTIZE", ok);
-    /* a FUN10 of a 1.2 build before SPREAD (#148): 103 parameters (no P_SPRD, nor 1.5's); one of 1.2 .. 1.4: 104 (no
-     * INSERT, filter TYPE, ENV SYNC: 1.5). Their engine values and their motion (the lock on E3) as many ids lower. They
-     * load by count: SPREAD 0, the INSERT OFF (its defaults), TYPE LP, ENV SYNC OFF, the rest as written */
-    for (uint32_t from = P_SPRD; from <= P_ITYPE; from += P_ITYPE - P_SPRD) {
-        static project_store_t so;
-        uint32_t pi = 68u, po = 68u, tr, m0, drop = P_E0 - from;
-        memset(&so, 0, sizeof so);
-        ok = proj_pack(&st, &a) && !a.t[0].p[P_SPRD] && !a.t[0].p[P_ITYPE] && !a.t[0].p[P_FTYPE] && !a.t[0].p[P_ESYNC];
-        memcpy(so.raw, st.raw, 68u);
-        so.raw[66] = (uint8_t)(P_COUNT - drop);
-        for (tr = 0; tr < NTRK; tr++) {
-            for (i = 0; i < P_COUNT; i++, pi++)
-                if (i < from || i >= P_E0)
-                    so.raw[po++] = st.raw[pi];
-            memcpy(so.raw + po, st.raw + pi, 2u + NSTEP * 9u);
-            pi += 2u + NSTEP * 9u;
-            po += 2u + NSTEP * 9u;
-        }
-        memcpy(so.raw + po, st.raw + pi, sizeof(chain_config_t) + sizeof(motion_store_t));
-        m0 = po + sizeof(chain_config_t);
-        for (i = 0; i < so.raw[m0]; i++) {
-            uint8_t *id = &so.raw[m0 + 4u + 3u * i + 1u];
-            if ((*id & 0x7Fu) >= P_E0)
-                *id = (uint8_t)(*id - drop);            /* (the lock bit kept) */
-        }
-        memcpy(so.raw + PROJ_FM6_OFF, st.raw + PROJ_FM6_OFF, PROJ_STORE_SIZE - 4u - PROJ_FM6_OFF);
-        i = proj_hash(so.raw, PROJ_STORE_SIZE - 4u);
-        memcpy(so.raw + PROJ_STORE_SIZE - 4u, &i, 4);
-        ok &= so.raw[66] == (from == P_SPRD ? 103u : 104u) && proj_import(&b, &so, sizeof so) && !memcmp(&a, &b, sizeof a) &&
-              b.t[2].p[P_E0 + 3] == 5 && b.t[1].p[P_ITYPE] == 0 && b.t[1].p[P_IMIX] == 127 && b.t[1].p[P_FTYPE] == 0 &&
-              b.t[1].p[P_ESYNC] == 0;
-        bad += check(from == P_SPRD ? "a FUN10 of 103 parameters (1.2 before SPREAD): SPREAD 0, the INSERT OFF, TYPE LP, ENV SYNC OFF, "
-                                      "engine values and motion in place"
-                                    : "a FUN10 of 104 parameters (1.2 .. 1.4): the INSERT OFF, TYPE LP, ENV SYNC OFF, engine values and motion "
-                                      "in place",
-                     ok);
-    }
+    bad += check("FOR4 round trip: 3840 bytes, nudges (bit 7 of the note bytes), 128 records, LFO 2, QUANTIZE", ok);
+    /* (a FUN10 of 103 / 104 parameters, Felucca 1.2 .. 1.4: refused, see project_test.c) */
     {   /* the song's sections (1.2): a slot per track, "-" silent, 5 bytes a row, 84 in all, right after the steps */
         project_t c = a, d;
         uint32_t at = 68u + NTRK * (P_COUNT + 2u + NSTEP * 9u);
@@ -561,76 +525,7 @@ static int formats(void)
                  motion.count == MOTION_MAX && t->p[P_LSYNC] == 8);
     st.raw[68u + 4u] |= 0x80u;                       /* a nudge bit in a FUN10 note byte: fine; in a FUN9: refused */
 
-    /* FUN9 (1.1), FUN8 (1.0.x), FUN7: as before; the four parameters at their defaults, every nudge 0 */
-    memset(&a.motion, 0, sizeof a.motion);
-    for (i = 0; i < 64u; i++)
-        a.motion.event[i] = (motion_event_t){(uint8_t)((i % 4u) << 6 | i / 4u), (uint8_t)(i % 5u ? P_REV : P_E0 + 3), (int8_t)(i % 5u ? i : 2)};
-    a.motion.count = 64; a.motion.on = 15;
-    a.motion.event[7].param = P_PAN; a.motion.event[7].value = -40;
-    a.motion.event[9].param |= MOTION_LOCK;
-    for (k = 0; k < NTRK; k++) {
-        a.t[k].p[P_LSYNC] = a.t[k].p[P_LTRIG] = a.t[k].p[P_LPOL] = 0;
-        a.t[k].p[P_SQNT] = 1;
-        for (i = 0; i < NSTEP; i++)
-            step_set_nudge(&a.t[k].step[i], 0);
-    }
-    memcpy(a.name, "OLD SONG", 9);
-    chain_defaults(&a.chain);                         /* a song of rows {slot, repeat} (36 bytes then) */
-    a.chain.count = 3;
-    a.chain.row[0] = chain_row_of(0, 4); a.chain.row[1] = chain_row_of(3, 16); a.chain.row[2] = chain_row_of(1, 1);
-    a.sum = proj_sum(&a);
-    ok = old_pack(v9, &a, OLD_FUN9, 99u) == sizeof v9 && proj_import(&b, v9, sizeof v9) && !memcmp(&a, &b, sizeof a);
-    bad += check("FUN9 (1.1, 64 records of 4 bytes): exactly the project (LFO 2 / QUANTIZE defaults, nudges 0)", ok);
-    {
-        uint8_t c9[3648];
-        uint32_t sum, at = 68u + NTRK * (99u + 2u + NSTEP * 9u);
-        ok = b.chain.count == 3u && !memcmp(&b.chain.row[1], &(chain_row_t){{3, 3, 3, 3}, 16}, sizeof(chain_row_t)) &&
-             v9[at] == 3 && v9[at + 4u] == 0 && v9[at + 5u] == 4 && v9[at + 6u] == 3 && v9[at + 7u] == 16;
-        memcpy(c9, v9, sizeof c9);
-        c9[at + 6u] = 4;                              /* a row on slot 4: never in a FUN9 */
-        sum = proj_hash(c9, 3644u); memcpy(c9 + 3644u, &sum, 4);
-        ok &= !proj_import(&b, c9, sizeof c9);
-        bad += check("  its song: rows {slot, repeat} load as sections with the four tracks on the row's slot; slot 4 refused", ok);
-        proj_import(&b, v9, sizeof v9);
-    }
-    {
-        uint8_t c9[3648];
-        uint32_t sum, mo = 68u + NTRK * (99u + 2u + NSTEP * 9u) + sizeof(chain_v9_t);
-        memcpy(c9, v9, sizeof c9);
-        c9[mo] = 65;                                  /* 65 records: never in a FUN9 */
-        sum = proj_hash(c9, 3644u); memcpy(c9 + 3644u, &sum, 4);
-        ok = !proj_import(&b, c9, sizeof c9);
-        memcpy(c9, v9, sizeof c9);
-        c9[mo + 4u + 4u * 7u + 2u] = 0x00; c9[mo + 4u + 4u * 7u + 3u] = 0x01;   /* a value of 256 */
-        sum = proj_hash(c9, 3644u); memcpy(c9 + 3644u, &sum, 4);
-        ok &= !proj_import(&b, c9, sizeof c9);
-        memcpy(c9, v9, sizeof c9);
-        c9[68u + 99u + 2u] |= 0x80u;                  /* a note byte above 127 (a FUN10's nudge bit) */
-        sum = proj_hash(c9, 3644u); memcpy(c9 + 3644u, &sum, 4);
-        ok &= !proj_import(&b, c9, sizeof c9);
-        bad += check("  a FUN9 claiming 65 records, a value out of -64..127 or a note byte above 127: refused", ok);
-    }
-    for (k = 0; k < NTRK; k++)                       /* (FUN8 / FUN7: no lane levels (the reserved ids' default), no locks then) */
-        for (i = P_RSV_LN; i <= P_RSV_LN_END; i++)
-            a.t[k].p[i] = 127;
-    a.motion.event[9].param &= 0x7Fu;
-    a.sum = proj_sum(&a);
-    ok = old_pack(v8, &a, OLD_FUN8, 91u) == sizeof v8 && proj_import(&b, v8, sizeof v8) && !memcmp(&a, &b, sizeof a);
-    bad += check("FUN8 (1.0.x, 91 parameters): exactly the project", ok);
-    a.g[G_RTYPE] = 1;                                /* (a FUN7 knew ROOM and SPRING: above, the old drum channel) */
-    a.sum = proj_sum(&a);
-    ok = old_pack(v7, &a, OLD_FUN7, 91u) == sizeof v7 && proj_import(&b, v7, sizeof v7) && !memcmp(&a, &b, sizeof a);
-    bad += check("FUN7 (91 parameters): exactly the project", ok);
-    for (i = 0; i < 2u; i++) {                        /* a retained slot of 3840 holding the older records */
-        static project_store_t slot;
-        memset(&slot, 0xA5, sizeof slot);
-        memcpy(slot.raw, i ? v8 : v9, i ? sizeof v8 : sizeof v9);
-        ok = proj_import(&b, &slot, sizeof slot) && b.motion.count == 64u;
-        bad += check(i ? "  a retained (longer) slot holding a FUN8: loads" : "  a retained (longer) slot holding a FUN9: loads", ok);
-    }
-    project_restore_runtime(&b);
-    bad += check("  restored: QUANTIZE ON, LFO 2 off, every step's nudge 0, the 64 records", trk[0].p[P_SQNT] == 1 &&
-                 !trk[0].p[P_LSYNC] && !step_nudge(&trk[0].step[1]) && motion.count == 64u && motion.event[7].value == -40);
+    /* FUN9 / FUN8 / FUN7 (Felucca): refused in FOUR, see project_test.c and backup_test.c */
 
     /* user presets: a record of 103 round trips; one of 99 (1.1) gets the four at their defaults; a pattern keeps no
      * nudge (bit 4 of its flags is the tie) */

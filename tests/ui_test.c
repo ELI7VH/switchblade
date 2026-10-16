@@ -447,27 +447,6 @@ static int test_sound_loads(void)
     trk[3].p[P_SDIV] = 3;
     before = trk[3];
     project_save(1);
-    project_v6_t legacy = {0};
-    project_t decoded;
-    proj_import(&decoded, &proj_slot[1], sizeof proj_slot[1]);
-    legacy.magic = PROJ_MAGIC_V6; legacy.size = sizeof legacy;
-    legacy.parts = 0; legacy.phys = PROJ_PHYS;
-    memcpy(legacy.g, decoded.g, sizeof legacy.g);
-    for (uint32_t ti = 0; ti < NTRK; ti++) {
-        memcpy(legacy.t[ti].p, decoded.t[ti].p, 61u * sizeof(int16_t));
-        memcpy(legacy.t[ti].p + 61, decoded.t[ti].p + P_E0, 8u * sizeof(int16_t));
-        legacy.t[ti].engine = decoded.t[ti].engine; legacy.t[ti].preset = decoded.t[ti].preset;
-        for (uint32_t st = 0; st < NSTEP; st++) memcpy(&legacy.t[ti].step[st], &decoded.t[ti].step[st], sizeof(step10_t));
-    }
-    legacy.t[3].engine = 0;
-    legacy.g[G_DRLVL] = 71; legacy.g[G_DRREV] = 43;
-    legacy.g[G_RTYPE] = 10;                               /* (id 24 was the GM drum part's MIDI channel: 10) */
-    legacy.sum = proj_hash(&legacy, offsetof(project_v6_t, sum));
-    memcpy(&proj_slot[1], &legacy, sizeof legacy);
-    project_load(1);
-    bad += check("old GM projects (parts 0): track 4 loads its engine byte (0, OB-Z), its steps and DIV kept",
-                 trk[3].eng_req == ENGI_OBX && trk[3].p[P_SDIV] == 3 && !memcmp(trk[3].step, before.step, sizeof trk[3].step));
-    bad += check("  its old drum channel (10, in id 24) loads as REVERB TYPE ROOM", song.g[G_RTYPE] == 0);
     printf("ui: undo copy %u bytes\n", (unsigned)sizeof undo);
     return bad;
 }
@@ -1209,23 +1188,6 @@ static int test_categories(void)
     ok = name_on() && nm.cat == CAT_KEYS;
     press(B_OCTDN);
     bad += check("  saving a sound loaded from a user preset starts at that preset's category", ok && !name_on() && !up_used(5));
-    {   /* a record of before categories (version 2: 16-bit values) */
-        up_rec_t *r = up_rec(9);
-        int16_t v0[P_COUNT], v1[P_COUNT];
-        uint32_t c0;
-        memset(r, 0, sizeof *r);
-        r->used = UP_USED; r->ver = 2; r->engine = ENGI_WAVE; r->np = 72;
-        str_cpy(r->name, "OLD KIT", 12);
-        for (i = 0; i < 72u; i++) r->p[i] = (int16_t)(i % 100u);
-        up_bank[0].magic = UP_BANK_MAGIC; up_bank[0].rsize = sizeof(up_rec_t); up_bank[0].nslot = UP_PER_BANK;
-        c0 = up_cat(9);
-        up_values(r, v0);
-        ok = up_rename_cat(9, "OLD KIT", CAT_FX) != 1;
-        up_values(r, v1);
-        bad += check("  a version 2 record: listed by its engine (OTHER); a rename with a category makes it version 4, same sound",
-                     c0 == CAT_OTHER && ok && r->ver == UP_VER && up_cat(9) == CAT_FX && !memcmp(v0, v1, sizeof v0));
-        memset(r, 0, sizeof *r);
-    }
     /* PROJECT: KNOB 3 a random name */
     go_page(GR_SLOTS);
     name_open(NK_PROJ_SAVE, 1);
@@ -5100,9 +5062,9 @@ static int test_screen_wake(void)
         ok &= settings_import(&p, sizeof p) && menu_get(MI_SCRWAKE) == 0u && (ui_prefs2 & 0x10u);
         memset(&p.favorites, 0, sizeof p.favorites);   /* 1.0 .. 1.5.1: the byte 0 */
         ok &= settings_import(&p, sizeof p) && menu_get(MI_SCRWAKE) == 0u;
-        p.magic = 0x50455233u;                         /* PER3 (no favorites at all) */
+        memset(&p.favorites, 0, sizeof p.favorites);   /* (settings without that field: zero) */
         ui_prefs2 = 0x20u;
-        ok &= settings_import(&p, (int)(sizeof p - sizeof p.favorites)) == 2 && menu_get(MI_SCRWAKE) == 0u;
+        ok &= settings_import(&p, (int)sizeof p) == 1 && menu_get(MI_SCRWAKE) == 0u;
         bad += check("SCREEN WAKE: older settings (the byte 0, PER3) read +MIDI; PANEL saved and read back", ok);
     }
 
@@ -6319,8 +6281,8 @@ static int test_fx_map(void)
         for (p = 0; p < PF_KEYS; p++)
             ok &= p == 10u || perf_map[p] == PF_DEF[p];
         memset(&pp.favorites, 0, sizeof pp.favorites);
-        pp.magic = 0x50455233u;                         /* PER3: no favorites */
-        ok &= settings_import(&pp, (int)(sizeof pp - sizeof pp.favorites)) == 2;
+        memset(&pp.favorites, 0, sizeof pp.favorites);   /* (settings without that field: zero) */
+        ok &= settings_import(&pp, (int)sizeof pp) == 1;
         frame();
         for (p = 0; p < PF_KEYS; p++)
             ok &= perf_map[p] == PF_DEF[p];
@@ -6477,8 +6439,8 @@ static int test_fx_latch(void)
         fx_latch = 0;
         ok = settings_import(&p, (int)sizeof p) == 1 && (fx_latch & 1u);
         memset(&p.favorites, 0, sizeof p.favorites);
-        p.magic = 0x50455233u;                                    /* PER3: no favorites */
-        ok &= settings_import(&p, (int)(sizeof p - sizeof p.favorites)) == 2 && !(fx_latch & 1u);
+        memset(&p.favorites, 0, sizeof p.favorites);   /* (settings without that field: zero) */
+        ok &= settings_import(&p, (int)sizeof p) == 1 && !(fx_latch & 1u);
         bad += check("  FX LATCH saved with the settings; settings from before it: OFF", ok);
     }
     fx_latch = 0;
@@ -6674,8 +6636,8 @@ static int test_knob_accel(void)
         ui_prefs = 0;
         ok = settings_import(&p, (int)sizeof p) == 1 && ui_prefs == PREF_ACCEL;
         memset(&p.favorites, 0, sizeof p.favorites);
-        p.magic = 0x50455233u;
-        ok &= settings_import(&p, (int)(sizeof p - sizeof p.favorites)) == 2 && !ui_prefs;
+        memset(&p.favorites, 0, sizeof p.favorites);   /* (settings without that field: zero) */
+        ok &= settings_import(&p, (int)sizeof p) == 1 && !ui_prefs;
         bad += check("#52 KNOB ACCEL saved with the settings; settings from before it: OFF", ok);
     }
     ui_prefs = 0;
@@ -6744,8 +6706,8 @@ static int test_usb_level(void)
         ui_prefs = 0;
         ok &= settings_import(&p, (int)sizeof p) == 1 && ui_prefs == PREF_USB_FIXED;
         memset(&p.favorites, 0, sizeof p.favorites);
-        p.magic = 0x50455233u;
-        ok &= settings_import(&p, (int)(sizeof p - sizeof p.favorites)) == 2 && !ui_prefs;
+        memset(&p.favorites, 0, sizeof p.favorites);   /* (settings without that field: zero) */
+        ok &= settings_import(&p, (int)sizeof p) == 1 && !ui_prefs;
         frame();
         ok &= !fx_usb_fixed;
     }
@@ -6810,8 +6772,8 @@ static int test_click_menu(void)
         frame();
         ok &= click_mode == CLICK_OFF && click_lvl == 1u && cin_bars == 1u;
         memset(&p.favorites, 0, sizeof p.favorites);   /* settings from before the favorites (PER3): the defaults */
-        p.magic = 0x50455233u;
-        ok &= settings_import(&p, (int)(sizeof p - sizeof p.favorites)) == 2 && !ui_rec_prefs;
+        memset(&p.favorites, 0, sizeof p.favorites);   /* (settings without that field: zero) */
+        ok &= settings_import(&p, (int)sizeof p) == 1 && !ui_rec_prefs;
         frame();
         ok &= click_mode == CLICK_OFF && click_lvl == 1u && !cin_bars;
     }
@@ -6920,8 +6882,8 @@ static int test_usb_serial(void)
         usb_serial_apply();
         ok &= !usb_cdc_on && !usb.up && plain_desc();
         memset(&p.favorites, 0, sizeof p.favorites);   /* settings from before it (PER3): ON */
-        p.magic = 0x50455233u;
-        ok &= settings_import(&p, (int)(sizeof p - sizeof p.favorites)) == 2 && !(ui_prefs & PREF_SERIAL_OFF);
+        memset(&p.favorites, 0, sizeof p.favorites);   /* (settings without that field: zero) */
+        ok &= settings_import(&p, (int)sizeof p) == 1 && !(ui_prefs & PREF_SERIAL_OFF);
         usb_serial_apply();
         ok &= usb_cdc_on && dev_is(DEV_DESC);
     }
@@ -7031,8 +6993,8 @@ static int test_bpm_lock(void)
         q = p;
         ok &= settings_import(&q, (int)sizeof q) == 1 && ui_prefs == PREF_BPM_LOCK && !memcmp(&p, &q, sizeof p);
         memset(&p.favorites, 0, sizeof p.favorites);
-        p.magic = 0x50455233u;                                        /* (PER3: before the favorites record) */
-        ok &= settings_import(&p, (int)(sizeof p - sizeof p.favorites)) == 2 && !ui_prefs;
+        memset(&p.favorites, 0, sizeof p.favorites);   /* (settings without that field: zero) */
+        ok &= settings_import(&p, (int)sizeof p) == 1 && !ui_prefs;
         q = p;
         ok &= settings_import(&q, (int)sizeof q) == 1 && !ui_prefs;
         frame();
@@ -7140,8 +7102,8 @@ static int test_large(void)
         q = p;
         ok &= settings_import(&q, (int)sizeof q) == 1 && ui_prefs == PREF_LARGE && !memcmp(&p, &q, sizeof p);
         memset(&p.favorites, 0, sizeof p.favorites);
-        p.magic = 0x50455233u;                                    /* (PER3: before the favorites record) */
-        ok &= settings_import(&p, (int)(sizeof p - sizeof p.favorites)) == 2 && !ui_prefs;
+        memset(&p.favorites, 0, sizeof p.favorites);   /* (settings without that field: zero) */
+        ok &= settings_import(&p, (int)sizeof p) == 1 && !ui_prefs;
         q = p;
         ok &= settings_import(&q, (int)sizeof q) == 1 && !ui_prefs;
         ui.force = 1; frame();
@@ -7227,8 +7189,8 @@ static int test_menu_prefs(void)
         ui_prefs = 0;
         ok = settings_import(&p, (int)sizeof p) == 1 && (ui_prefs & PREF_ANIM_OFF);
         memset(&p.favorites, 0, sizeof p.favorites);
-        p.magic = 0x50455233u;
-        ok &= settings_import(&p, (int)(sizeof p - sizeof p.favorites)) == 2 && !ui_prefs;
+        memset(&p.favorites, 0, sizeof p.favorites);   /* (settings without that field: zero) */
+        ok &= settings_import(&p, (int)sizeof p) == 1 && !ui_prefs;
         bad += check("#46 ANIM saved with the settings; settings from before it: ON", ok);
     }
     ui_prefs = 0;
@@ -7284,8 +7246,8 @@ static int test_style(void)
         ui_style = ST_LINE;
         settings_export(&p);
         memset(&p.favorites, 0, sizeof p.favorites);
-        p.magic = 0x50455233u;                          /* settings from before STYLE (PER3) */
-        ok &= settings_import(&p, (int)(sizeof p - sizeof p.favorites)) == 2 && ui_style == ST_FLAT;
+        memset(&p.favorites, 0, sizeof p.favorites);   /* (settings without that field: zero) */
+        ok &= settings_import(&p, (int)sizeof p) == 1 && ui_style == ST_FLAT;
         frame();
         ok &= ux.style == ST_FLAT && ux.surf != ux.bg;
         bad += check("  STYLE saved with the settings and read back; older settings and unknown values: FLAT, PIXEL: LINE (idempotent)", ok);

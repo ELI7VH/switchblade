@@ -59,17 +59,24 @@ int main(void)
     assert(!p.lowcut && p.bold == 1 && p.favorites.user == (1u << 31));   /* bold: kept as saved */
     assert(p.favorites.factory[3][0] == 1 && p.favorites.filter == 1);
     assert(p.panel.enc[0] == 3); /* saving one feature preserves the other */
-    p = original; p.magic = 0x50455233u;
-    assert(settings_import(&p, sizeof p - sizeof p.favorites) == 2);
+    p = original; memset(&p.favorites, 0, sizeof p.favorites);
+    assert(settings_import(&p, sizeof p) == 1);
     assert(p.bold == 1 && !p.favorites.user && !p.favorites.filter);
     settings_export(&p); assert(p.bold == 1); /* favorites-only preserves PER3 font */
-    p = original; p.magic = 0x50455232u;
-    assert(settings_import(&p, sizeof p - sizeof p.favorites - sizeof p.bold) == 2);
-    assert(!p.bold && !p.favorites.user && settings.zoom && panel.enc[0] == 3);
-    p = original; p.magic = 0x50455231u;
-    memcpy((uint8_t *)&p + 8, &PANEL_DEFAULT, sizeof(panel_t));
-    assert(settings_import(&p, 8 + sizeof(panel_t)) == 2);
-    assert(!p.bold && !p.zoom && !p.lowcut && !p.favorites.user && panel.magic == PANEL_MAGIC);
+    {   /* every Felucca settings object (PER1..PER4, any size) is refused and leaves the settings untouched */
+        static const uint32_t OLD[4] = {0x50455231u, 0x50455232u, 0x50455233u, 0x50455234u};
+        uint32_t m;
+        for (m = 0; m < 4u; m++) {
+            persist_t o = original;
+            uint32_t pal = settings.palette;
+            o.magic = OLD[m];
+            assert(settings_import(&o, sizeof o) == 0 && settings.palette == pal);
+            assert(settings_import(&o, sizeof o - sizeof o.favorites) == 0);
+            assert(settings_import(&o, sizeof o - sizeof o.favorites - sizeof o.bold) == 0);
+            assert(settings_import(&o, 8 + sizeof(panel_t)) == 0);
+        }
+        assert(PERSIST_MAGIC == 0x34524F46u);
+    }
     {   /* HOLD: in the retired bold field; older records (bold 0 / 1) are 0.4 s, and stay as saved */
         p = original; p.bold = 0;
         assert(settings_import(&p, sizeof p) == 1 && settings_hold == HOLD_DEF && HOLD_MS[settings_hold] == 400u);
@@ -84,10 +91,6 @@ int main(void)
         settings_export(&p);
         assert(p.bold == 0u && settings_import(&p, sizeof p) == 1 && settings_hold == HOLD_DEF);
         assert(!hold_stored_ok(2u) && !hold_stored_ok(HOLD_TAG + 4u) && hold_stored_ok(HOLD_TAG | 2u));
-        p = original; p.magic = 0x50455231u;
-        memcpy((uint8_t *)&p + 8, &PANEL_DEFAULT, sizeof(panel_t));
-        settings_hold = 2;
-        assert(settings_import(&p, 8 + sizeof(panel_t)) == 2 && settings_hold == HOLD_DEF);
     }
     {   /* LEDS: in the retired zoom field; older records (zoom 0 / 1) are DIM, and stay as saved; idempotent */
         persist_t q;
@@ -125,18 +128,14 @@ int main(void)
             settings_export(&p);
             assert(p.zoom == 0u);
         }
-        p = original; p.magic = 0x50455231u;           /* PER1: no zoom field, DIM */
-        memcpy((uint8_t *)&p + 8, &PANEL_DEFAULT, sizeof(panel_t));
-        settings_leds = LEDS_INV;
-        assert(settings_import(&p, 8 + sizeof(panel_t)) == 2 && settings_leds == LEDS_DIM);
     }
 #ifdef FELUCCA_FAVORITES
     {   /* 1.1 CLICK / CLICK LEVEL / COUNT-IN (ui.c ui_rec_prefs, favorites.factory[15][28]): 0 in every older record
          * (the defaults: OFF / MID / OFF); each field 0..2 kept, 3 (no value) back to 0, bits 6-7 kept; twice the same */
         persist_t q;
         uint32_t b;
-        p = original; p.magic = 0x50455233u;            /* PER3 (no favorites): 0 */
-        assert(settings_import(&p, sizeof p - sizeof p.favorites) == 2 && favorites.factory[15][28] == 0u);
+        p = original; memset(&p.favorites, 0, sizeof p.favorites);            /* PER3 (no favorites): 0 */
+        assert(settings_import(&p, sizeof p) == 1 && favorites.factory[15][28] == 0u);
         for (b = 0; b < 256u; b++) {
             uint32_t f, want = b;
             for (f = 0; f < 3u; f++)
@@ -151,8 +150,8 @@ int main(void)
     {   /* 1.2 RESTORE LAST (ui.c PREF_RESTORE_OFF, bit 7 of MENU's flags, favorites.factory[15][30]): clear in every
          * older record = ON; set = OFF, kept as saved with the other flags */
         persist_t q;
-        p = original; p.magic = 0x50455233u;
-        assert(settings_import(&p, sizeof p - sizeof p.favorites) == 2 && !(favorites.factory[15][30] & 128u));
+        p = original; memset(&p.favorites, 0, sizeof p.favorites);
+        assert(settings_import(&p, sizeof p) == 1 && !(favorites.factory[15][30] & 128u));
         p = original; p.favorites.factory[15][30] = 128u | 64u | 1u;
         assert(settings_import(&p, sizeof p) == 1 && favorites.factory[15][30] == (128u | 64u | 1u));
         q = p; settings_export(&q); assert(q.favorites.factory[15][30] == (128u | 64u | 1u));
@@ -163,8 +162,8 @@ int main(void)
          * them untouched; twice the same */
         persist_t q;
         uint32_t i;
-        p = original; p.magic = 0x50455233u;
-        assert(settings_import(&p, sizeof p - sizeof p.favorites) == 2);
+        p = original; memset(&p.favorites, 0, sizeof p.favorites);
+        assert(settings_import(&p, sizeof p) == 1);
         for (i = 14; i < 24u; i++) assert(favorites.factory[15][i] == 0u);
         p = original;
         for (i = 14; i < 24u; i++) p.favorites.factory[15][i] = (uint8_t)(i * 37u + 5u);
@@ -181,8 +180,8 @@ int main(void)
          * export / import round trip and importing twice change nothing */
         persist_t q;
         uint32_t i;
-        p = original; p.magic = 0x50455233u;
-        assert(settings_import(&p, sizeof p - sizeof p.favorites) == 2);
+        p = original; memset(&p.favorites, 0, sizeof p.favorites);
+        assert(settings_import(&p, sizeof p) == 1);
         for (i = 0; i < 32u; i++) assert(favorites.factory[14][i] == 0u);
         p = original;
         for (i = 0; i < 32u; i++) p.favorites.factory[14][i] = (uint8_t)(i * 29u + 3u);

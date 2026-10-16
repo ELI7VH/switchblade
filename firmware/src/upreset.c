@@ -24,20 +24,20 @@
  * SPREAD (P_SPRD, #148, before 1.2's release) made it P_COUNT 104 the same way: a record of 103 gets SPREAD 0.
  * 1.5: the INSERT (P_ITYPE .. P_IMIX), ANALOG's filter TYPE and ENV SYNC (P_FTYPE, P_ESYNC) made it 111 the same way:
  * a record of 104 gets the INSERT OFF, LP and OFF; 1.2 .. 1.4 read a record of 111 by count (the seven left out).
- * FM1-Four: the engine byte is an index of the four machines (engines.c ENGINES[]); a record of another number reads
- * as empty (the storage format is rewritten in Task 1.2).
+ * FM1-Four: the engine byte is an index of the four machines (engines.c ENGINES[]), and a record's ver is UP_VER
+ * (0x40): a record of any Felucca version (1..5) reads as empty, nothing is migrated.
  *
  * With -DUP_HOST (host test) only the part above #ifndef UP_HOST is built;
  * it needs nothing but core.h. */
 #define UP_PER_BANK 16u
 #define UP_PMAX 72u                              /* room for P_COUNT to grow */
 #define UP_USED 0xA5u
-#define UP_VER 4u                                /* 2 since 1.0; 1 is read too */
+#define UP_VER 0x40u                             /* FOUR records; every Felucca version (1..5) reads as empty */
 #define UP_BANK_MAGIC 0x31425055u                /* "UPB1" */
 typedef struct {
     uint8_t used, ver, engine, np;               /* UP_USED, UP_VER, engine, P_COUNT when stored */
     char name[12];                               /* ASCII 32..126, 0-padded (no 0 when 12 long) */
-    union { int16_t p[UP_PMAX]; uint8_t packed[UP_PMAX * 2u]; };
+    uint8_t packed[UP_PMAX * 2u];                /* value + 64 */
     uint8_t note[16], flags[16];                 /* note 0 = rest; flags 1 accent, 2 slide, 4 tie, SF_RATCH */
 } up_rec_t;
 typedef struct {
@@ -56,50 +56,32 @@ static up_rec_t *up_rec(uint32_t k) { return &up_bank[k / UP_PER_BANK].r[k % UP_
  * neither), so every record of before holds 0 there (CAT_NONE: listed by its engine, cat_of_engine) and firmware
  * before keeps the byte (a bank is written whole) without reading it: no format change, no version bump. A record of
  * versions 1..3 (a 16-bit value in every pair) has none; giving it one (a rename) rewrites it as version 4 / 5 when its
- * values fit a byte (up_to_v4) */
+ * values fit a byte) */
 #define UP_CAT_AT (UP_PMAX * 2u - 1u)
 #include "category.c"
 static uint32_t up_cat_of(const up_rec_t *r)
 {
-    uint32_t c = r->ver >= 4u && r->np <= UP_CAT_AT ? r->packed[UP_CAT_AT] : 0u;
+    uint32_t c = r->np <= UP_CAT_AT ? r->packed[UP_CAT_AT] : 0u;
     return c && c < CAT_N ? c : cat_of_engine(r->engine);
 }
-static int up_to_v4(up_rec_t *r)                 /* 1 = r is version 4 / 5 (now) */
+static void up_set_cat(up_rec_t *r, uint32_t c)  /* c CAT_BASS..CAT_OTHER */
 {
-    int16_t v[UP_PMAX];
-    uint32_t i;
-    if (r->ver >= 4u)
-        return 1;
-    for (i = 0; i < r->np; i++)
-        if ((v[i] = r->p[i]) < -64 || v[i] > 127)
-            return 0;
-    memset(r->packed, 0, sizeof r->packed);
-    r->ver = UP_VER;
-    for (i = 0; i < r->np; i++)
-        r->packed[i] = (uint8_t)(v[i] + 64);
-    return 1;
-}
-static void up_set_cat(up_rec_t *r, uint32_t c)  /* c CAT_BASS..CAT_OTHER; a record that cannot hold one keeps none */
-{
-    if (c && c < CAT_N && up_to_v4(r))
+    if (c && c < CAT_N)
         r->packed[UP_CAT_AT] = (uint8_t)c;
 }
 
 static int up_valid(const up_rec_t *r)
 {
-    if (!(r->used == UP_USED && r->ver >= 1u && r->ver <= UP_VER && r->ver != 3u && r->engine < NENGINES &&
-          r->np >= 8u && r->np <= (r->ver >= 4u ? UP_PMAX * 2u : UP_PMAX) && r->name[0])) return 0;
-    if (r->ver >= 4u) for (uint32_t i = 0; i < r->np; i++) if (r->packed[i] > 191u) return 0;
+    if (!(r->used == UP_USED && r->ver == UP_VER && r->engine < NENGINES &&
+          r->np >= 8u && r->np <= P_COUNT && r->name[0])) return 0;
+    for (uint32_t i = 0; i < r->np; i++) if (r->packed[i] > 191u) return 0;
     return 1;
 }
 
 static int up_used(uint32_t k) { return k < UP_SLOTS && up_valid(up_rec(k)); }
 
-static int16_t up_value(const up_rec_t *r, uint32_t k) { return r->ver >= 4u ? (int16_t)r->packed[k] - 64 : r->p[k]; }
-static void up_set_value(up_rec_t *r, uint32_t k, int16_t v)
-{
-    if (r->ver >= 4u) r->packed[k] = (uint8_t)(v + 64); else r->p[k] = v;
-}
+static int16_t up_value(const up_rec_t *r, uint32_t k) { return (int16_t)r->packed[k] - 64; }
+static void up_set_value(up_rec_t *r, uint32_t k, int16_t v) { r->packed[k] = (uint8_t)(v + 64); }
 static void up_pat_norm(uint8_t *note, uint8_t *flags);
 /* after loading bank b (len bytes, -1 = none): wrong shape -> empty; each record's pattern inside its fields, as
  * UP_PUT and SAVE store it (flash or a restored backup may hold anything there) */
