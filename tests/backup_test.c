@@ -3,8 +3,6 @@
 /* The editor's full backup (editor_backup.c: LIST / GET / PUT) against simulated NOR flash:
  * CRC before any write, stale runtime copies, USB resets and timeouts, malformed objects, older
  * project formats, settings values and user preset banks kept byte for byte. */
-static unsigned char host_samples[3][0x14000];
-#define SMP_USER_XIP(k) host_samples[k]
 #define main hostsim_main
 #include "hostsim.c"
 #undef main
@@ -178,9 +176,14 @@ int main(void)
 
     reset();
     trk[0].step[0] = (step_t){{60}, 1, ST_NOTE, 0, 96, 0, 0};
-    bad += check("LIST captures the runtime: 13 objects (id 8 empty, id 9 the FM6 patches), runtime 3840 B (FUN10)",
-                 list(0, &len, &crc) == 0 && rep[2] == 13u && len == sizeof(project_store_t) && len == 3840u &&
+    bad += check("LIST captures the runtime: 8 objects (ids 0..7), runtime 3840 B (FUN10)",
+                 list(0, &len, &crc) == 0 && rep[2] == 8u && len == sizeof(project_store_t) && len == 3840u &&
                  crc == st_crc32(ED_BK_RAW, len));
+    {
+        uint32_t i, ok = 1;
+        for (i = 0; i < 8u; i++) ok &= rep[3 + i * 11u] == i;
+        bad += check("  .. listed in order 0..7, no retired id (8, 9, 32..34)", ok);
+    }
     bad += check("an empty project slot lists as length 0", list(2, &len, &crc) == 0 && len == 0);
     bad += check("GET of the runtime copy", get(0, 0, 64) == 0);
     project_save(0);
@@ -280,19 +283,20 @@ int main(void)
     bad += check("a FUN10 project restores into slot 3 (flash and RAM)",
                  put_all(4, &st, sizeof st, st_crc32(&st, sizeof st)) == 0 && project_used(2) &&
                  !memcmp(&proj_slot[2], &st, sizeof st) && st_load(OBJ_PROJECT0 + 2, &proj_wire, sizeof proj_wire) == (int)sizeof st);
-    {   /* FUN8 of 1.0.x (3584 bytes, 91 parameters) and FUN9 of 1.1 (3648, 99): restore as FUN10, E0 at P_E0, lanes
-         * 100 %, the four 1.2 parameters at their defaults; a FUN9 with 64 motion records keeps them all */
+    {   /* FUN8 of 1.0.x (3584 bytes, 91 parameters) and FUN9 of 1.1 (3648, 99): restore as FUN10, E0 at P_E0, the
+         * reserved block (the retired lane levels) at 127 for FUN8, the four 1.2 parameters at their defaults; a FUN9
+         * with 64 motion records keeps them all */
         static uint8_t v8[3584], v9[3648];
         uint32_t k, ok;
         trk[2].p[P_E0] = 2;
-        trk[2].p[P_LN3] = 90;
+        trk[2].p[P_RSV_LN + 3] = 90;                   /* (the retired lane levels' ids: reserved, still stored) */
         project_capture(&proj_scratch);
-        proj_scratch.t[2].p[P_LN3] = 127;              /* (FUN8 had no lane levels) */
-        bad += check("a FUN8 project (1.0.x) restores as FUN10 into slot 2, E0 at P_E0, lane levels 100 %",
+        proj_scratch.t[2].p[P_RSV_LN + 3] = 127;       /* (FUN8 had no lane levels) */
+        bad += check("a FUN8 project (1.0.x) restores as FUN10 into slot 2, E0 at P_E0, the reserved block's default",
                      old_pack(v8, &proj_scratch, OLD_FUN8, 91u) == sizeof v8 &&
                      put_all(3, v8, sizeof v8, st_crc32(v8, sizeof v8)) == 0 && ((uint32_t *)proj_slot[1].raw)[0] == PROJ_MAGIC &&
                      proj_import(&proj_scratch, &proj_slot[1], sizeof st) && proj_scratch.t[2].p[P_E0] == 2 &&
-                     proj_scratch.t[2].p[P_LN3] == 127 && proj_scratch.t[1].step[3].note[0] == 64u);
+                     proj_scratch.t[2].p[P_RSV_LN + 3] == 127 && proj_scratch.t[1].step[3].note[0] == 64u);
         project_capture(&proj_scratch);
         for (k = 0; k < 64u; k++)
             proj_scratch.motion.event[k] = (motion_event_t){(uint8_t)(1u << 6 | k), P_REV, (int8_t)k};
@@ -301,10 +305,10 @@ int main(void)
         ok = old_pack(v9, &proj_scratch, OLD_FUN9, 99u) == sizeof v9 &&
              put_all(4, v9, sizeof v9, st_crc32(v9, sizeof v9)) == 0 && ((uint32_t *)proj_slot[2].raw)[0] == PROJ_MAGIC &&
              proj_import(&proj_scratch, &proj_slot[2], sizeof st) && proj_scratch.t[2].p[P_E0] == 2 &&
-             proj_scratch.t[2].p[P_LN3] == 90 && proj_scratch.motion.count == 64u && proj_scratch.motion.event[63].value == 63 &&
+             proj_scratch.t[2].p[P_RSV_LN + 3] == 90 && proj_scratch.motion.count == 64u && proj_scratch.motion.event[63].value == 63 &&
              proj_scratch.t[0].p[P_LSYNC] == 0 && proj_scratch.t[0].p[P_LTRIG] == 0 && proj_scratch.t[0].p[P_LPOL] == 0 &&
              proj_scratch.t[0].p[P_SQNT] == 1;
-        bad += check("a FUN9 project (1.1) restores as FUN10 into slot 3: its 64 records, the lanes, LFO 2 / QUANTIZE defaults", ok);
+        bad += check("a FUN9 project (1.1) restores as FUN10 into slot 3: its 64 records, the reserved block, LFO 2 / QUANTIZE defaults", ok);
     }
     memset(&v6, 0, sizeof v6);                           /* FUN6: 69 parameters, steps out of range */
     v6.magic = PROJ_MAGIC_V6;
@@ -322,62 +326,18 @@ int main(void)
                  proj_import(&proj_scratch, &proj_slot[3], sizeof st) && proj_scratch.t[0].step[0].n == 4u &&
                  proj_scratch.t[0].step[0].note[0] == 127u && proj_scratch.t[0].p[P_E0] ==
                  clamp(3, param_desc_of(trk[0].engine, P_E0)->min, param_desc_of(trk[0].engine, P_E0)->max));
-    {   /* 1.0.3: the FM6 patch bank (id 8) is retired; an older archive's bank moves into its user presets (ids 6, 7
-         * restored first), the user presets' patches are id 9 */
-        static up_bank_t ub;
-        static fm6_bank_t bk;
-        static upf_t got;
-        uint8_t pk[FM6_PACKED];
-        static const int16_t SL[5] = {FM6_NFACTORY + 2, 1, FM6_NFACTORY + 4, FM6_NFACTORY + 2, FM6_NFACTORY + 2};
-        memset(&ub, 0, sizeof ub);
-        ub.magic = UP_BANK_MAGIC; ub.rsize = sizeof(up_rec_t); ub.nslot = UP_PER_BANK;
-        for (uint32_t k = 0; k < 5u; k++) {             /* slots 1..5: B3, F2, B5 (empty), B3 on DRUM, B3 */
-            up_rec_t *r = &ub.r[k];
-            uint32_t e = k == 3u ? ENGI_DRUM : ENGI_FM6;
-            r->used = UP_USED; r->ver = UP_VER; r->engine = (uint8_t)e; r->np = P_COUNT;
-            r->name[0] = (char)('A' + k);
-            for (uint32_t i = 0; i < P_COUNT; i++) up_set_value(r, i, param_desc_of(e, i)->def);
-            up_set_value(r, P_E7, SL[k]);                 /* (the raw stored value: B slots as 1.0.2 wrote them) */
-        }
-        ub.r[4].name[1] = 'X';
-        up_set_value(&ub.r[4], P_E0, 3);                 /* (another sound than slot 1's) */
-        memset(&bk, 0, sizeof bk);
-        bk.magic = FM6_BANK_MAGIC; bk.ver = 1; bk.nslot = FM6_BANK_N; bk.used = 1u << 2;
-        memcpy(bk.v[2], FM6_FACTORY[5], FM6_PACKED);
-        memcpy(bk.v[2] + 118, "BANK B3   ", 10);
-        upf_empty();
-        bad += check("the user presets of an old archive (id 6) restore", put_all(6, &ub, sizeof ub, st_crc32(&ub, sizeof ub)) == 0);
-        bad += check("an old archive's FM6 bank (id 8) is taken (0)", put_all(8, &bk, sizeof bk, st_crc32(&bk, sizeof bk)) == 0);
-        bad += check("  .. its B3 patch is now the B3 presets' own (slots 1 and 5)",
-                     !upf_get(0, pk) && !memcmp(pk + 118, "BANK B3   ", 10) && !upf_get(4, pk) && !memcmp(pk + 118, "BANK B3", 7));
-        bad += check("  .. an F slot, an empty B slot and a DRUM sound get none (factory / init / no patch, as before)",
-                     upf_get(1, pk) && upf_get(2, pk) && upf_get(3, pk));
-        bad += check("  .. written to flash (the user presets' FM6 patches)",
-                     st_load(OBJ_UPFM6, &got, sizeof got) == (int)sizeof got && !memcmp(&got, &upf, sizeof got));
-        up_load(0);
-        bad += check("  .. and the B3 preset loads it, SLOT OWN", TSEL->eng_req == ENGI_FM6 &&
-                     !memcmp(fm6_patch[song.sel] + FP_NAME, "BANK B3", 7) && TSEL->p[P_E7] == FM6_OWN);
-        up_load(1);
-        bad += check("  .. the F2 preset loads the factory patch, SLOT F2", TSEL->p[P_E7] == 1 &&
-                     !memcmp(fm6_patch[song.sel] + FP_NAME, FM6_FACTORY[1] + 118, 10));
-        bad += check("a restore of id 8 twice moves nothing more (idempotent)",
-                     put_all(8, &bk, sizeof bk, st_crc32(&bk, sizeof bk)) == 0 && !memcmp(&got, &upf, sizeof got));
-        bad += check("an empty id 8 (a 1.0.3 archive) is taken and ignored", put_all(8, 0, 0, st_crc32(0, 0)) == 0 &&
-                     !memcmp(&got, &upf, sizeof got));
-        bk.v[3][0] = 200;
-        bad += check("an FM6 bank with a byte above 127 is refused (2)", put_all(8, &bk, sizeof bk, st_crc32(&bk, sizeof bk)) == 2u);
-        bad += check("id 8 lists empty, id 9 with the patches' length", list(8, &len, &crc) == 0 && len == 0 &&
-                     list(9, &len, &crc) == 0 && len == sizeof(upf_t) && crc == st_crc32(&upf, sizeof upf));
-        memcpy(&got, &upf, sizeof got);
-        upf_empty();
-        bad += check("id 9 restores the user presets' FM6 patches (flash and RAM)",
-                     put_all(9, &got, sizeof got, st_crc32(&got, sizeof got)) == 0 && !memcmp(&got, &upf, sizeof got) &&
-                     !upf_get(0, pk) && !memcmp(pk + 118, "BANK B3", 7));
-        got.magic ^= 1;
-        bad += check("an id 9 of another layout is refused (2), the patches kept",
-                     put_all(9, &got, sizeof got, st_crc32(&got, sizeof got)) == 2u && !upf_get(0, pk));
-        bad += check("an id 9 of the wrong size is refused at begin (1)", put_begin(9, sizeof got - 4u, 0) == 1u);
-        bad += check("an id 10 is refused (1)", put_begin(10, 0, 0) == 1u);
+    {   /* the retired ids (8 the FM6 bank, 9 the user presets' FM6 patches, 32..34 the user sample slots) and any
+         * other past 7: refused at begin (1), nothing written */
+        static const uint8_t RETIRED[] = {8, 9, 10, 32, 33, 34, 127};
+        uint32_t ok = 1;
+        before = erases;
+        for (uint32_t k = 0; k < sizeof RETIRED; k++)
+            ok &= put_begin(RETIRED[k], 0, st_crc32(0, 0)) == 1u && put_begin(RETIRED[k], 64, 0) == 1u;
+        bad += check("PUT of ids 8, 9, 10, 32..34, 127 refused (1), nothing written", ok && erases == before);
+        ok = !list(0, &len, &crc);                    /* (a fresh capture: GET's only refusal is the id) */
+        for (uint32_t k = 0; k < sizeof RETIRED; k++)
+            ok &= get(RETIRED[k], 0, 16) == 1u;
+        bad += check("GET of the same ids refused (1)", ok && get(1, 0, 16) == 0u);
     }
     memcpy(&st, &proj_slot[2], sizeof st);
     erase_error = 1;

@@ -9,7 +9,7 @@
  *   storage     FUN10 round trip (the chance byte 102..112), proj_bound, a byte past them refused; what 1.5 / 1.5.1 do
  *               with it (their proj_unpack's rule, copied: a project holding a condition is refused, one without loads)
  *   editor      STEP_SET / TRACK_STEP's condition byte (INFO 4B 01 0B), a chance of 100 without it keeps the condition
- *   EUCLID      (SEQ TOOLS F4) hits / steps / rotation, DRUM lane or notes (the step's own or the root), the live
+ *   EUCLID      (SEQ TOOLS F4) hits / steps / rotation, notes (the step's own or the root), the live
  *               preview, OCT+ applies, OCT- cancels, one undo
  *   DOUBLE HALF (SEQ TOOLS D5 E5) LEN x2 (up to 64) / half, ties, locks and the steps' own fields with them, one undo
  * Built and run by tests/run_tests.sh. */
@@ -458,41 +458,6 @@ static int test_euclid(void)
         btn_up(B_SEQ); frame();
         bad += check("  a Program Change for T2 while open (its load's undo copy): T1 turned from its own steps, OCT- "
                      "puts them back, OCT+ applies; T2's steps untouched", ok);
-    }
-    {   /* DRUM: the selected lane only */
-        uint32_t m;
-        ui_power_on();
-        song.sel = 3;
-        set_engine_of(TSEL, ENGI_DRUM);
-        TSEL->engine = TSEL->eng_req;
-        track_defaults_steps(TSEL);
-        TSEL->p[P_SLEN] = 16;
-        for (i = 0; i < 16u; i += 8u)
-            grid_hit(TSEL, i, DV_KICK, 1);
-        grid_hit(TSEL, 4, DV_SNARE, 1);
-        grid_acc(TSEL, 4, DV_SNARE, 1);
-        memcpy(ref, TSEL->step, sizeof ref);
-        go_page(GR_ROLL); frame();
-        eu.steps = 0;
-        btn_down(B_SEQ); frame();
-        key_down(black(3)); frame(); key_up(black(3)); frame();   /* the closed hat */
-        tkey(7);
-        kt(EN_K1, 1);                                  /* 5 / 16 */
-        for (m = 0, i = 0; i < 16u; i++)
-            m |= ((step_lanes(&TSEL->step[i]) >> 3) & 1u) << i;
-        ok = ui.lane == 3u && m == 0x2491u;
-        for (i = 0; i < 16u; i++)
-            ok &= (step_lanes(&TSEL->step[i]) & 7u) == (step_lanes(&ref[i]) & 7u) &&
-                  step_accents(&TSEL->step[i]) == step_accents(&ref[i]);
-        bad += check("EUCLID on DRUM: the selected lane (HATCL 5 / 16), the other lanes and accents untouched", ok);
-        key_down(black(2)); frame(); key_up(black(2)); frame();   /* the clap: the preview moves there */
-        for (m = 0, i = 0; i < 16u; i++)
-            m |= ((step_lanes(&TSEL->step[i]) >> 2) & 1u) << i | ((step_lanes(&TSEL->step[i]) >> 3) & 1u) << 16;
-        ok = m == 0x2491u;
-        oct_fwd();
-        btn_up(B_SEQ); frame();
-        bad += check("  another lane picked while open: the hits go to it, the first lane as it was", ok && !eu.on);
-        ui_power_on();
     }
     return bad;
 }

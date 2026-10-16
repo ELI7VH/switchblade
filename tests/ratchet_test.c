@@ -3,13 +3,13 @@
 /* RATCH, a step's ratchet (core.h SF_RATCH, seq.c seq_step / seq_ratchet), on the real sequencer, project, user
  * preset and UI sources (with the stubs of tests/ui_test.c):
  *   PLAY       x1..x4: that many note-ons in one pass of the step, in equal parts of it, each retriggered after its
- *              gate; chords and the DRUM grid's hits repeat whole; x1 slides and ties out as before, x2..x4 never;
+ *              gate; chords repeat whole; x1 slides and ties out as before, x2..x4 never;
  *              the chance is rolled once per pass for all its parts; swing; STOP and an edit to fewer end them.
  *   PROJECTS   FUN8 round trip of x1..x4 (bit 7 of the velocity and chance bytes), an x1 project packs those bytes
  *              as before, FUN7 / FUN6 images load x1.
- *   PRESETS    a user preset's note pattern keeps it (flags 8 | 16, UP_PUT too); a drum grid record has no room: x1.
+ *   PRESETS    a user preset's note pattern keeps it (flags 8 | 16, UP_PUT too).
  *   UI         SEQ > AUTOMATION RATCH rows, KNOB 4 (x1..x4, clamped, the row's step; dimmed on a REST, a TIE, an empty
- *              step); the piano roll and the DRUM grid draw a ratcheted step in its parts, the roll no slide line
+ *              step); the piano roll draws a ratcheted step in its parts, the roll no slide line
  *              out of one.
  * The editor protocol (STEP_SET / TRACK_STEP, INFO 52 01 04) is in tests/editor_test.c. Built and run by
  * tests/run_tests.sh. */
@@ -91,17 +91,7 @@ static int play(void)
     run(t, step_len(t, 0) / CTL + step_len(t, 1) / CTL - 1u, 0, 0, 0);
     bad += check("  nor ties out: a TIE after a ratcheted step holds nothing", !t->seq_n);
 
-    t = one_step(4, 0);                               /* the DRUM grid: hits of BD (accented) and CH */
-    set_engine_of(t, ENGI_DRUM);
-    t->engine = t->eng_req;
-    t->step[0] = (step_t){{0}, 0, ST_NOTE, 0, 100, 1u << DV_KICK | 1u << DV_HATC, 1u << DV_KICK};
-    step_set_ratchet(&t->step[0], 3);
-    seq_start();
-    n = run(t, passes(t, 1), 0, 0, 0);
-    ok = 0;
-    for (h = 0; h < NVOICE; h++)
-        ok |= t->v[h].note == DRUM_LANE_NOTE[DV_KICK] && t->v[h].vel == 127u;
-    bad += check("  DRUM grid: BD + CH at x3, 6 hits, BD accented", n == 6u && ok);
+    t = one_step(3, 0);                               /* chance 0: one roll, no part */
     step_set_chance(&t->step[0], 0);
     seq_start();
     bad += check("  chance 0: no part plays", run(t, passes(t, 2), 0, 0, 0) == 0u);
@@ -163,15 +153,15 @@ static int projects(void)
         step_set_ratchet(&t->step[i], 1u + i % 4u);
         step_set_chance(&t->step[i], i < 4u ? 100u : i == 4u ? 0u : 30u);
     }
-    trk[3].step[5].hit = 0x81; trk[3].step[5].acc = 0x80; trk[3].step[5].time = ST_NOTE;
+    trk[3].step[5] = (step_t){{67}, 1, ST_NOTE, 0, 100};
     step_set_ratchet(&trk[3].step[5], 4);
     project_capture(&before);
     ok = proj_pack(&packed, &before) && proj_import(&after, &packed, sizeof packed) && !memcmp(&before, &after, sizeof before);
     for (i = 0; ok && i < 8u; i++)
         ok &= step_ratchet(&after.t[0].step[i]) == 1u + i % 4u && step_chance(&after.t[0].step[i]) == step_chance(&before.t[0].step[i]) &&
               after.t[0].step[i].vel == before.t[0].step[i].vel;
-    bad += check("FUN8: x1..x4 round trip with their velocity, accent, chance (0 and 30 %) and lane hits", ok &&
-                 step_ratchet(&after.t[3].step[5]) == 4u && after.t[3].step[5].hit == 0x81);
+    bad += check("FUN8: x1..x4 round trip with their velocity, accent, chance (0 and 30 %), track 4 too", ok &&
+                 step_ratchet(&after.t[3].step[5]) == 4u && after.t[3].step[5].note[0] == 67);
     pos = 68u + P_COUNT + 2u + 3u * 9u;              /* step 3 of track 1: x4 -> bit 7 of its velocity and chance */
     bad += check("  x4 is bit 7 of the velocity and the chance bytes", (packed.raw[pos + 5] & 128u) && (packed.raw[pos + 8] & 128u) &&
                  (packed.raw[pos + 5] & 127u) == before.t[0].step[3].vel);
@@ -254,15 +244,6 @@ static int presets(void)
     memset(&r, 0, sizeof r);
     bad += check("  UP_PUT keeps a pattern's ratchet", !up_parse(a, n, &r, &slot) && r.flags[2] == 2u << SF_RATCH_SH &&
                  r.flags[5] == (SF_ACCENT | 3u << SF_RATCH_SH));
-    set_engine_of(t, ENGI_DRUM);                     /* a drum grid record: no room, x1 */
-    t->engine = t->eng_req;
-    track_defaults_steps(t);
-    t->step[0] = (step_t){{0}, 0, ST_NOTE, 0, 100, 1u << DV_KICK};
-    step_set_ratchet(&t->step[0], 2);
-    up_store(4, "GRID");
-    up_pat_load(t, 4);
-    bad += check("  a DRUM grid record loads its hits x1", up_grid(up_rec(4)) && t->step[0].hit == 1u << DV_KICK &&
-                 step_ratchet(&t->step[0]) == 1u);
     return bad;
 }
 
@@ -313,13 +294,10 @@ static int screens(void)
             memset(host_screen, 0, sizeof host_screen); ui.force = 1; ui_draw();
             dim[k] = card_px(3, T_DIM); thm[k] = card_px(3, T_THEME);
         }
-        t->step[0] = kind[3]; t->step[0].hit = 1u;   /* a NOTE step of lane hits only: it plays */
-        step_set_ratchet(&t->step[0], 2);
-        memset(host_screen, 0, sizeof host_screen); ui.force = 1; ui_draw();
-        ok = card_px(3, T_DIM) == dim[0] && card_px(3, T_THEME) == thm[0];
+        ok = 1;
         for (k = 1; k < 4u; k++)
             ok &= dim[k] > dim[0] && thm[k] < thm[0];
-        bad += check("  RATCH shows dimmed on a REST, a TIE or an empty step (a note or a hit: not)", ok);
+        bad += check("  RATCH shows dimmed on a REST, a TIE or an empty step (a note: not)", ok);
         t->step[0] = (step_t){{0}, 0, ST_REST, 0, 0};
     }
     ui_power_on();                                   /* the piano roll: x2 in two bars, the middle column empty */
@@ -345,16 +323,6 @@ static int screens(void)
                  pr_slide_px(1, 60, 64) == 0u);
     t->step[1].flags &= (uint8_t)~SF_SLIDE; t->step[3].flags = 0;
     t->step[2] = t->step[4] = (step_t){{0}, 0, ST_REST, 0, 0};
-    set_engine_of(t, ENGI_DRUM);                     /* the grid: x3 in three bars */
-    t->engine = t->eng_req;
-    t->step[1] = (step_t){{0}, 0, ST_NOTE, 0, 100, 1u};
-    step_set_ratchet(&t->step[1], 3);
-    ui.lane = 1;
-    memset(host_screen, 0, sizeof host_screen); ui.force = 1; ui_draw();
-    y = Y_GRAPH + 6u + 4u + 6u;                      /* lane 0's hits: y 12 .. 21 of the panel */
-    x = 40u + 12u;
-    bad += check("  the DRUM grid draws an x3 hit in three parts", pr_is_bar(x, y) && !pr_is_bar(x + 2u, y) &&
-                 pr_is_bar(x + 3u, y) && !pr_is_bar(x + 5u, y) && pr_is_bar(x + 6u, y));
     return bad;
 }
 

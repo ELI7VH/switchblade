@@ -196,7 +196,7 @@ static void test_filter(void)
     static const uint8_t NOTE[5] = {36, 60, 84, 108, 120};
     const param_desc_t *d = &TP[P_FTYPE];
     stats_t r[3][5];
-    uint32_t ft, n, e, cut = 0, same = 1;
+    uint32_t ft, n, e, cut = 0;
     char msg[200];
     track_t *t = &trk[0];
 
@@ -213,13 +213,8 @@ static void test_filter(void)
               k && PAGES[k - 1u].fam == FAM_EDIT && PAGES[k - 1u].id[0] == P_FTYPE && PAGES[k - 1u].id[1] == P_E4 &&
               PAGES[k - 1u].id[2] == P_E5 && PAGES[k - 1u].id[3] == P_E7 && str_eq(PAGES[k - 2u].title, "EDIT 2"));
     }
-    /* every engine but ANALOG and VOID ignores TYPE; ANALOG's LP is the golden renders' (regress.c) */
-    for (e = 1; e < NENGINES; e++) {
-        if (ENGINES[e] == ENGINES[0] || !ENGINES[e]->npresets || e == ENGI_VOID)
-            continue;
-        same &= phrase_child(e, 0, 0) == phrase_child(e, 0, type_hp);
-    }
-    check("TYPE BP / HP on every other engine: its phrase bit for bit (only ANALOG and VOID read it)", same);
+    /* (every engine but ANALOG and VOID ignored TYPE: FM1-Four has none such, ACID and DRIFT play OB-Z's render until
+     * their phases) */
     check("ANALOG: VOID's LP12 / HP24 / NOTCH play as its LP / HP / LP, bit for bit",
           phrase_child(0, 0, type_lp12) == phrase_child(0, 0, 0) && phrase_child(0, 0, type_hp24) == phrase_child(0, 0, type_hp) &&
           phrase_child(0, 0, type_notch) == phrase_child(0, 0, 0));

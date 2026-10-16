@@ -104,13 +104,6 @@ int main(void)
     bad += check("data stays in the Felucca regions",
                  st_sector(OBJ_SETTINGS, 1) + 4096 <= 0xFF000 && st_sector(OBJ_PROJECT0 + 3, 1) + 4096 <= 0xE0000 &&
                      st_sector(OBJ_UPRESET0, 0) >= 0xDC000 && st_sector(OBJ_UPRESET0 + 1, 1) + 4096 <= 0xE0000);
-    /* the user presets' FM6 patches (1.0.3) in the two sectors of the retired FM6 bank: 0x9F000 (after the projects)
-     * and 0xFE000 (after the settings); the two objects share them, told apart by the commit record's type */
-    bad += check("FM6 user preset patches (and the retired bank) in the sectors 0x9F000 / 0xFE000",
-                 OBJ_UPFM6 == OBJ_COUNT - 2 && OBJ_FM6BANK == OBJ_UPFM6 - 1 && st_sector(OBJ_UPFM6, 0) == 0x9F000u &&
-                     st_sector(OBJ_PROJECT0 + 3, 1) + 4096 == 0x9F000u && st_sector(OBJ_UPFM6, 1) == 0xFE000u &&
-                     st_sector(OBJ_FM6BANK, 0) == 0x9F000u && st_sector(OBJ_FM6BANK, 1) == 0xFE000u &&
-                     st_sector(OBJ_SETTINGS, 1) + 4096 == 0xFE000u);
     /* the autosave (1.2, project.c): its own pair 0xE5000 / 0xE6000, above the OTA staging, apart from every other
      * object; a save there touches no other object */
     {
@@ -124,30 +117,6 @@ int main(void)
         ok &= st_save(OBJ_AUTOSAVE, a, sizeof a) == 0 && st_load(OBJ_AUTOSAVE, got, sizeof got) == (int)sizeof a &&
               !memcmp(got, a, sizeof a) && !memcmp(snap, nor, 0xE5000u) && !memcmp(snap + 0xE7000u, nor + 0xE7000u, 0x19000u);
         bad += check("the autosave in its own sectors 0xE5000 / 0xE6000, nothing else touched", ok);
-    }
-    {
-        static uint8_t bank[3472], back[3728], tab[3728];
-        uint32_t i;
-        memset(nor, 0xFF, sizeof nor);
-        for (i = 0; i < sizeof bank; i++) bank[i] = (uint8_t)(i * 7u);
-        for (i = 0; i < sizeof tab; i++) tab[i] = (uint8_t)(i * 3u);
-        st_save(OBJ_FM6BANK, bank, sizeof bank);         /* A (seq 1) */
-        bank[0] ^= 1;
-        st_save(OBJ_FM6BANK, bank, sizeof bank);         /* B (seq 2): the newest */
-        bad += check("a bank copy does not read as the patches object (its type)", st_load(OBJ_UPFM6, back, sizeof back) < 0);
-        bad += check("st_save_to: the first patches write into A, the bank's older copy; the bank's B still loads",
-                     st_save_to(OBJ_UPFM6, tab, sizeof tab, 0) == 0 &&
-                     st_load(OBJ_UPFM6, back, sizeof back) == (int)sizeof tab && !memcmp(back, tab, sizeof tab) &&
-                     st_load(OBJ_FM6BANK, back, sizeof back) == (int)sizeof bank && !memcmp(back, bank, sizeof bank));
-        tab[0] ^= 1;
-        bad += check("the next save goes to B (over the bank), A/B as any object",
-                     st_save(OBJ_UPFM6, tab, sizeof tab) == 0 && st_load(OBJ_FM6BANK, back, sizeof back) < 0 &&
-                     st_load(OBJ_UPFM6, back, sizeof back) == (int)sizeof tab && back[0] == tab[0]);
-        {
-            int erased = 1;
-            for (i = 256u + sizeof tab; i < 4096u; i++) erased &= nor[0x9F000u + i] == 0xFFu && nor[0xFE000u + i] == 0xFFu;
-            bad += check("FM6 patches: the sector tails stay erased", erased);
-        }
     }
     {
         uint8_t copies[2 * ST_SECTOR];
@@ -198,6 +167,11 @@ int main(void)
         bad += check("invalid object load does no flash access", st_load(OBJ_COUNT, got, sizeof got) < 0 && io_calls == calls);
         bad += check("invalid object save does no flash access", st_save(OBJ_COUNT, a, sizeof a) < 0 && io_calls == calls);
         bad += check("wrapped object rejected", st_save(0xFFFFFFFFu, a, sizeof a) < 0 && io_calls == calls);
+        /* the retired FM6 bank / FM6 patches types, OBJ_UPRESET0 + 2 and + 3 (7, 8): refused before any I/O */
+        bad += check("retired objects 7 / 8 (FM6 bank, FM6 patches) refused, no flash access",
+                     OBJ_UPRESET0 + 2 == 7 && OBJ_AUTOSAVE == 9 && st_load(7, got, sizeof got) < 0 &&
+                         st_load(8, got, sizeof got) < 0 && st_save(7, a, sizeof a) < 0 && st_save(8, a, sizeof a) < 0 &&
+                         st_save_to(7, a, sizeof a, 0) < 0 && st_save_to(8, a, sizeof a, 1) < 0 && io_calls == calls);
         memset(got, 'X', sizeof got);
         bad += check("small destination rejects whole object", st_load(OBJ_PROJECT0, got, sizeof got - 1u) < 0 && got[0] == 'X');
         bad += check("oversized save rejected", st_save(OBJ_PROJECT0, a, ST_PAYLOAD_MAX + 1u) < 0);

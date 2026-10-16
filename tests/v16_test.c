@@ -7,7 +7,7 @@
  * Discussion #238 (#242): SEQ's piano roll follows the play position:
  *   follows    a melodic pattern longer than 16 steps, the transport playing: the roll's bank is the playhead's;
  *              STEP and DETAIL alike; the cursor, the steps and the pattern length are not touched
- *   leaves     a 16-step pattern, the transport stopped, DRUM's grid, SEQ > AUTOMATION, HOME: the bank stays
+ *   leaves     a 16-step pattern, the transport stopped, SEQ > AUTOMATION, HOME: the bank stays
  *   holds      KNOB 1 (STEP) or PRESETS (DETAIL) walking the cursor, an edit of the cursor's step (KNOB 2..4, DETAIL's
  *              four), step entry: the roll stays on the cursor's bank
  *   resumes    after 3 s without that, or once the playhead has gone one pass round the pattern, whichever is first
@@ -114,19 +114,6 @@ static int leaves(void)
     at(t, 36);
     ok = ui.bank == 0u;
     bad += check("HOME: the bank stays", ok);
-    ui_power_on();
-    song.sel = 3;
-    t = &trk[3];
-    track_defaults_steps(t);
-    t->p[P_SLEN] = 40;
-    go_page(GR_ROLL);
-    ui.cursor = 0;
-    ui.bank = 0;
-    song.playing = 1;
-    ok = drum_track(t);
-    at(t, 36);
-    ok &= ui.bank == 0u;
-    bad += check("a DRUM track (its grid): the bank stays, the keys keep their steps", ok);
     return bad;
 }
 

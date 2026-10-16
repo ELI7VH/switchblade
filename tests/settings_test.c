@@ -4,11 +4,8 @@
 #include <string.h>
 #include <assert.h>
 #define __attribute__(x)
-#define NENGINES 9u
+#define NENGINES 4u                              /* (core.h: OB-Z WAVE ACID DRIFT) */
 #define UP_SLOTS 32u
-#define ENGI_SAMPLE 4u                           /* (core.h: SAMPLE, DRUM, the retired PERC set) */
-#define ENGI_DRUM 10u
-#define SMP_SET_PERC 4u
 static uint8_t fx_lowcut;
 static void fm1_led_key(unsigned k, int on) { (void)k; (void)on; }
 static int fm1_enc_take(unsigned k) { (void)k; return 0; }
@@ -30,7 +27,7 @@ int main(void)
     original.magic = PERSIST_MAGIC;
     original.palette = 4; original.bold = original.lowcut = original.zoom = 1;   /* old id 4: MONO, now GREY */
     original.panel = PANEL_DEFAULT; original.panel.enc[0] = 3;
-    original.favorites.factory[8][0] = 1;
+    original.favorites.factory[3][0] = 1;           /* DRIFT (the last engine) preset 0 */
     original.favorites.user = 1u << 31; original.favorites.filter = 1;
     p = original;
     assert(settings_import(&p, sizeof p) == 1); settings_init();
@@ -54,22 +51,13 @@ int main(void)
         p = original; assert(settings_import(&p, sizeof p) == 1); settings_init();
     }
 #ifdef FELUCCA_FAVORITES
-    assert(favorite_has(8, 0) && favorite_has(NENGINES, 31) && favorites.filter);
-    {   /* SAMPLE's PERC starred (preset 4, retired): DRUM's kit (preset 0) instead; SAMPLE's others kept; twice the same */
-        persist_t q = original;
-        q.favorites.factory[ENGI_SAMPLE][0] = 1u << SMP_SET_PERC | 1u << 2;
-        assert(settings_import(&q, sizeof q) == 1 && favorites.factory[ENGI_SAMPLE][0] == 1u << 2 &&
-               favorites.factory[ENGI_DRUM][0] == 1u);
-        settings_export(&q);
-        assert(settings_import(&q, sizeof q) == 1 && favorites.factory[ENGI_SAMPLE][0] == 1u << 2 &&
-               favorites.factory[ENGI_DRUM][0] == 1u);
-        p = original; assert(settings_import(&p, sizeof p) == 1);
-    }
+    assert(favorite_has(3, 0) && favorite_has(NENGINES, 31) && favorites.filter);
+    assert(!favorite_has(NENGINES + 1u, 0) && !favorite_set(NENGINES + 1u, 0, 1));   /* no row past the engines */
 #endif
     settings.lowcut = 0;
     settings_export(&p);
     assert(!p.lowcut && p.bold == 1 && p.favorites.user == (1u << 31));   /* bold: kept as saved */
-    assert(p.favorites.factory[8][0] == 1 && p.favorites.filter == 1);
+    assert(p.favorites.factory[3][0] == 1 && p.favorites.filter == 1);
     assert(p.panel.enc[0] == 3); /* saving one feature preserves the other */
     p = original; p.magic = 0x50455233u;
     assert(settings_import(&p, sizeof p - sizeof p.favorites) == 2);

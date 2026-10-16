@@ -506,8 +506,8 @@ static FILE *demo_open(const char *dir, const char *name, uint32_t frames)
         wav_hdr(f, frames);
     return f;
 }
-/* the loop: track 1 an acid line (ANALOG ACID .. its first preset as the factory sets it), track 2 DRUM (kick, snare,
- * hats); the INSERT on both from bar 3 */
+/* the loop: track 1 an acid line (OB-Z .. its first preset as the factory sets it), track 2 OB-Z SINE KEY (preset 5,
+ * POLY) chords on the beats; the INSERT on both from bar 3 */
 static int demos(const char *dir)
 {
     static const uint8_t LINE[16] = {36, 36, 48, 36, 0, 39, 36, 46, 36, 0, 48, 43, 36, 39, 0, 41};
@@ -520,12 +520,13 @@ static int demos(const char *dir)
         FILE *f;
         uint32_t k;
         fresh(0, 0);
-        host_preset(&trk[1], ENGI_DRUM, 0);
+        host_preset(&trk[1], ENGI_OBX, 5);
+        trk[1].p[P_VOICE] = V_POLY;
         for (i = 0; i < 16u; i++) {
             uint8_t nt = LINE[i];
+            static const uint8_t CH[3] = {60, 63, 67};
             put_step(&trk[0], i, nt ? 1u : 0u, &nt, nt ? ST_NOTE : ST_REST, (i % 4u) == 2u ? SF_ACCENT : 0u);
-            put_step(&trk[1], i, 0, 0, ST_NOTE, 0);
-            trk[1].step[i].hit = (uint8_t)((i % 4u == 0u ? 1u : 0u) | (i % 8u == 4u ? 2u : 0u) | (i % 2u == 0u ? 8u : 0u));
+            put_step(&trk[1], i, i % 4u == 0u ? 3u : 0u, CH, i % 4u == 0u ? ST_NOTE : ST_REST, 0);
             trk[1].step[i].vel = 100;
         }
         trk[0].p[P_SLEN] = trk[1].p[P_SLEN] = 16;

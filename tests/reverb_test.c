@@ -850,7 +850,8 @@ static void demo(const char *dir, const char *name, int rtype, int pluck)
         for (i = 0; i < 16u; i++)
             put_step(tr, i, PL[i] ? 1u : 0u, &PL[i], PL[i] ? ST_NOTE : ST_REST, 0);
     } else {
-        host_drums(tr);                                            /* the GM map: DRUM KIT (SAMPLE PERC until 1.0.2) */
+        host_preset(tr, ENGI_OBX, 5);                              /* OB-Z SINE KEY on the drum line (DRUM KIT */
+        tr->p[P_VOICE] = V_POLY;                                   /* until FM1-Four) */
         for (i = 0; i < 16u; i++) {
             uint8_t dn[3], k = 0;
             if (i % 4u == 0u || i == 10u) dn[k++] = 36;
@@ -927,7 +928,7 @@ static void demo2(const char *dir, int src, int m, int size)
         for (i = 0; i < 16u; i++)
             put_step(tr, i, PL[i] ? 1u : 0u, &PL[i], PL[i] ? ST_NOTE : ST_REST, 0);
     } else if (src == 2) {
-        host_preset(tr, ENGI_SAMPLE, 0);                           /* SAMPLE PIANO */
+        host_preset(tr, ENGI_WAVE, 0);                             /* WAVE (SAMPLE PIANO until FM1-Four) */
         for (i = 0; i < 16u; i++) {
             if (i % 4u == 0u)
                 put_step(tr, i, 3, CH[i / 4u], ST_NOTE, 0);
@@ -937,7 +938,8 @@ static void demo2(const char *dir, int src, int m, int size)
                 put_step(tr, i, 0, &ME[0], ST_REST, 0);
         }
     } else {
-        host_drums(tr);                                            /* DRUM KIT */
+        host_preset(tr, ENGI_OBX, 5);                              /* OB-Z SINE KEY (DRUM KIT until FM1-Four) */
+        tr->p[P_VOICE] = V_POLY;
         for (i = 0; i < 16u; i++) {
             uint8_t dn[3], k = 0;
             if (i % 4u == 0u || i == 10u) dn[k++] = 36;

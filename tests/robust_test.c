@@ -2,50 +2,13 @@
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
 /* Robustness against damaged or crafted stored data and editor requests (the 1.0.4 audit's items 5-10): the real
  * C paths of the editor build (editor_test.c is the base: hostsim, stubs, RAM flash).
- *   user sample slots   a SLICE scan bounded by the slot's size; a slot that fails its check leaves no zone behind
  *   projects            an engine number past the last refused (every format, and a RAM restore); a retained
  *                       older-format RAM slot bounded as one from flash
- *   user presets        a bank from flash or a backup: each record's pattern inside its fields
- *   editor              a malformed SMP_END / BACKUP_PUT does not stop the transport */
+ *   user presets        a bank from flash or a backup: each record's pattern inside its fields; a retired drum grid
+ *                       record (version 3) or a retired engine number reads as empty
+ *   editor              a malformed BACKUP_PUT does not stop the transport */
 #define EDITOR_TEST_NO_MAIN 1
 #include "editor_test.c"
-
-static void zone_set(smp_zone_t *z, uint32_t off, uint32_t n)
-{
-    memset(z, 0, sizeof *z);
-    z->off = off; z->n = n; z->ls = 0; z->le = n - 1u; z->rate = 1u << 16; z->idx = 0; z->lo = 0; z->hi = 127;
-}
-
-static int sample_slots(void)
-{
-    int bad = 0;
-    uint32_t i, dl = SMP_USER_SIZE - SMP_USER_DATA;
-    smp_user_hdr_t *h;
-    reset(); memset(host_samples, 0, sizeof host_samples);
-    /* 16 zones over overlapping data, each almost the whole slot (every zone inside the data) */
-    h = (smp_user_hdr_t *)host_samples[0];
-    h->magic = SMP_USER_MAGIC; h->version = 1; h->nz = 16; h->data_len = dl;
-    for (i = 0; i < 16u; i++) zone_set(&h->zone[i], 32u * i, 2u * (dl - 32u * i));
-    smp_user_scan(0);
-#if FELUCCA_SLICE
-    printf("robust: SLICE material of 16 overlapping zones: %u samples (the slot holds %u)\n", slc_usr[0].len,
-           2u * dl);
-    bad += check("16 overlapping zones: the SLICE scan is at most the slot's size", usr_nz[0] == 16u &&
-                 slc_usr[0].len && slc_usr[0].len <= 2u * dl);
-#endif
-    /* zone 0 good, zone 1 malformed: nothing of the slot is left (usr_zone[1][0] was copied before the check) */
-    h = (smp_user_hdr_t *)host_samples[1];
-    h->magic = SMP_USER_MAGIC; h->version = 1; h->nz = 2; h->data_len = 4096;
-    zone_set(&h->zone[0], 0, 4096);
-    zone_set(&h->zone[1], 0, 4096); h->zone[1].idx = 99;
-    smp_user_scan(1);
-    bad += check("a slot with a malformed zone: unusable, no zone of it left behind",
-                 !usr_nz[1] && !usr_zone[1][0].n && !usr_zone[1][1].n);
-    h->zone[1].idx = 0;
-    smp_user_scan(1);
-    bad += check("the same slot made valid scans again", usr_nz[1] == 2u && usr_zone[1][0].n == 4096u);
-    return bad;
-}
 
 static int projects(void)
 {
@@ -101,14 +64,17 @@ static int user_presets(void)
     r->used = UP_USED; r->ver = 2; r->engine = 0; r->np = 8; r->name[0] = 'A';
     r->note[3] = 200; r->flags[3] = 0x43;
     r->note[4] = 0; r->flags[4] = 0x03;                     /* a rest with flags */
-    r = &bk->r[1];                                          /* a drum grid: accents where there is no hit */
-    r->used = UP_USED; r->ver = UP_VER_GRID; r->engine = ENGI_DRUM; r->np = 8; r->name[0] = 'G';
+    r = &bk->r[1];                                          /* a retired drum grid (version 3) */
+    r->used = UP_USED; r->ver = 3; r->engine = 0; r->np = 8; r->name[0] = 'G';
     r->note[0] = 0x05; r->flags[0] = 0xFF;
+    r = &bk->r[2];                                          /* a retired engine's record (1.x SAMPLE: 4) */
+    r->used = UP_USED; r->ver = 2; r->engine = NENGINES; r->np = 8; r->name[0] = 'S';
+    r->note[0] = 60;
     up_bank_check(0, sizeof *bk);
     bad += check("a bank from flash: a note pattern's note inside 0..127, its flags inside their fields",
                  up_used(0) && bk->r[0].note[3] == (200u & 127u) && bk->r[0].flags[3] == 3u && !bk->r[0].flags[4]);
-    bad += check("a bank from flash: a drum grid's accents only on its hits", up_used(1) && bk->r[1].note[0] == 5u &&
-                 bk->r[1].flags[0] == 5u);
+    bad += check("a bank from flash: a drum grid record (version 3) and an engine past the last read as empty",
+                 !up_used(1) && !up_used(2) && up_used(0));
     return bad;
 }
 
@@ -118,9 +84,6 @@ static int stop_after_checks(void)
     uint8_t a[16] = {0};
     reset();
     song.playing = 1; host_progress = 1;                    /* the transport runs and could be stopped */
-    a[0] = 0; a[1] = 1; a[2] = 2;
-    request(ED_SMP_END, a, 3);                              /* a header far too short */
-    bad += check("a malformed SMP_END is refused without stopping the transport", host_wire[6] == 1 && song.playing);
     a[0] = 0; a[1] = 2;
     request(ED_BACKUP_PUT, a, 2);                           /* BEGIN without its arguments */
     bad += check("a malformed BACKUP_PUT is refused without stopping the transport", host_wire[7] == 1 && song.playing);
@@ -133,7 +96,7 @@ static int stop_after_checks(void)
 
 int main(void)
 {
-    int bad = sample_slots() + projects() + user_presets() + stop_after_checks();
+    int bad = projects() + user_presets() + stop_after_checks();
     printf("%s\n", bad ? "ROBUSTNESS TEST FAILED" : "robustness test passed");
     return bad != 0;
 }

@@ -180,9 +180,10 @@ static void song_setup(void)
     memset(sl, 0, sizeof sl);
     song.g[G_BPM] = 120;
     host_preset(t1, 0, 4);
-    host_preset(t2, 1, 5);
-    host_preset(t3, 3, 0);
-    host_drums(td);                                /* DRUM KIT (SAMPLE PERC until 1.0.2) */
+    host_preset(t2, ENGI_WAVE, 5);                 /* (FM6 PAD until FM1-Four) */
+    host_preset(t3, ENGI_DRIFT, 0);                /* (LOFI until FM1-Four) */
+    host_preset(td, ENGI_OBX, 5);                  /* OB-Z SINE KEY on the drum line (DRUM KIT until FM1-Four) */
+    td->p[P_VOICE] = V_POLY;
     for (i = 0; i < 16u; i++) {
         uint8_t n = ACID[i];
         put_step(t1, i, n ? 1u : 0u, &n, n ? ST_NOTE : ST_REST, ACIDF[i]);

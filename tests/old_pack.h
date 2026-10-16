@@ -5,7 +5,8 @@
  * byte for byte as their proj_pack: np parameters mapped by count (the first np - 8 are today's ids 0.., the last 8
  * P_E0..P_E7), 9-byte steps without a nudge (bit 7 of the note bytes 0), the motion block of 260 bytes (count <= 64,
  * 64 x (place, id, i16 value); the ids from P_E0 on at that store's own: id - (P_COUNT - np), a lock's bit kept), the
- * patches at name - 512 (not FUN7), the name, the FNV-1a hash. -> its size, 0 when q does not fit the old format.
+ * retired FM6 patches' area at name - 512 (not FUN7; left 0), the name, the FNV-1a hash. -> its size, 0 when q does
+ * not fit the old format.
  * The song's chain as rows {slot, repeat} (chain_v9_t, 36 bytes): a section with its four tracks on one slot each (a
  * section of several slots or a "-" does not fit) */
 #define OLD_FUN9 0x46554E39u
@@ -70,9 +71,8 @@ static uint32_t old_pack(uint8_t *b, const project_t *q, uint32_t magic, uint32_
     }
     pos += 260u;
     if (magic != OLD_FUN7) {
-        if (pos > name - NTRK * FM6_PACKED)
+        if (pos > name - NTRK * PROJ_FM6_PACKED)          /* (the retired FM6 patches' area: left 0) */
             return 0;
-        memcpy(b + name - NTRK * FM6_PACKED, q->fm6, NTRK * FM6_PACKED);
     } else if (pos > name) {
         return 0;
     }

@@ -300,8 +300,10 @@ static void song_setup(void)
     perf_reset();
     song.g[G_BPM] = 120;
     host_preset(t1, 0, 4);
-    host_preset(t2, 1, 5);
-    host_drums(td);                                /* DRUM KIT (SAMPLE PERC until 1.0.2) */
+    host_preset(t2, ENGI_OBX, 1);                  /* OB-Z SOFT PAD (FM6 PAD until FM1-Four; the effects cost as they did
+                                                    * over it: WAVE there makes the harmonizer ~12 % dearer, host counts) */
+    host_preset(td, ENGI_OBX, 5);                  /* OB-Z SINE KEY on the drum line (DRUM KIT until FM1-Four) */
+    td->p[P_VOICE] = V_POLY;
     for (i = 0; i < 16u; i++) {
         uint8_t n = ACID[i], d[4], k = 0;
         put_step(t1, i, n ? 1u : 0u, &n, n ? ST_NOTE : ST_REST, 0);

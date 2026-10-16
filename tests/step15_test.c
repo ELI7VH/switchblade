@@ -5,11 +5,9 @@
  *         step; a chord ties whole), stopping at the next step holding notes (NOTE AHEAD; a REST's kept notes too) and
  *         at LEN (END OF PATTERN); left turns its last TIEs back into RESTs, never the note itself; nothing else moves
  *         (the steps' locks stay); one undo per turn (SAVE held), redo; on a REST / TIE / empty step KNOB 3 is TIME as
- *         before; the DRUM grid's KNOB 3 is still HIT. Played: one note-on, held to the end of its last TIE (as a
- *         recorded hold plays).
- *   VEL   step_t.vel as it plays (seq.c seq_step: 0 = 96, ACC 127, a DRUM step's accented hit 127, its other hits the
- *         step's); SEQ > AUTOMATION: no VEL rows until + ADD VEL's OCT+ (SHOW) lists every note step inside LEN, KNOB 4
- *         1..127, EDIT back to 96, SAVE held undoes, KNOB 2 nothing, HIDE / leaving the page hides them; a pattern
+ *         before. Played: one note-on, held to the end of its last TIE (as a recorded hold plays).
+ *   VEL   step_t.vel as it plays (seq.c seq_step: 0 = 96, ACC 127; hit bits alone play nothing); SEQ > AUTOMATION:
+ *         no VEL rows until + ADD VEL's OCT+ (SHOW) lists every note step inside LEN, KNOB 4 1..127, EDIT back to 96, SAVE held undoes, KNOB 2 nothing, HIDE / leaving the page hides them; a pattern
  *         untouched plays as before (the golden renders: tests/regress.c).
  * Built and run by tests/run_tests.sh. */
 #define UI_TEST_NO_MAIN 1
@@ -135,27 +133,12 @@ static int len_edit(void)
     ok = t->step[3].time == ST_TIE;
     turn(EN_K3, -1);
     ok &= t->step[3].time == ST_NOTE;   /* (empty: still TIME) */
-    t->step[4] = (step_t){{0}, 0, ST_REST, 0, 0, 1, 0, 0};    /* a REST keeping a hit: not overwritten */
+    t->step[4] = (step_t){{55}, 1, ST_REST, 0, 0};             /* a REST keeping a note: not overwritten */
     put(t, 3, 50, ST_NOTE);
     turn(EN_K3, 1);
-    ok &= note_len(t, 3) == 1u && msg_is("NOTE AHEAD") && t->step[4].hit == 1u;
-    bad += check("  a REST / TIE / empty step: KNOB 3 TIME (NOTE TIE REST); a REST keeping notes or hits is kept", ok);
+    ok &= note_len(t, 3) == 1u && msg_is("NOTE AHEAD") && t->step[4].n == 1u && t->step[4].note[0] == 55u;
+    bad += check("  a REST / TIE / empty step: KNOB 3 TIME (NOTE TIE REST); a REST keeping notes is kept", ok);
 
-    ui_power_on();                                    /* the DRUM grid: KNOB 3 is still HIT */
-    song.sel = 3;
-    t = &trk[3];
-    track_defaults_steps(t);
-    t->p[P_SLEN] = 16;
-    go_page(GR_ROLL);
-    ui.cursor = 2;
-    ui.lane = 0;
-    frame();
-    grid_hit(t, 2, 0, 1);
-    turn(EN_K3, 1);
-    ok = drum_track(t) && t->step[3].time != ST_TIE && (step_lanes(&t->step[2]) & 1u);
-    turn(EN_K3, -1);
-    ok &= !(step_lanes(&t->step[2]) & 1u) && t->step[3].time != ST_TIE;
-    bad += check("  the DRUM grid: KNOB 3 HIT as before, no TIE written", ok);
     return bad;
 }
 
@@ -198,10 +181,9 @@ static int vel(void)
     n = play(t, 8, &off, v, 8);
     ok &= n == 1u && v[0] == 127u;
     bad += check("VEL plays: a step's 0 at 96, 50 at 50, an ACC step at 127", ok);
-    t->step[0] = (step_t){{0}, 0, ST_NOTE, 0, 40, 3, 2};          /* hits on lanes 1, 2; lane 2 accented */
+    t->step[0] = (step_t){{0}, 0, ST_NOTE, 0, 40, 3, 2};          /* stale hit bits only (the retired grid's) */
     n = play(t, 8, &off, v, 8);
-    ok = n == 2u && ((v[0] == 40u && v[1] == 127u) || (v[0] == 127u && v[1] == 40u));
-    bad += check("  a step's hits: the step's VEL, an accented one 127 (no velocity per lane)", ok);
+    bad += check("  a step of hit bits and no notes: silent (only notes play)", n == 0u);
 
     t = roll(0);
     for (n = 0; n < 16u; n += 4u)

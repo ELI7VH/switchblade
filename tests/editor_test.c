@@ -2,8 +2,6 @@
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
 /* The firmware editor handler, USB framing and UART recovery against RAM flash.
  * Build with the generated tables and the same flags as hostsim.c. */
-static unsigned char host_samples[3][0x14000];
-#define SMP_USER_XIP(k) host_samples[k]
 #define FELUCCA_OTA 1
 #define FELUCCA_FLASH 0
 #define FELUCCA_VERSION "TEST"
@@ -12,7 +10,7 @@ static unsigned char host_samples[3][0x14000];
 #include "hostsim.c"
 #undef main
 
-static uint32_t host_progress = 1, host_erases, host_writes;
+static uint32_t host_progress = 1;
 static uint8_t host_wire[4096];
 static uint32_t host_wire_n;
 static void host_drain(void)
@@ -49,16 +47,6 @@ static void panel_setup(void) {}
 
 static uint32_t flash_ok = 1;
 static void audio_silence(void) {}
-static void fl_inval(uint32_t off, uint32_t n) { (void)off; (void)n; }
-static uint8_t *host_flash_ptr(uint32_t off) { return &host_samples[0][0] + off - SMP_USER_BASE; }
-static int fl_erase4k(uint32_t off, uint32_t *took)
-{
-    memset(host_flash_ptr(off), 0xFF, 4096); *took = 0; host_erases++; return 0;
-}
-static int fl_write(uint32_t off, const void *p, uint32_t n)
-{
-    memcpy(host_flash_ptr(off), p, n); host_writes++; return 0;
-}
 static int st_read(uint32_t off, void *p, uint32_t n) { (void)off; (void)p; (void)n; return -1; }
 static int st_prog(uint32_t off, const void *p, uint32_t n) { (void)off; (void)p; (void)n; return -1; }
 static int st_erase(uint32_t off) { (void)off; return -1; }
@@ -78,8 +66,8 @@ static void reset(void)
     memset(&ed_w, 0, sizeof ed_w); memset(&ui, 0, sizeof ui);
     memset(&favorites, 0, sizeof favorites); memset(&settings, 0, sizeof settings); settings_init();
     memset(proj_slot, 0, sizeof proj_slot); memset(up_bank, 0, sizeof up_bank);
-    memset(&um, 0, sizeof um); memset(usr_nz, 0, sizeof usr_nz);
-    host_progress = 1; host_erases = host_writes = host_wire_n = 0;
+    memset(&um, 0, sizeof um);
+    host_progress = 1; host_wire_n = 0;
     transport_req = panic_req = 0; sx_ready = sx_collect = sx_busy = 0;
     so_r = so_w = mi_r = mi_w = 0; midi_in_overflow = 0; usb.config = 1;
     for (i = 0; i < G_COUNT; i++) song.g[i] = GP[i].def;
@@ -171,24 +159,19 @@ static int preferences(void)
     reset();
     uint32_t n = request(ED_INFO, a, 0);
     uint32_t e = n - 6u;                                  /* (1.5.5: 4B 01 NCOND, 1.6: 45 01 5 last, below) */
-    bad += check("INFO explicitly tags display capabilities after SONG without changing command 33",
+    bad += check("INFO tags the capabilities after CHAIN_ROWS (no FM6 tags 46 / 50 / 56) without changing command 33",
         ED_SONG == 33 && ED_UI_STATE == 34 && ED_FAV_SET == 38 &&
-        host_wire[e - 47] == CHAIN_ROWS && host_wire[e - 46] == 0x55 &&
-        host_wire[e - 45] == 1 && host_wire[e - 44] == 9 &&
-        host_wire[e - 43] == 0x4d && host_wire[e - 42] == 1 &&
-        host_wire[e - 41] == 64u && host_wire[e - 40] == 1 &&   /* (64 kept: 41 01 says 128) */
-        host_wire[e - 39] == 0x42 && host_wire[e - 38] == 1 && host_wire[e - 37] == 3 &&
-        host_wire[e - 36] == 0x46 && host_wire[e - 35] == 1 && host_wire[e - 34] == FM6_NFACTORY &&
-        host_wire[e - 33] == 0 &&                        /* (no bank since 1.0.3) */
-        host_wire[e - 32] == 0x53 && host_wire[e - 31] == 1 && host_wire[e - 30] == 3 &&
-        host_wire[e - 29] == 0x50 && host_wire[e - 28] == 1 && host_wire[e - 27] == 3 &&   /* FM6 v2: no bank, preset patches */
-        host_wire[e - 26] == 0x4E && host_wire[e - 25] == 1 && host_wire[e - 24] == 32 &&   /* MENU settings: 32 items (1.5.5) */
-        host_wire[e - 23] == 0x52 && host_wire[e - 22] == 1 && host_wire[e - 21] == 4 &&   /* RATCH */
-        host_wire[e - 20] == 0x4C && host_wire[e - 19] == 1 && host_wire[e - 18] == 1 &&   /* 1.1 parameter locks */
-        host_wire[e - 17] == 0x41 && host_wire[e - 16] == 1 && host_wire[e - 15] == 0 && host_wire[e - 14] == 1 &&   /* 1.2: 128 */
-        host_wire[e - 13] == 0x54 && host_wire[e - 12] == 1 && host_wire[e - 11] == NUDGE_DIV &&   /* 1.2: NUDGE */
-        host_wire[e - 10] == 0x57 && host_wire[e - 9] == 1 && host_wire[e - 8] == NTRK &&   /* 1.2: SONG lanes */
-        host_wire[e - 7] == 0x56 && host_wire[e - 6] == 1 && host_wire[e - 5] == 32 &&   /* 1.4.1: FM6 voice bank */
+        host_wire[e - 37] == CHAIN_ROWS &&
+        host_wire[e - 36] == 0x55 && host_wire[e - 35] == 1 && host_wire[e - 34] == 9 &&
+        host_wire[e - 33] == 0x4d && host_wire[e - 32] == 1 && host_wire[e - 31] == 64u && host_wire[e - 30] == 1 &&   /* (64 kept: 41 01 says 128) */
+        host_wire[e - 29] == 0x42 && host_wire[e - 28] == 1 && host_wire[e - 27] == 3 &&
+        host_wire[e - 26] == 0x53 && host_wire[e - 25] == 1 && host_wire[e - 24] == 3 &&
+        host_wire[e - 23] == 0x4E && host_wire[e - 22] == 1 && host_wire[e - 21] == 32 &&   /* MENU settings: 32 items (1.5.5) */
+        host_wire[e - 20] == 0x52 && host_wire[e - 19] == 1 && host_wire[e - 18] == 4 &&   /* RATCH */
+        host_wire[e - 17] == 0x4C && host_wire[e - 16] == 1 && host_wire[e - 15] == 1 &&   /* 1.1 parameter locks */
+        host_wire[e - 14] == 0x41 && host_wire[e - 13] == 1 && host_wire[e - 12] == 0 && host_wire[e - 11] == 1 &&   /* 1.2: 128 */
+        host_wire[e - 10] == 0x54 && host_wire[e - 9] == 1 && host_wire[e - 8] == NUDGE_DIV &&   /* 1.2: NUDGE */
+        host_wire[e - 7] == 0x57 && host_wire[e - 6] == 1 && host_wire[e - 5] == NTRK &&   /* 1.2: SONG lanes */
         host_wire[e - 4] == 0x43 && host_wire[e - 3] == 1 && host_wire[e - 2] == ML_N);   /* 1.5: MIDI LEARN */
     bad += check("INFO 1.5.5: 4B 01 11, a step's condition after its nudge",
         host_wire[n - 7] == 0x4B && host_wire[n - 6] == 1 && host_wire[n - 5] == NCOND);
@@ -204,9 +187,9 @@ static int preferences(void)
         host_wire[5] == 2 && host_wire[8] == 9 && host_wire[10] == 127);
     a[0] = 2; request(ED_UI_SET, a, 2);
     bad += check("unsupported preference is reported without applying it", host_wire[5] == 2);
-    a[0] = ENGI_DRUM; a[1] = 0; a[2] = 64; a[3] = 1;
+    a[0] = ENGI_DRIFT; a[1] = 0; a[2] = 64; a[3] = 1;
     request(ED_FAV_SET, a, 4);
-    bad += check("FAV_SET marks DRUM as a normal engine", host_wire[5] == 3 && favorite_has(ENGI_DRUM, 0));
+    bad += check("FAV_SET marks DRIFT (the last engine) as a normal engine", host_wire[5] == 3 && favorite_has(ENGI_DRIFT, 0));
     request(ED_FAV_GET, a, 4);
     bad += check("FAV_GET reads the bounded favorite range", host_wire[5] == 0 && host_wire[10] == 1);
     a[0] = NENGINES; a[1] = 31; request(ED_FAV_SET, a, 4);
@@ -306,11 +289,13 @@ static int steps(void)
     int bad = 0;
     reset();
     TSEL->step[0].hit = TSEL->step[0].acc = 0x80;
-    bad += check("legacy 8-byte step writes preserve lane data",
+    bad += check("legacy 8-byte step write: the notes; the retired grid's bytes replied 0",
                  request(ED_STEP_SET, a, 9) == 22u && TSEL->step[0].note[0] == 60 &&
-                 TSEL->step[0].hit == 0x80 && TSEL->step[0].acc == 0x80);
-    bad += check("full grid step writes preserve high lane bits and constrain accents",
-                 request(ED_STEP_SET, a, 12) == 22u && TSEL->step[0].hit == 0x92 && TSEL->step[0].acc == 2);
+                 !host_wire[14] && !host_wire[15] && !host_wire[16]);
+    a[2] = 62;
+    bad += check("a write with the retired grid's 3 bytes: accepted, the bytes ignored (fields untouched), replied 0",
+                 request(ED_STEP_SET, a, 12) == 22u && TSEL->step[0].note[0] == 62 && TSEL->step[0].hit == 0x80 &&
+                 TSEL->step[0].acc == 0x80 && !host_wire[14] && !host_wire[15] && !host_wire[16]);
     before = TSEL->step[0]; a[2] = 71;
     for (n = 2; n <= sizeof a; n++) {
         if (n == 9u || n == 12u || n == 13u) continue;   /* (14: a[13], the ratchet, 0 is refused) */
@@ -390,47 +375,13 @@ static int steps(void)
     return bad;
 }
 
-static int samples(void)
+/* user-preset STORE / ERASE while the audio cannot stop (the transport runs, the ISR stalled) */
+static int up_stalled(void)
 {
-    uint8_t a[640] = {0}, data[257], short_group[] = {0, 0, 4, 0, 1};
-    uint32_t n, i;
+    uint8_t a[2] = {0, 0};
     int bad = 0;
-    smp_user_hdr_t h;
-    reset(); memset(host_samples, 0, sizeof host_samples);
-    for (i = 0; i < sizeof data; i++) data[i] = (uint8_t)(i * 37u);
+    reset();
     song.playing = 1; host_progress = 0;
-    bad += check("sample erase waits for STOP and refuses a stalled audio ISR",
-                 request(ED_SMP_BEGIN, a, 1) == 8u && host_wire[6] != 0 && !host_erases && song.playing);
-    host_progress = 1;
-    bad += check("sample erase stops transport before touching flash",
-                 request(ED_SMP_BEGIN, a, 1) == 8u && !host_wire[6] && host_erases == 1 && !song.playing);
-    a[0] = 0; a[1] = 0; a[2] = 4; a[3] = 0;
-    n = pack7(data, 257, a + 4) + 4u;
-    bad += check("257 decoded sample bytes are rejected without a truncated write",
-                 request(ED_SMP_WRITE, a, n) == 11u && host_wire[9] == 1 && !host_writes);
-    bad += check("a dangling packed-data mask is rejected",
-                 request(ED_SMP_WRITE, short_group, sizeof short_group) == 11u && host_wire[9] == 1 && !host_writes);
-    n = pack7(data, 256, a + 4) + 4u;
-    transport_req = 1;
-    bad += check("sample writes cancel a pending PLAY before flash access",
-                 request(ED_SMP_WRITE, a, n) == 11u && !host_wire[9] && transport_req != 1u && host_writes == 1);
-    memset(&h, 0, sizeof h); h.magic = SMP_USER_MAGIC; h.version = 1; h.nz = 1;
-    h.data_len = 256; h.crc = st_crc32(data, 256); h.zone[0].n = 512; h.zone[0].le = 511;
-    h.zone[0].rate = 65536; h.zone[0].hi = 127;
-    a[0] = 0; n = pack7((const uint8_t *)&h, sizeof h, a + 1) + 1u;
-    a[n] = 0; a[n + 1u] = 0;
-    bad += check("an oversized sample header is rejected without programming flash",
-                 request(ED_SMP_END, a, n + 2u) == 8u && host_wire[6] == 1 && host_writes == 1);
-    bad += check("complete sample header and CRC publish a valid slot",
-                 request(ED_SMP_END, a, n) == 8u && !host_wire[6] && usr_nz[0] == 1 && host_writes == 2);
-    bad += check("repeated END of the same published header does not rewrite live zones",
-                 request(ED_SMP_END, a, n) == 8u && !host_wire[6] && host_writes == 2);
-    h.zone[0].rate = 131072;
-    n = pack7((const uint8_t *)&h, sizeof h, a + 1) + 1u;
-    bad += check("END cannot change published sample zones without BEGIN",
-                 request(ED_SMP_END, a, n) == 8u && host_wire[6] == 2 && host_writes == 2 &&
-                 usr_zone[0][0].rate == 65536u);
-    song.playing = 1; host_progress = 0; a[0] = 0; a[1] = 0;
     bad += check("user-preset STORE does not mutate RAM when audio cannot stop",
                  request(ED_UP_STORE, a, 2) == 8u && host_wire[6] == 2 && !up_used(0));
     bad += check("user-preset ERASE reports failure when audio cannot stop",
@@ -512,125 +463,6 @@ static int malformed_saves(void)
     return bad;
 }
 
-/* FM6 patches (cmds 68..71): a track's own patch, the retired bank ("no bank"), the factory patches, the user presets'
- * patches (target 3), malformed frames */
-static int fm6_patches(void)
-{
-    int bad = 0;
-    uint8_t a[2 + FM6_PACKED], pk[FM6_PACKED];
-    uint32_t n, i;
-    reset();
-    upf_empty();
-    a[0] = ED_FM6_FACTORY; a[1] = 3;
-    n = request(ED_FM6_GET, a, 2);
-    bad += check("FM6_GET factory 4: the packed record", n == 5u + 3u + FM6_PACKED + 1u && host_wire[7] == 0 &&
-                 !memcmp(host_wire + 8, FM6_FACTORY[3], FM6_PACKED));
-    memcpy(pk, FM6_FACTORY[3], FM6_PACKED);
-    memcpy(pk + 118, "MY PATCH  ", 10);
-    trk[2].eng_req = ENGI_FM6;
-    trk[2].p[P_E7] = 3;
-    a[0] = ED_FM6_TRACK; a[1] = 2; memcpy(a + 2, pk, FM6_PACKED);
-    n = request(ED_FM6_PUT, a, sizeof a);
-    bad += check("FM6_PUT track 3: rc 0, the track's patch, SLOT OWN (not F4: the name differs)", n == 9u &&
-                 host_wire[7] == 0 && !memcmp(fm6_patch[2] + FP_NAME, "MY PATCH  ", 10) &&
-                 trk[2].p[P_E7] == FM6_OWN && fm6_slot[2] == FM6_OWN);
-    fm6_poll();
-    bad += check("  .. the main loop keeps it", !memcmp(fm6_patch[2] + FP_NAME, "MY PATCH  ", 10));
-    a[1] = 2;
-    n = request(ED_FM6_GET, a, 2);
-    bad += check("FM6_GET track 3: as sent", host_wire[7] == 0 && !memcmp(host_wire + 8, pk, FM6_PACKED));
-    a[0] = ED_FM6_TRACK; a[1] = 2; memcpy(a + 2, FM6_FACTORY[5], FM6_PACKED);
-    request(ED_FM6_PUT, a, sizeof a);
-    bad += check("FM6_PUT of a factory patch unchanged: SLOT shows it (F6)", trk[2].p[P_E7] == 5 && fm6_slot[2] == 5u);
-    trk[2].p[P_E7] = FM6_OWN;                            /* (back to MY PATCH for the SLOT trip below) */
-    a[0] = ED_FM6_TRACK; a[1] = 2; memcpy(a + 2, pk, FM6_PACKED);
-    request(ED_FM6_PUT, a, sizeof a);
-    trk[2].p[P_E7] = 1;
-    fm6_poll();
-    bad += check("SLOT OWN -> F2 loads the factory patch", !memcmp(fm6_patch[2] + FP_NAME, FM6_FACTORY[1] + 118, 10));
-    trk[2].p[P_E7] = 6;
-    fm6_poll();
-    trk[2].p[P_E7] = FM6_OWN;
-    fm6_poll();
-    bad += check("  .. and back to OWN brings the own patch back", !memcmp(fm6_patch[2] + FP_NAME, "MY PATCH  ", 10) &&
-                 fm6_slot[2] == FM6_OWN);
-    trk[2].p[P_E7] = 20;                                 /* (a 1.0.2 B slot that escaped a clamp) */
-    fm6_poll();
-    bad += check("a SLOT past OWN is OWN: the patch stays, nothing reloads", trk[2].p[P_E7] == FM6_OWN &&
-                 !memcmp(fm6_patch[2] + FP_NAME, "MY PATCH  ", 10));
-    for (i = 0; i < 3u; i++) {                           /* the bank: GET, PUT, ERASE answer "no bank" (3) */
-        a[0] = ED_FM6_BANK; a[1] = 4; memcpy(a + 2, pk, FM6_PACKED);
-        if (i < 2u)
-            request(i ? ED_FM6_PUT : ED_FM6_GET, a, i ? sizeof a : 2u);
-        else {
-            a[0] = 4;
-            request(ED_FM6_ERASE, a, 1);
-        }
-        bad += check(i == 0u ? "FM6_GET of the bank: rc 3, no bank" : i == 1u ? "FM6_PUT to the bank: rc 3, no bank" :
-                               "FM6_ERASE: rc 3, no bank", host_wire[i == 2u ? 6 : 7] == 3u);
-    }
-    n = request(ED_FM6_LIST, a, 0);
-    {   /* factory 8, bank 0, then used + name per factory slot */
-        uint32_t p = 7, k, ok = host_wire[5] == FM6_NFACTORY && host_wire[6] == 0;
-        for (k = 0; k < FM6_NFACTORY && p < n; k++) {
-            ok &= host_wire[p++] == 1u;
-            while (host_wire[p]) p++;
-            p++;
-        }
-        bad += check("FM6_LIST: 8 factory names, nbank 0", ok && k == FM6_NFACTORY && p == n - 1u);
-    }
-    /* target 3: an FM6 user preset's patch */
-    song.sel = 2;
-    up_store(5, "MINE");                                 /* track 3 (MY PATCH, OWN) -> slot 6 */
-    a[0] = ED_FM6_USER; a[1] = 5;
-    request(ED_FM6_GET, a, 2);
-    bad += check("UP_STORE of an FM6 track: FM6_GET user 6 gives its patch", host_wire[7] == 0 &&
-                 !memcmp(host_wire + 8 + 118, "MY PATCH  ", 10));
-    memcpy(a + 2, pk, FM6_PACKED);
-    memcpy(a + 2 + 118, "EDITOR    ", 10);
-    a[2 + 14] = 120;                                     /* OP6 output level 120: stored as 99 */
-    request(ED_FM6_PUT, a, sizeof a);
-    i = host_wire[7];
-    request(ED_FM6_GET, a, 2);
-    bad += check("FM6_PUT user 6, then GET: stored in range (a level of 120 -> 99)", i == 0u && host_wire[7] == 0 &&
-                 host_wire[8 + 14] == 99 && !memcmp(host_wire + 8 + 118, "EDITOR    ", 10));
-    fm6_load_slot(2, 0);
-    up_load(5);
-    bad += check("  .. UP_LOAD 6 plays it, SLOT OWN", !memcmp(fm6_patch[2] + FP_NAME, "EDITOR    ", 10) &&
-                 trk[2].p[P_E7] == FM6_OWN);
-    up_rename(5, "RENAMED");
-    a[0] = ED_FM6_USER; a[1] = 5;
-    request(ED_FM6_GET, a, 2);
-    bad += check("  .. a rename keeps it", host_wire[7] == 0 && !memcmp(host_wire + 8 + 118, "EDITOR    ", 10));
-    trk[0].eng_req = ENGI_DRUM;
-    song.sel = 0;
-    up_store(6, "KIT");
-    a[0] = ED_FM6_USER; a[1] = 6; memcpy(a + 2, pk, FM6_PACKED);
-    request(ED_FM6_GET, a, 2);
-    i = host_wire[7];
-    request(ED_FM6_PUT, a, sizeof a);
-    bad += check("a DRUM user preset has no patch: GET rc 2, PUT rc 1", i == 2u && host_wire[7] == 1u);
-    a[1] = 9;                                            /* an empty slot */
-    request(ED_FM6_PUT, a, sizeof a);
-    i = host_wire[7];
-    a[1] = UP_SLOTS;
-    request(ED_FM6_GET, a, 2);
-    bad += check("an empty user slot: PUT rc 1; past the slots: GET rc 1", i == 1u && host_wire[7] == 1u);
-    up_put(5, 0);
-    a[1] = 5;
-    request(ED_FM6_GET, a, 2);
-    bad += check("an erased preset's patch is gone (GET rc 2)", host_wire[7] == 2u);
-    a[0] = ED_FM6_TRACK; a[1] = 4;
-    request(ED_FM6_PUT, a, sizeof a);
-    i = host_wire[7];
-    request(ED_FM6_PUT, a, 20);
-    bad += check("FM6_PUT: a fifth track or a short record: rc 1", i == 1u && host_wire[7] == 1u);
-    a[0] = 4; a[1] = 0;
-    request(ED_FM6_GET, a, 2);
-    bad += check("FM6_GET of an unknown target: rc 1", host_wire[7] == 1u);
-    return bad;
-}
-
 /* UP_PUT -> UP_GET: every value round-trips through the v4 record (a byte each), negative ones too */
 static int user_preset_roundtrip(void)
 {
@@ -639,7 +471,7 @@ static int user_preset_roundtrip(void)
     uint32_t k = 0, i, p, ok, n;
     int bad = 0;
     reset();
-    a[k++] = 3; a[k++] = 0;                                /* slot U04, ANALOG */
+    a[k++] = 3; a[k++] = 0;                                /* slot U04, OB-Z */
     memcpy(a + k, "ROUND", 5); k += 5; a[k++] = 0;
     for (i = 0; i < P_COUNT; i++) {
         const param_desc_t *d = param_desc_of(0, i);
@@ -668,7 +500,7 @@ static int user_preset_roundtrip(void)
     for (i = 0; i < 16u; i++, p += 2u)
         ok &= host_wire[p] == (i & 1u ? 0u : 48u + i);
     bad += check("UP_GET returns the values and the pattern UP_PUT sent", ok);
-    bad += check("  .. then kind 0 and (1.2) the category: none sent, ANALOG's (OTHER)",
+    bad += check("  .. then kind 0 and (1.2) the category: none sent, OB-Z's (OTHER)",
                  host_wire[p] == 0u && host_wire[p + 1u] == CAT_OTHER && host_wire[p + 2u] == 0xF7);
     {   /* 1.2 (Discussion #90): UP_PUT's category after the kind's 16 bytes; UP_LIST lists the categories after the slots */
         uint32_t k0 = k;
@@ -751,14 +583,14 @@ static int live_sync(void)
                  TSEL->preset == 2 && !wire_frames(ED_RELOAD, 0) && wire_frames(ED_CHANGED, &x) == 1u &&
                  x[1] == P_LEVEL && !sync_pass());
     for (i = 0; i < 3u; i++) {                           /* any preset of any engine */
-        a[0] = (uint8_t)(i ? 12u : 4u); a[1] = (uint8_t)i;
+        a[0] = (uint8_t)(ENGI_WAVE + i); a[1] = (uint8_t)i;   /* WAVE, ACID, DRIFT */
         request(ED_PRESET, a, 2);
         other += sync_pass() != 0;
     }
     bad += check("PRESET of other engines: no push at all", !other && ed_w.eng == ed_eng(TSEL));
-    a[0] = 1; a[1] = G_ENGSEL; a[2] = (8192 + 5) & 127; a[3] = (8192 + 5) >> 7;
+    a[0] = 1; a[1] = G_ENGSEL; a[2] = (8192 + ENGI_ACID) & 127; a[3] = (8192 + ENGI_ACID) >> 7;
     request(ED_SET, a, 4);
-    bad += check("SET of G_ENGSEL: no RELOAD", ed_eng(TSEL) == 5u && !sync_pass());
+    bad += check("SET of G_ENGSEL: no RELOAD", ed_eng(TSEL) == ENGI_ACID && !sync_pass());
     sync_reload = 1;                                     /* a load on the device, not pushed yet */
     a[0] = 0; a[1] = 1;
     request(ED_PRESET, a, 2);
@@ -1085,64 +917,6 @@ static int menu_protocol(void)
     return bad;
 }
 
-/* DRUM KIT 1..3 (HAND CYM H+CYM until 1.0.4, retired): DESC names them as the kit they play (66 10 77), a SET of
- * one lands on that kit (the reply says so), a user preset sent with one loads as that kit */
-static int drum_kit_retired(void)
-{
-    static const uint8_t MAP[4] = {0, 6, 5, 8};
-    static uint8_t a[16 + 2u * P_COUNT + 32u];
-    int16_t got[P_COUNT];
-    uint32_t r, i, k = 0, ok = 1;
-    int bad = 0;
-    reset();
-    a[0] = 1; a[1] = G_ENGSEL; a[2] = (8192 + ENGI_DRUM) & 127; a[3] = (8192 + ENGI_DRUM) >> 7;
-    request(ED_SET, a, 4);
-    a[0] = 0; a[1] = P_E0;
-    request(ED_DESC, a, 2);
-    {   /* scope, id, fmt, min, max, def (v14 each), "KIT", "", then the 9 names */
-        const char *n = (const char *)host_wire + 5 + 3 + 6;
-        static const char *const WANT[9] = {"STD", "66", "10", "77", "80", "10", "66", "55", "77"};
-        n += strlen(n) + 1; n += strlen(n) + 1;
-        for (i = 0; i < 9u; i++, n += strlen(n) + 1)
-            ok &= !strcmp(n, WANT[i]);
-    }
-    bad += check("DESC of DRUM KIT: STD 66 10 77 80 10 66 55 77 (1..3 as the kits they play)", ok);
-    for (r = 1, ok = ed_eng(TSEL) == ENGI_DRUM; r < 4u; r++) {
-        uint32_t u = r + 8192u;
-        a[0] = 0; a[1] = P_E0; a[2] = u & 127u; a[3] = u >> 7;
-        request(ED_SET, a, 4);
-        ok &= TSEL->p[P_E0] == MAP[r] && (int32_t)(host_wire[7] | host_wire[8] << 7) - 8192 == MAP[r];
-    }
-    bad += check("SET of DRUM KIT 1..3 lands on 66 10 77 (and replies it)", ok);
-    a[k++] = 5; a[k++] = ENGI_DRUM;                        /* slot U06, DRUM, KIT 3 (H+CYM) */
-    memcpy(a + k, "OLDKIT", 6); k += 6; a[k++] = 0;
-    for (i = 0; i < P_COUNT; i++) {
-        uint32_t u = (uint32_t)((i == P_E0 ? 3 : param_desc_of(ENGI_DRUM, i)->def) + 8192);
-        a[k++] = u & 127u; a[k++] = (u >> 7) & 127u;
-    }
-    for (i = 0; i < 16u; i++) { a[k++] = 0; a[k++] = 0; }
-    request(ED_UP_PUT, a, k);
-    up_values(up_rec(5), got);
-    bad += check("a user preset of DRUM KIT 3 (H+CYM) loads as 77", up_used(5) && got[P_E0] == 8);
-    {   /* a project whose DRUM tracks hold KIT 0..3: loaded (and bounded, as from flash) as STD 66 10 77 */
-        static project_t p;
-        for (r = 0; r < NTRK; r++) {
-            set_engine_of(&trk[r], ENGI_DRUM); apply_preset_to(&trk[r], 0);
-            trk[r].engine = trk[r].eng_req;
-        }
-        project_capture(&p);
-        for (r = 0; r < NTRK; r++) p.t[r].p[P_E0] = (int16_t)r;
-        p.sum = proj_sum(&p);
-        ok = !project_restore_runtime(&p);
-        for (r = 0; r < NTRK; r++) ok &= trk[r].p[P_E0] == MAP[r];
-        for (r = 0; r < NTRK; r++) p.t[r].p[P_E0] = (int16_t)r;
-        proj_bound(&p);
-        for (r = 0; r < NTRK; r++) ok &= p.t[r].p[P_E0] == MAP[r];
-        bad += check("a project of DRUM KIT 1..3 loads as 66 10 77 (STD stays)", ok);
-    }
-    return bad;
-}
-
 /* 1.5 MIDI LEARN (78 LEARN_GET, 79 LEARN_SET; editor_learn.c): the map as the device keeps it (midi_learn.c) */
 static int learn_entry(uint32_t i, uint32_t used, uint32_t cc, uint32_t k, uint32_t id)   /* (a LEARN_GET reply) */
 {
@@ -1169,7 +943,7 @@ static int learn_protocol(void)
         request(ED_LEARN_SET, c, 4);                     /* (CC20 again: T2 PAN in place of T1 LEVEL) */
         n = request(ED_LEARN_GET, 0, 0);
         ok &= learn_entry(0, 1, 74, 3, P_E0 + 2) && learn_entry(1, 1, 20, 1, P_PAN) && learn_entry(2, 0, 0, 0, 0);
-        bad += check("LEARN_SET op 0: learns (DRUM's TONE on CC74); CC20 again replaces its parameter", ok);
+        bad += check("LEARN_SET op 0: learns (T4's E2 on CC74); CC20 again replaces its parameter", ok);
     }
     {
         const uint8_t bad1[] = {0, 64, 0, 1}, bad2[] = {0, 21, 4, 1}, bad3[] = {0, 21, 0, P_COUNT}, bad4[] = {0, 120, 0, 1};
@@ -1327,8 +1101,8 @@ static int custom_palette(void)
 #ifndef EDITOR_TEST_NO_MAIN                              /* (robust_test.c, fuzz_*.c: this file is their base) */
 int main(void)
 {
-    int bad = preferences() + motion_locks() + framing() + uart_recovery() + steps() + samples() + song_protocol() + malformed_saves() +
-              fm6_patches() + user_preset_roundtrip() + live_sync() + usb_burst() + menu_protocol() + drum_kit_retired() +
+    int bad = preferences() + motion_locks() + framing() + uart_recovery() + steps() + up_stalled() + song_protocol() + malformed_saves() +
+              user_preset_roundtrip() + live_sync() + usb_burst() + menu_protocol() +
               learn_protocol() + custom_palette();
     printf("%s\n", bad ? "EDITOR TEST FAILED" : "editor test passed");
     return bad != 0;

@@ -3,14 +3,12 @@
 /* Engine switches on a part, hashed (1.5: the engines' per-part state shares one region, engines.c eng_mem).
  *   build/host/union_test [GOLDEN_FILE]      (run_tests.sh builds and runs it against tests/union_golden.txt)
  *
- * Every pair (and A -> B -> A) of the engines that keep state per part (GRAIN, PHYS, DRUM, FM6, SLICE), with
- * ANALOG, SAMPLE and WHEEL (state outside the region) among them, on part 1 while part 3 plays other engines
- * alongside, at three presets: a chord and a low note held, released, still ringing at the next switch (the
- * fade on the old engine), and once more with the next notes inside the fade (they wait for the switch).
- * Each sequence runs in its own fork()ed child from boot state; its mix is one 64-bit FNV-1a hash. The file
- * holds the hashes of 1.4 (the engines' own arrays, before the shared region): any difference fails. The 380
- * sequences that play SAMPLE's PIANO (SAMPLE presets 0 / 1, GRAIN's FROZEN / SHIMMER) were rewritten in 1.5, when
- * PIANO went back to the full piano of 1.1.5; the other 340 are 1.4's.
+ * Every pair (and A -> B -> A) of the four machines (OB-Z, WAVE: its voices in the region, ACID, DRIFT) on part 1
+ * while part 3 plays other engines alongside, at three presets: a chord and a low note held, released, still ringing
+ * at the next switch (the fade on the old engine), and once more with the next notes inside the fade (they wait for
+ * the switch). Each sequence runs in its own fork()ed child from boot state; its mix is one 64-bit FNV-1a hash; any
+ * difference from the file fails. (FM1-Four, Task 1.1: the file was rewritten for the four machines; the 1.4 / 1.5
+ * hashes of the retired engines' switches are gone with them.)
  * env: GOLDEN_UPDATE=1 rewrites GOLDEN_FILE (only with a reason: a switch is to sound as it did). */
 #define main hostsim_main
 #include "hostsim.c"
@@ -40,8 +38,6 @@ static void uplay(track_t *t, uint32_t e, uint32_t pi, uint32_t base, uint32_t w
 {
     static const uint8_t CH[4] = {0, 4, 7, 12};
     uint32_t i;
-    if (e == ENGI_DRUM)                          /* (DRUM had one preset until 1.5.6 (#216): the 1.4 hashes play DRUM KIT */
-        pi = 0;                                  /* at every pi; the new kits' presets are not engine-memory cases) */
     host_preset_req(t, e, pi);                   /* eng_req: the audio side switches (voice.c engine_block) */
     urun(wait_ms);
     for (i = 0; i < 4u; i++)
@@ -55,11 +51,7 @@ static void uplay(track_t *t, uint32_t e, uint32_t pi, uint32_t base, uint32_t w
     urun(250);                                   /* still ringing at the next switch */
 }
 
-static const uint32_t UE[] = {0 /* ANALOG */, ENGI_SAMPLE, 7 /* WHEEL */, 8 /* GRAIN */, ENGI_PHYS, ENGI_DRUM, ENGI_FM6,
-#if FELUCCA_SLICE
-                              13 /* SLICE */
-#endif
-};
+static const uint32_t UE[] = {ENGI_OBX, ENGI_WAVE, ENGI_ACID, ENGI_DRIFT};
 #define UNE (sizeof UE / sizeof UE[0])
 
 static uint64_t useq(const uint32_t *e, uint32_t n, uint32_t pi, uint32_t wait_ms)
@@ -138,6 +130,6 @@ int main(int argc, char **argv)
         }
     }
     fclose(f);
-    printf("union_test: %u engine switch sequences, %u differ from 1.4: %s\n", n, bad, bad ? "FAIL" : "ok");
+    printf("union_test: %u engine switch sequences, %u differ from the file: %s\n", n, bad, bad ? "FAIL" : "ok");
     return bad != 0;
 }

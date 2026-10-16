@@ -5,7 +5,8 @@
  *   blocker); LOWCUT cuts below ~110 Hz (12 dB/oct), BASS+ below ~220 Hz; both leave 1 kHz and up alone.
  *   BASS+: a 55 Hz tone gains energy at 250 Hz..1 kHz, the sub is cut, the output settles back to 0 after the
  *   tone and nothing reaches full scale.
- * #180 (BASS+ distorted a kick): a full-scale kick pattern (the DRUM voices KICK PUNCH / ROUND, 4 hits, at full scale
+ * #180 (BASS+ distorted a kick): a full-scale kick pattern (a kick synthesized here as the retired DRUM engine's KICK
+ *   was made, PUNCH / ROUND: a swept sine with its 2nd and 3rd harmonics, a click, soft-clipped; 4 hits, at full scale
  *   and twice that: a loud mix) through each mode. BASS+ keeps the samples off the rails (under 30000: the soft clip
  *   tops out at 31600) with no flat tops, and leaves the limiter no busier than LOWCUT (its envelope's peak at most
  *   +0.5 dB): the harmonics of 1.4 peaked at 1.5 .. 3.5 x the kick itself, and the limiter pulled the whole mix down
@@ -63,32 +64,37 @@ static void master_reset(uint32_t mode)
 }
 
 #define HD_MAX -9.0       /* the harmonics' energy against the kick's, dB (1.4: -5.0 .. -6.2) */
+/* a kick (the test's own, float, after drum_voice.c's KICK, retired): a sine swept from (1 + sw) x 50 Hz down to 50 Hz
+ * (time constant tp s), its 2nd and 3rd harmonics (h2, h3), a click of two cycles of fc Hz under a raised cosine,
+ * decaying with ta s, soft-clipped by tanh(drv x) */
+typedef struct { double sw, tp, h2, h3, fc, ta, drv; } kick_t;
+static void kick_render(float *out, uint32_t n, const kick_t *k)
+{
+    double ph = 0;
+    uint32_t i, nc = (uint32_t)(2.0 * FS / k->fc);
+    for (i = 0; i < n; i++) {
+        double t = (double)i / FS, f = 50.0 * (1.0 + k->sw * exp(-t / k->tp)), x;
+        ph += 2.0 * M_PI * f / FS;
+        x = (sin(ph) + k->h2 * sin(2.0 * ph) + k->h3 * sin(3.0 * ph)) * exp(-t / k->ta);
+        if (i < nc)
+            x += 0.6 * sin(2.0 * M_PI * k->fc * t) * 0.5 * (1.0 - cos(2.0 * M_PI * i / nc));
+        out[i] = (float)tanh(k->drv * x);
+    }
+}
 /* #180: a kick pattern (4 hits, one each 0.5 s) at 1 and 2 x full scale through each mode; fails counted */
 static uint32_t kick_pattern(void)
 {
     static const char *const NAME[2] = {"PUNCH", "ROUND"};
-    static float f[2 * FS];
-    static dv_coef_t c;
-    static dv_voice_t v;
-    static dv_metal_t mb;
-    uint32_t type, gi, mode, i, k, fails = 0;
+    static const kick_t K[2] = {{6.0, 0.02, 0.3, 0.15, 3000.0, 0.2, 1.5}, {1.0, 0.06, 0.5, 0.3, 1500.0, 0.35, 2.0}};
+    static float f[2 * FS], one[FS / 2u];
+    uint32_t type, gi, mode, i, fails = 0;
     for (type = 0; type < 2u; type++) {
-        dv_param_t p;
-        int32_t y[CTL], m[CTL], pk = 1;
-        dv_default(&p, type);
-        dv_setup(&c, &p);
-        dv_init(&v, c.type);
-        memset(&mb, 0, sizeof mb);
-        dv_metal_tune(&mb, &c);
-        for (i = 0; i < 2u * FS; i += CTL) {
-            if (i % (FS / 2u) < CTL)
-                dv_trigger(&v);
-            dv_metal_run(&mb, m, CTL);
-            dv_run(&c, &v, m, y, CTL);
-            for (k = 0; k < CTL; k++) {
-                f[i + k] = (float)y[k];
-                pk = abs(y[k]) > pk ? abs(y[k]) : pk;
-            }
+        int32_t pk = 1;
+        kick_render(one, FS / 2u, &K[type]);
+        for (i = 0; i < 2u * FS; i++) {
+            int32_t y = (int32_t)(20000.0f * one[i % (FS / 2u)]);
+            f[i] = (float)y;
+            pk = abs(y) > pk ? abs(y) : pk;
         }
         for (gi = 1; gi <= 2u; gi++) {
             int32_t env[3], peak = 0;

@@ -1,16 +1,17 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* Host test of the VOID engine (eng_void.c), same sources as the firmware (hostsim.c):
  *   build/host/void_test [DEMO_DIR]      (run_tests.sh builds and runs it; demos in build/void_demo/)
- * 1. the engine: number 14 (ENGI_VOID), its knobs, its presets.
+ * 1. the engine: number 1 (ENGI_WAVE, "WAVE"), its knobs, its presets.
  * 2. pitch: SINE at A4 is 440 Hz within the plugin's movement (drift +-1.5 cents, micro-LFO up to 2.5); OSC2 +12
  *    alone an octave up; the fine steps (-12c) as many cents.
  * 3. band-limited: SAW, SQUARE and SPECTRAL (its top position) at C8: what is not a harmonic below -30 dB (the
  *    linear read of a level at 4 samples per cycle of its top harmonic; the plugin aliases at ~-10 dB here).
  * 4. bounded: every table x every filter TYPE at RES 127 and DRV 127, CUT 0 / 127, C1 / C4 / C8, POS 0 / 127: no
  *    wrapped sample (a jump over full scale), no DC; a TYPE and table change while notes sound.
- * 5. the presets: each sounds, its loudest 0.2 s of a held chord (a pluck decays, a pad swells) near ANALOG's SAW
+ * 5. the presets: each sounds, its loudest 0.2 s of a held chord (a pluck decays, a pad swells) near OB-Z's SAW
  *    LEAD (-18 .. +6 dB: the plugin's LP24 at a high RES loses its pass band, as a ladder does).
- * 6. the cost: each preset at VOID's voice cap against 8 voices of PHASE WIRE, the heaviest before it (instructions).
+ * 6. the cost: each preset at WAVE's voice cap against 8 voices of OB-Z RAVE (instructions; the reference was PHASE
+ *    WIRE, retired, whose cost was within 2 % of OB-Z RAVE's on the host).
  * 7. demos (DEMO_DIR): each preset playing a phrase, a POS sweep per table.
  * 8. against the plugin: eng_void.c's filter and the plugin's own Filter.cpp (build/void_ref, tools/void_ref.cpp:
  *    skipped without it) on the same saw: the level, and the harmonics within 50 dB of the loudest. */
@@ -79,7 +80,7 @@ static void fresh(uint32_t e, uint32_t pi)
 static track_t *plain(uint32_t tb1, uint32_t tb2, uint32_t mix, uint32_t osc2, uint32_t ft)
 {
     track_t *t = &trk[0];
-    fresh(ENGI_VOID, 0);
+    fresh(ENGI_WAVE, 0);
     t->p[P_DIST] = t->p[P_CHOR] = t->p[P_DLY] = t->p[P_REV] = 0;
     t->p[P_ATK] = 0;
     t->p[P_DEC] = 0;
@@ -129,9 +130,9 @@ static double cents(double f, double ref) { return 1200.0 * log2(f / ref); }
 /* ------------------------------------------------------------------ 1 --- */
 static void test_engine(void)
 {
-    const engine_t *e = ENGINES[ENGI_VOID];
-    check("engine 14 is VOID, two EDIT pages of four (TBL1 POS TBL2 MIX, CUT RES OSC2 DRV), presets",
-          str_eq(e->name, "VOID") && str_eq(e->edit[0].label, "TBL1") && str_eq(e->edit[4].label, "CUT") &&
+    const engine_t *e = ENGINES[ENGI_WAVE];
+    check("engine 1 is WAVE, two EDIT pages of four (TBL1 POS TBL2 MIX, CUT RES OSC2 DRV), presets",
+          str_eq(e->name, "WAVE") && str_eq(e->edit[0].label, "TBL1") && str_eq(e->edit[4].label, "CUT") &&
           str_eq(e->edit[6].label, "OSC2") && str_eq(e->edit[7].label, "DRV") && e->npresets >= 5u && e->mem);
 }
 
@@ -292,12 +293,12 @@ static void test_presets(void)
         if (str_eq(ENGINES[0]->presets[k].name, "SAW LEAD"))
             a = k;
     ref = phrase_rms(0, a);
-    for (k = 0; k < ENGINES[ENGI_VOID]->npresets; k++) {
-        double r = phrase_rms(ENGI_VOID, k), db = 20 * log10(r / ref + 1e-12);
-        printf("void: preset %-12s %+5.1f dB against ANALOG SAW LEAD\n", ENGINES[ENGI_VOID]->presets[k].name, db);
+    for (k = 0; k < ENGINES[ENGI_WAVE]->npresets; k++) {
+        double r = phrase_rms(ENGI_WAVE, k), db = 20 * log10(r / ref + 1e-12);
+        printf("void: preset %-12s %+5.1f dB against OB-Z SAW LEAD\n", ENGINES[ENGI_WAVE]->presets[k].name, db);
         ok &= db > -18.0 && db < 6.0;
     }
-    check("presets: each sounds, its loudest 0.2 s within -18 .. +6 dB of ANALOG's SAW LEAD", ok);
+    check("presets: each sounds, its loudest 0.2 s within -18 .. +6 dB of OB-Z's SAW LEAD", ok);
 }
 
 /* ------------------------------------------------------------------ 6 --- */
@@ -341,19 +342,19 @@ static void test_cost(void)
         printf("void: cost: no instruction counter on this host, skipped\n");
         return;
     }
-    for (e = 0; e < NENGINES; e++)                     /* PHASE WIRE: the heaviest preset before VOID */
-        if (str_eq(ENGINES[e]->name, "PHASE"))
+    for (e = 0; e < NENGINES; e++)                     /* OB-Z RAVE: the reference (PHASE WIRE's cost, retired) */
+        if (str_eq(ENGINES[e]->name, "OB-Z"))
             for (k = 0; k < ENGINES[e]->npresets; k++)
-                if (str_eq(ENGINES[e]->presets[k].name, "WIRE"))
+                if (str_eq(ENGINES[e]->presets[k].name, "RAVE"))
                     ph = e, pw = k;
     a = cost(ph, pw);
-    for (k = 0; k < ENGINES[ENGI_VOID]->npresets; k++) {   /* (cost() asks for 8 notes: the cap plays VOID_POLY) */
-        double c = cost(ENGI_VOID, k);
-        printf("void: cost: %-12s %u voices %.0f instructions / sample (PHASE WIRE, 8: %.0f; %.2f x)\n",
-               ENGINES[ENGI_VOID]->presets[k].name, VOID_POLY, c, a, c / a);
+    for (k = 0; k < ENGINES[ENGI_WAVE]->npresets; k++) {   /* (cost() asks for 8 notes: the cap plays VOID_POLY) */
+        double c = cost(ENGI_WAVE, k);
+        printf("void: cost: %-12s %u voices %.0f instructions / sample (OB-Z RAVE, 8: %.0f; %.2f x)\n",
+               ENGINES[ENGI_WAVE]->presets[k].name, VOID_POLY, c, a, c / a);
         worst = c / a > worst ? c / a : worst;
     }
-    snprintf(msg, sizeof msg, "cost: any preset at its cap (%u voices) within 1.25 x 8 of PHASE WIRE (%.2f x)", VOID_POLY, worst);
+    snprintf(msg, sizeof msg, "cost: any preset at its cap (%u voices) within 1.25 x 8 of OB-Z RAVE (%.2f x)", VOID_POLY, worst);
     check(msg, worst < 1.25);
 }
 
@@ -388,9 +389,9 @@ static void demos(const char *dir)
     static const uint8_t PHR[8] = {36, 43, 48, 36, 39, 46, 51, 39};
     uint32_t k, i, tb;
     char nm[64];
-    for (k = 0; k < ENGINES[ENGI_VOID]->npresets; k++) {
+    for (k = 0; k < ENGINES[ENGI_WAVE]->npresets; k++) {
         track_t *t = &trk[0];
-        fresh(ENGI_VOID, k);
+        fresh(ENGI_WAVE, k);
         void_track_loaded(t);
         for (i = 0; i < (t->p[P_ATK] > 80 ? 2u : 8u); i++) {   /* (a slow attack: two long chords) */
             trk_note_on(t, PHR[i] + (t->p[P_VOICE] == V_POLY ? 12u : 0u), 100);
@@ -400,7 +401,7 @@ static void demos(const char *dir)
             trk_note_off(t, PHR[i] + (t->p[P_VOICE] == V_POLY ? 12u : 0u));
             trk_note_off(t, PHR[i] + 19u);
         }
-        snprintf(nm, sizeof nm, "preset_%02u_%s", k, ENGINES[ENGI_VOID]->presets[k].name);
+        snprintf(nm, sizeof nm, "preset_%02u_%s", k, ENGINES[ENGI_WAVE]->presets[k].name);
         for (i = 0; nm[i]; i++)
             if (nm[i] == ' ')
                 nm[i] = '_';
@@ -542,19 +543,18 @@ int prof_main(void)
     printf("LP24 mix64           %.0f\n", costv(64, 0, 0, 0, 0) - id);
     printf("LP24 mix64 drv40     %.0f\n", costv(64, 0, 40, 0, 0) - id);
     printf("LP12 mix64 res110    %.0f\n", costv(64, 3, 0, 110, 0) - id);
-    printf("ANALOG SAW LEAD      %.0f\n", cost(0, 0) - id);
+    printf("OB-Z SAW LEAD        %.0f\n", cost(0, 0) - id);
     {
-        static const char *const W[][2] = {{"ANALOG", "SUB BASS"}, {"NOISE", "ARCADE"}, {"FM6", "PAD"}, {"PHASE", "WIRE"},
-                                           {"PHYS", "BOWED METAL"}, {"TRIO", "CHIP CHOIR"}};
+        static const char *const W[][2] = {{"OB-Z", "SUB BASS"}, {"OB-Z", "RAVE"}};
         uint32_t k, e, q;
-        for (k = 0; k < 6u; k++)
+        for (k = 0; k < NELEM(W); k++)
             for (e = 0; e < NENGINES; e++)
                 if (str_eq(ENGINES[e]->name, W[k][0]))
                     for (q = 0; q < ENGINES[e]->npresets; q++)
                         if (str_eq(ENGINES[e]->presets[q].name, W[k][1]))
                             printf("%-7s %-12s %.0f\n", W[k][0], W[k][1], cost(e, q) - id);
-        for (q = 0; q < ENGINES[ENGI_VOID]->npresets; q++)
-            printf("VOID    %-12s %.0f\n", ENGINES[ENGI_VOID]->presets[q].name, cost(ENGI_VOID, q) - id);
+        for (q = 0; q < ENGINES[ENGI_WAVE]->npresets; q++)
+            printf("WAVE    %-12s %.0f\n", ENGINES[ENGI_WAVE]->presets[q].name, cost(ENGI_WAVE, q) - id);
     }
     return 0;
 }

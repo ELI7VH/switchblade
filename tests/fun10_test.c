@@ -157,7 +157,7 @@ static int lfo(void)
     }
     bad += check("LFO 2 is no automation (motion_param), its page SYNC TRIG POL after LFO (LFO's family)",
                  !motion_param(P_LSYNC) && !motion_param(P_LTRIG) && !motion_param(P_LPOL) && !motion_param(P_SQNT) &&
-                 motion_param(P_LN7) && motion_param(P_E0) && PAGES[3].id[0] == P_LSYNC && !strcmp(PAGES[3].title, "LFO 2") &&
+                 !motion_param(P_RSV_LN_END) && motion_param(P_REV) && motion_param(P_E0) && PAGES[3].id[0] == P_LSYNC && !strcmp(PAGES[3].title, "LFO 2") &&
                  PAGES[3].fam == FAM_LFO && PAGES[2].graph == GR_LFO && !strcmp(PAGES[4].title, "LFO DEST"));
     go_page(GR_LFO);
     ui.page++;                                       /* LFO 2 */
@@ -421,31 +421,35 @@ static int nudge(void)
         bad += check("  EDIT: back to 0 (the row goes)", ok && ev_list(rw) == n);
         t->p[P_SQNT] = 1;
     }
-    {   /* the DRUM grid on STEP: a step key held + the PRESETS knob; let go: the hit stays */
-        uint32_t k4;
-        song.sel = 3;
-        t = &trk[3];
+    {   /* STEP, armed and stopped (step recording): a note key held is the step held; + the PRESETS knob: its NUDGE */
+        uint32_t kn, cur;
+        song.sel = 0;
+        t = &trk[0];
         track_defaults_steps(t);
         t->p[P_SLEN] = 16;
         t->p[P_SQNT] = 0;
+        song.playing = 0;
+        song.rec = 1;
         go_home();
         open_family(FAM_SEQ);
         frame();
-        grid_hit(t, 4, 0, 1);
-        k4 = key_at(0, 4);
-        uint32_t cur;
-        fm1_in.notes |= 1u << k4; host_notes |= 1u << k4; frame();
+        cursor_set(4);
+        for (kn = 0; kn < 27u && kb_map(t, kn) > 127u; kn++)
+            ;
+        fm1_in.notes |= 1u << kn; host_notes |= 1u << kn; frame();
         cur = ui.cursor;
         turn(EN_PRESET, -1); turn(EN_PRESET, -1);
-        ok = step_nudge(&t->step[4]) == -2 && msg_is("NUDGE -2") && ui.cursor == cur;
-        fm1_in.notes &= ~(1u << k4); frame();
-        ok &= (t->step[4].hit & 1u) != 0u;
+        ok = cur == 4u && t->step[4].n == 1u && step_nudge(&t->step[4]) == -2 && msg_is("NUDGE -2") && ui.cursor == cur;
+        fm1_in.notes &= ~(1u << kn); frame();
+        ok &= t->step[4].n == 1u;
+        cur = ui.cursor;
         turn(EN_PRESET, 1);
         ok &= ui.cursor == cur + 1u && step_nudge(&t->step[4]) == -2;
-        bad += check("STEP (the grid): a step held + PRESETS: its NUDGE (-2); let go, the hit stays; alone, the cursor", ok);
+        bad += check("STEP (step recording): a note held + PRESETS: its NUDGE (-2); let go, the note stays; alone, the cursor", ok);
         hold(B_SAVE);
-        bad += check("  SAVE held: that turn undone (one undo), the hit kept", step_nudge(&t->step[4]) == 0 &&
-                     (t->step[4].hit & 1u) != 0u);
+        bad += check("  SAVE held: that turn undone (one undo), the note kept", step_nudge(&t->step[4]) == 0 &&
+                     t->step[4].n == 1u);
+        song.rec = 0;
     }
     return bad;
 }
@@ -606,19 +610,17 @@ static int formats(void)
         ok &= !proj_import(&b, c9, sizeof c9);
         bad += check("  a FUN9 claiming 65 records, a value out of -64..127 or a note byte above 127: refused", ok);
     }
-    for (k = 0; k < NTRK; k++)                       /* (FUN8 / FUN7: no lane levels, no locks then) */
-        for (i = P_LN0; i <= P_LN7; i++)
+    for (k = 0; k < NTRK; k++)                       /* (FUN8 / FUN7: no lane levels (the reserved ids' default), no locks then) */
+        for (i = P_RSV_LN; i <= P_RSV_LN_END; i++)
             a.t[k].p[i] = 127;
     a.motion.event[9].param &= 0x7Fu;
     a.sum = proj_sum(&a);
     ok = old_pack(v8, &a, OLD_FUN8, 91u) == sizeof v8 && proj_import(&b, v8, sizeof v8) && !memcmp(&a, &b, sizeof a);
     bad += check("FUN8 (1.0.x, 91 parameters): exactly the project", ok);
-    for (k = 0; k < NTRK; k++)
-        memcpy(a.fm6[k], FM6_INIT, FM6_PACKED);
     a.g[G_RTYPE] = 1;                                /* (a FUN7 knew ROOM and SPRING: above, the old drum channel) */
     a.sum = proj_sum(&a);
     ok = old_pack(v7, &a, OLD_FUN7, 91u) == sizeof v7 && proj_import(&b, v7, sizeof v7) && !memcmp(&a, &b, sizeof a);
-    bad += check("FUN7 (91 parameters): exactly the project, the init patches", ok);
+    bad += check("FUN7 (91 parameters): exactly the project", ok);
     for (i = 0; i < 2u; i++) {                        /* a retained slot of 3840 holding the older records */
         static project_store_t slot;
         memset(&slot, 0xA5, sizeof slot);
@@ -648,7 +650,7 @@ static int formats(void)
         r.np = 99;                                    /* as 1.1 stored it: the engine's 8 after its 91 */
         for (i = 0; i < 8u; i++) up_set_value(&r, 91u + i, (int16_t)(10 + i));
         up_params(&r, v, def);
-        ok &= v[P_LSYNC] == 0 && v[P_LPOL] == 0 && v[P_SQNT] == 1 && v[P_E0] == 10 && v[P_E7] == 17 && v[P_LN7] == t->p[P_LN7];
+        ok &= v[P_LSYNC] == 0 && v[P_LPOL] == 0 && v[P_SQNT] == 1 && v[P_E0] == 10 && v[P_E7] == 17 && v[P_RSV_LN_END] == t->p[P_RSV_LN_END];
         r.np = 103;                                   /* a 1.2 build before SPREAD: its 95, then the engine's 8 */
         for (i = 0; i < 95u; i++) up_set_value(&r, i, t->p[i]);
         for (i = 0; i < 8u; i++) up_set_value(&r, 95u + i, (int16_t)(20 + i));

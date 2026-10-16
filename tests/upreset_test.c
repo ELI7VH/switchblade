@@ -2,8 +2,8 @@
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
 /* Host test of the user preset record (firmware/src/upreset.c, -DUP_HOST part):
  * UP_PUT parsing, a bank round trip through storage.c on a simulated NOR,
- * bank / record version checks, map-by-count, pattern <-> steps, PHYS MODEL DRUM records -> the DRUM engine,
- * drum grid records (version 3: UP_PUT's kind 1 and its high bits, a round trip). */
+ * bank / record version checks, map-by-count, pattern <-> steps; the retired drum grid records (versions 3 and 5)
+ * read as empty, UP_PUT's kind 1 is refused, a record of an engine number >= NENGINES reads as empty. */
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -86,12 +86,9 @@ int main(void)
     bad += check("UP_PUT slot 32 -> args", up_parse(a, n, &r, &slot) == 1);
     n = put_frame(a, 0, NENGINES, "X", 0);
     bad += check("UP_PUT bad engine -> args", up_parse(a, n, &r, &slot) == 1);
-    n = put_frame(a, 3, ENGI_DIGITAL, "OLD FM", 0);   /* (DIGITAL, retired: a record keeps it, its load converts) */
-    bad += check("UP_PUT engine 1 (DIGITAL): kept as it is", up_parse(a, n, &r, &slot) == 0 && slot == 3u &&
-                                                        r.engine == ENGI_DIGITAL && up_valid(&r));
-    up_migrate(&r);
-    bad += check("  a bank read keeps it engine 1 (its values DIGITAL's)", r.engine == ENGI_DIGITAL && up_value(&r, P_E4) ==
-                                                                       (int16_t)P_E4);
+    n = put_frame(a, 3, NENGINES - 1u, "LAST", 0);
+    bad += check("UP_PUT engine NENGINES - 1 (DRIFT) ok", up_parse(a, n, &r, &slot) == 0 && slot == 3u &&
+                                                        r.engine == NENGINES - 1u && up_valid(&r));
     n = put_frame(a, 0, 0, "", 0);
     bad += check("UP_PUT empty name -> args", up_parse(a, n, &r, &slot) == 1);
     n = put_frame(a, 0, 0, "THIRTEEN CHRS", 0);
@@ -134,39 +131,53 @@ int main(void)
     up_bank[1].rsize = sizeof(up_rec_t);
     up_bank[1].nslot = UP_PER_BANK;
     *up_rec(17) = r;
-    up_rec(17)->ver = UP_VER_GRID + 1u;
+    up_rec(17)->ver = UP_VER + 2u;
     bad += check("record with another version -> empty", !up_used(17));
-    up_rec(17)->ver = UP_VER_GRID;
-    bad += check("a version 3 record (a drum grid) is used", up_used(17));
+    up_rec(17)->ver = 3u;
+    bad += check("a version 3 record (a drum grid) -> empty", !up_used(17));
+    up_rec(17)->ver = UP_VER + 1u;
+    bad += check("a version 5 record (a packed drum grid) -> empty", !up_used(17));
+    up_rec(17)->ver = UP_VER;
+    bad += check("  the same record as version 4 is used", up_used(17));
+    up_rec(17)->engine = NENGINES;
+    bad += check("a record of engine NENGINES (a retired one) -> empty", !up_used(17));
+    up_rec(17)->engine = 0xFFu;
+    bad += check("a record of engine 255 -> empty", !up_used(17));
+    up_rec(17)->engine = r.engine;
+    *up_rec(16) = r;                                        /* a bank read: a retired engine number, a grid record */
+    up_rec(16)->engine = 9u;
+    *up_rec(18) = r;
+    up_rec(18)->ver = 3u;
+    st_save(OBJ_UPRESET0 + 1, &up_bank[1], sizeof up_bank[1]);
+    memset(up_bank, 0, sizeof up_bank);
+    up_bank_check(1, st_load(OBJ_UPRESET0 + 1, &up_bank[1], sizeof up_bank[1]));
+    bad += check("bank load: retired engine / grid records empty, others kept",
+                 !up_used(16) && !up_used(18) && up_used(17) && !memcmp(up_rec(17), &r, sizeof r));
 
-    /* a drum grid by UP_PUT: kind 1, then bit 7 of each step's hits (bit 0) and accents (bit 1) */
+    /* UP_PUT's optional tail: kind 0 (16 bytes ignored) is a note pattern; kind 1 (the retired drum grid) is refused */
     {
         uint8_t g[640];
-        uint32_t k, m = put_frame(g, 9, ENGI_DRUM, "My Beat", 0), at = m - 32u;
+        uint32_t k, m = put_frame(g, 9, ENGI_ACID, "My Beat", 0), at = m - 32u;
         for (k = 0; k < 16u; k++) {
-            g[at + 2u * k] = (uint8_t)(k % 4u ? 0x08u : 0x09u);    /* HAT CL, the kick on the beats */
-            g[at + 2u * k + 1u] = (uint8_t)(k == 0u ? 0x7Fu : 0u);  /* step 1: every lane's accent (one too many) */
+            g[at + 2u * k] = (uint8_t)(k % 4u ? 0x08u : 0x09u);    /* notes 8 / 9 */
+            g[at + 2u * k + 1u] = (uint8_t)(k == 0u ? 0x7Fu : 0u);  /* step 1: every flag bit (a tie) */
         }
         g[m++] = 1;
         for (k = 0; k < 16u; k++)
-            g[m++] = (uint8_t)(k == 2u ? 3u : k == 5u ? 2u : 0u);  /* step 3: BELL hit + accent; 6: an accent alone */
-        ok = up_parse(g, m, &got, &slot) == 0 && slot == 9u && got.ver == UP_VER_GRID && up_valid(&got) &&
-             got.note[0] == 0x09u && got.flags[0] == 0x09u && got.note[1] == 0x08u && !got.flags[1] &&
-             got.note[2] == 0x88u && got.flags[2] == 0x80u && got.note[5] == 0x08u && !got.flags[5] &&
-             got.engine == ENGI_DRUM && !up_pat_empty(&got);
-        bad += check("UP_PUT kind 1: a grid record, accents only on hits", ok);
+            g[m++] = (uint8_t)(k == 2u ? 3u : k == 5u ? 2u : 0u);  /* (the old grid's hit / accent bits) */
+        bad += check("UP_PUT kind 1 (a drum grid) refused", up_parse(g, m, &got, &slot) == 1);
         g[m - 17u] = 0;                                     /* kind 0: the notes and flags as before */
-        ok = up_parse(g, m, &got, &slot) == 0 && got.ver == UP_VER && got.note[2] == 0x08u && got.flags[0] == 4u;   /* (flags 0x7F: a tie) */
-        bad += check("UP_PUT kind 0: a note pattern (version 2)", ok);
-        g[m - 17u] = 1;
+        ok = up_parse(g, m, &got, &slot) == 0 && slot == 9u && got.ver == UP_VER && got.engine == ENGI_ACID &&
+             got.note[2] == 0x08u && got.flags[0] == 4u && up_valid(&got);   /* (flags 0x7F: a tie) */
+        bad += check("UP_PUT kind 0: a note pattern (version 4)", ok);
         {
             up_rec_t keep = got;
             ok = up_parse(g, m - 1u, &got, &slot) == 1 && !memcmp(&got, &keep, sizeof got);
-            bad += check("UP_PUT short grid rejected, record unchanged", ok);
+            bad += check("UP_PUT short tail rejected, record unchanged", ok);
             g[m - 17u] = 2;
             bad += check("UP_PUT unknown kind rejected", up_parse(g, m, &got, &slot) == 1 &&
                                                          !memcmp(&got, &keep, sizeof got));
-            g[m - 17u] = 1;
+            g[m - 17u] = 0;
             g[m] = CAT_N;                               /* (1.2: one byte more is the category, 0..CAT_N - 1) */
             g[m + 1u] = 0;
             bad += check("UP_PUT trailing byte rejected (no category; two bytes)", up_parse(g, m + 1u, &got, &slot) == 1 &&
@@ -178,87 +189,7 @@ int main(void)
         st_save(OBJ_UPRESET0 + 1, &up_bank[1], sizeof up_bank[1]);
         memset(up_bank, 0, sizeof up_bank);
         up_bank_check(1, st_load(OBJ_UPRESET0 + 1, &up_bank[1], sizeof up_bank[1]));
-        bad += check("a grid record: bank round trip", up_used(20) && !memcmp(up_rec(20), &got, sizeof got));
-    }
-
-    /* PHYS MODEL DRUM (before 1.0) -> the DRUM engine: from flash (a record of an older layout too), by UP_PUT */
-    {
-        static const int16_t OLD[8] = {4, 70, 80, 60, 50, 110, 100, 70}, NEW[8] = {2, 70, 80, 60, 50, 110, 1, 0};
-        up_rec_t d = r, m = r, o = r;
-        uint32_t k;
-        d.engine = ENGI_PHYS;
-        m.engine = ENGI_PHYS;                               /* MEMB: stays PHYS */
-        o.engine = ENGI_PHYS;
-        o.np = P_COUNT - 2u;                                /* an older layout: E0 at np - 8 */
-        for (k = 0; k < 8u; k++) {
-            up_set_value(&d, P_E0 + k, OLD[k]);
-            up_set_value(&m, P_E0 + k, (int16_t)(k ? 9 : 2));
-            up_set_value(&o, o.np - 8u + k, OLD[k]);
-        }
-        *up_rec(16) = d;
-        *up_rec(17) = m;
-        *up_rec(18) = o;
-        st_save(OBJ_UPRESET0 + 1, &up_bank[1], sizeof up_bank[1]);
-        memset(up_bank, 0, sizeof up_bank);
-        up_bank_check(1, st_load(OBJ_UPRESET0 + 1, &up_bank[1], sizeof up_bank[1]));
-        ok = up_used(16) && up_rec(16)->engine == ENGI_DRUM && up_used(17) && up_rec(17)->engine == ENGI_PHYS &&
-             !memcmp(up_rec(17)->p, m.p, sizeof m.p) && up_used(18) && up_rec(18)->engine == ENGI_DRUM &&
-             up_rec(16)->ver == UP_VER;
-        for (k = 0; k < 8u; k++)
-            ok &= up_value(up_rec(16), P_E0 + k) == NEW[k] && up_value(up_rec(18), o.np - 8u + k) == NEW[k];
-        bad += check("bank load: PHYS DRUM -> DRUM engine, MEMB kept", ok);
-        n = put_frame(a, 3, ENGI_PHYS, "Old kit", 0);
-        for (k = 0; k < 8u; k++) {                          /* E0..E7 of the frame: OLD */
-            uint32_t at = 3u + 7u + 1u + 2u * (P_E0 + k), u = (uint32_t)(OLD[k] + 8192);
-            a[at - 1u] = u & 127u;
-            a[at] = (u >> 7) & 127u;
-        }
-        ok = up_parse(a, n, &got, &slot) == 0 && got.engine == ENGI_DRUM;
-        for (k = 0; k < 8u; k++)
-            ok &= up_value(&got, P_E0 + k) == NEW[k];
-        bad += check("UP_PUT of PHYS DRUM -> DRUM engine", ok);
-    }
-
-    /* SAMPLE SET 4 (PERC, the GM kit, retired after 1.0.2) -> the DRUM engine with its default kit: from flash (an
-     * older layout too), by UP_PUT; the rest of the sound and the pattern as stored; another SET stays SAMPLE */
-    {
-        static const int16_t KIT[8] = DRUM_KIT_E;
-        up_rec_t d = r, m = r, o = r, before;
-        uint32_t k;
-        d.engine = m.engine = o.engine = ENGI_SAMPLE;
-        o.np = P_COUNT - 2u;                                /* an older layout: E0 at np - 8 */
-        for (k = 0; k < 8u; k++) {
-            up_set_value(&d, P_E0 + k, (int16_t)(k ? 30 + k : SMP_SET_PERC));
-            up_set_value(&m, P_E0 + k, (int16_t)(k ? 30 + k : 2));   /* FLUTE: stays SAMPLE */
-            up_set_value(&o, o.np - 8u + k, (int16_t)(k ? 30 + k : SMP_SET_PERC));
-        }
-        *up_rec(19) = d;
-        *up_rec(20) = m;
-        *up_rec(21) = o;
-        st_save(OBJ_UPRESET0 + 1, &up_bank[1], sizeof up_bank[1]);
-        memset(up_bank, 0, sizeof up_bank);
-        up_bank_check(1, st_load(OBJ_UPRESET0 + 1, &up_bank[1], sizeof up_bank[1]));
-        ok = up_used(19) && up_rec(19)->engine == ENGI_DRUM && up_used(20) && up_rec(20)->engine == ENGI_SAMPLE &&
-             !memcmp(up_rec(20)->p, m.p, sizeof m.p) && up_used(21) && up_rec(21)->engine == ENGI_DRUM &&
-             !memcmp(up_rec(19)->note, d.note, sizeof d.note) && !memcmp(up_rec(19)->flags, d.flags, sizeof d.flags);
-        for (k = 0; k < 8u; k++)
-            ok &= up_value(up_rec(19), P_E0 + k) == KIT[k] && up_value(up_rec(21), o.np - 8u + k) == KIT[k];
-        for (k = 0; k < P_E0; k++)
-            ok &= up_value(up_rec(19), k) == up_value(&d, k);
-        bad += check("bank load: SAMPLE PERC -> DRUM kit, FLUTE kept", ok);
-        before = *up_rec(19);
-        up_migrate(up_rec(19));
-        bad += check("  migrated again: as it is", !memcmp(up_rec(19), &before, sizeof before));
-        n = put_frame(a, 3, ENGI_SAMPLE, "Old perc", 0);
-        {
-            uint32_t at = 3u + 8u + 1u + 2u * P_E0, u = (uint32_t)(SMP_SET_PERC + 8192);   /* E0 of the frame: SET 4 */
-            a[at - 1u] = u & 127u;
-            a[at] = (u >> 7) & 127u;
-        }
-        ok = up_parse(a, n, &got, &slot) == 0 && got.engine == ENGI_DRUM;
-        for (k = 0; k < 8u; k++)
-            ok &= up_value(&got, P_E0 + k) == KIT[k];
-        bad += check("UP_PUT of SAMPLE PERC -> DRUM kit", ok);
+        bad += check("a kind 0 record: bank round trip", up_used(20) && !memcmp(up_rec(20), &got, sizeof got));
     }
 
     /* map by count: a record from a build with 2 parameters fewer */
@@ -282,7 +213,7 @@ int main(void)
         r.p[i] = (int16_t)(2000 + i);
     up_params(&r, v, def);
     ok = P_SLCR == 45 && P_SLDEPTH + 1 == P_M1SRC && P_M4AMT + 1 == P_FM1_ATK && P_FM4_LEVEL + 1 == P_CHRD &&
-         P_VOIC + 1 == P_LN0 && P_LN7 + 1 == P_LSYNC && P_SQNT + 1 == P_SPRD && P_SPRD + 1 == P_ITYPE &&
+         P_VOIC + 1 == P_RSV_LN && P_RSV_LN_END + 1 == P_LSYNC && P_SQNT + 1 == P_SPRD && P_SPRD + 1 == P_ITYPE &&
          P_IMIX + 1 == P_FTYPE && P_ESYNC + 1 == P_E0 && P_E0 == 103 && P_COUNT == 111;
     for (i = 0; i < 45u; i++)
         ok &= v[i] == (int16_t)(2000 + i);
@@ -305,15 +236,15 @@ int main(void)
     for (i = 0; i < 8u; i++)
         ok &= v[P_E0 + i] == (int16_t)(3000 + 49 + i);
     bad += check("old record (np 57): SLICER kept, matrix defaults, E0..E7 kept", ok);
-    /* records of versions 4 (packed bytes) and 5 (a drum grid) saved before the DRUM lane levels (1.0.x: P_COUNT 91,
+    /* records of version 4 (packed bytes) saved before the DRUM lane levels (1.0.x: P_COUNT 91,
      * P_E0 83), before the chord keys (89, P_E0 81) and before the FM operator ENVs (69, P_E0 61): their engine
      * values land on today's E0..E7 (91..98), the lane levels (100 %) and the chord keys their defaults (OFF, CLOSE), the
      * operator parameters too for 69 */
     {
-        static const uint8_t VERS[2] = {UP_VER, UP_VER_GRID}, NPS[3] = {91, 89, 69};
+        static const uint8_t VERS[1] = {UP_VER}, NPS[3] = {91, 89, 69};
         uint32_t a, b;
         ok = 1;
-        for (a = 0; a < 2u; a++)
+        for (a = 0; a < 1u; a++)
             for (b = 0; b < 3u; b++) {
                 uint32_t np = NPS[b];
                 up_rec_t o;
@@ -331,7 +262,7 @@ int main(void)
                 for (i = 0; i < 8u; i++)
                     ok &= v[P_E0 + i] == (int16_t)((np - 8u + i) % 100u - 30);
             }
-        bad += check("v4 / v5 records of 91, 89 and 69 parameters: E0..E7 at P_E0, lane levels and chord keys defaults", ok);
+        bad += check("v4 records of 91, 89 and 69 parameters: E0..E7 at P_E0, lane levels and chord keys defaults", ok);
     }
     r.ver = UP_VER;
     r.np = P_COUNT;
@@ -360,7 +291,7 @@ int main(void)
         bad += check("empty sequencer -> empty pattern", up_pat_empty(&r));
     }
     {   /* 1.2 (Discussion #90): the category, the record's last byte (UP_CAT_AT), outside its values; UP_PUT's optional
-         * last byte; through a bank's flash round trip; a record of before reads its engine's; versions 2 / 3 converted */
+         * last byte; through a bank's flash round trip; a record of before reads its engine's; version 2 converted */
         n = put_frame(a, 17, 0, "CAT", 0);
         a[n++] = 0;
         for (i = 0; i < 16u; i++) a[n++] = 0;
@@ -368,8 +299,8 @@ int main(void)
         ok = !up_parse(a, n, &r, &slot) && up_cat_of(&r) == CAT_KEYS && UP_CAT_AT >= P_COUNT && r.np == P_COUNT;
         a[n - 1u] = CAT_N;
         ok &= up_parse(a, n, &got, &slot) == 1;
-        n = put_frame(a, 17, ENGI_DRUM, "KIT", 0);
-        ok &= !up_parse(a, n, &got, &slot) && up_cat_of(&got) == CAT_DRUM && !got.packed[UP_CAT_AT];
+        n = put_frame(a, 17, ENGI_WAVE, "WAVE", 0);
+        ok &= !up_parse(a, n, &got, &slot) && up_cat_of(&got) == cat_of_engine(ENGI_WAVE) && !got.packed[UP_CAT_AT];
         bad += check("category: UP_PUT's last byte, none = the engine's", ok);
         memset(&up_bank[1], 0, sizeof up_bank[1]);
         up_bank[1].magic = UP_BANK_MAGIC; up_bank[1].rsize = sizeof(up_rec_t); up_bank[1].nslot = UP_PER_BANK;
@@ -379,19 +310,19 @@ int main(void)
         up_bank_check(1, st_load(OBJ_UPRESET0 + 1, &up_bank[1], sizeof up_bank[1]));
         bad += check("category: kept through the bank on flash", up_used(17) && up_cat_of(up_rec(17)) == CAT_KEYS);
         memset(&r, 0, sizeof r);
-        r.used = UP_USED; r.ver = 3; r.engine = ENGI_DRUM; r.np = 60;
-        memcpy(r.name, "GRID", 4);
+        r.used = UP_USED; r.ver = 2; r.engine = ENGI_ACID; r.np = 60;
+        memcpy(r.name, "OLD2", 4);
         for (i = 0; i < 60u; i++) r.p[i] = (int16_t)(i * 3u) - 64;
         r.note[0] = 0x81; r.flags[0] = 0x80;
         got = r;
         up_set_cat(&got, CAT_FX);
-        ok = got.ver == UP_VER_GRID && up_cat_of(&got) == CAT_FX && got.note[0] == 0x81 && up_valid(&got);
+        ok = up_valid(&r) && got.ver == UP_VER && up_cat_of(&got) == CAT_FX && got.note[0] == 0x81 && up_valid(&got);
         for (i = 0; i < 60u; i++) ok &= up_value(&got, i) == r.p[i];
-        r.p[7] = 200;                                   /* a value a byte cannot hold: stays version 3, no category */
+        r.p[7] = 200;                                   /* a value a byte cannot hold: stays version 2, no category */
         got = r;
         up_set_cat(&got, CAT_FX);
-        bad += check("category: a version 3 grid -> 5 with it, values kept; one that cannot be packed keeps none",
-                     ok && got.ver == 3u && up_cat_of(&got) == CAT_DRUM && !memcmp(&got, &r, sizeof r));
+        bad += check("category: a version 2 record -> 4 with it, values kept; one that cannot be packed keeps none",
+                     ok && got.ver == 2u && up_cat_of(&got) == cat_of_engine(ENGI_ACID) && !memcmp(&got, &r, sizeof r));
     }
     printf("%s\n", bad ? "USER PRESET TEST FAILED" : "user preset test passed");
     return bad != 0;

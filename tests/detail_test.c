@@ -9,7 +9,6 @@
  *              still deletes a row (the field back to its default)
  *   EDIT       the step's four back to 100 % / x1 / 0 / 96, its notes kept
  *   undo       one per knob gesture on one step (walking to the next step starts another), EDIT one
- *   DRUM       the white keys pick the step (no hit toggled), held together several; the key LEDs the steps with hits
  *   chords     one value for the whole chord (RATCH x3 = every note three times)
  *   playback   the sequencer plays them (RATCH parts, CHANCE 0 silent, VEL), a pattern untouched plays as before
  *   STEP       unchanged: KNOB 1 the cursor; modified steps marked over the roll
@@ -277,56 +276,6 @@ static int chords_play(void)
     return bad;
 }
 
-static int drum(void)
-{
-    int bad = 0, ok;
-    track_t *t;
-    step_t ref[NSTEP], want;
-    uint32_t leds, n, i;
-    uint8_t v[16];
-    ui_power_on();
-    song.sel = 3;
-    t = &trk[3];
-    track_defaults_steps(t);
-    t->p[P_SLEN] = 16;
-    t->p[P_SDIV] = 2;
-    t->p[P_SGATE] = 64;
-    song.g[G_SWING] = 0;
-    t->p[P_SSWING] = 0;
-    for (i = 0; i < 16u; i += 4u)
-        grid_hit(t, i, 0, 1);                         /* a kick on 1 5 9 13 */
-    grid_hit(t, 6, 3, 1);                             /* a closed hat on 7 */
-    go_detail();
-    ok = grid_on() && detail_on() && song.grid == 1u;
-    memcpy(ref, t->step, sizeof ref);
-    tap_key(key_at(0, 4));                            /* white key 5: the cursor there, no hit toggled */
-    ok &= ui.cursor == 4u && !memcmp(t->step, ref, sizeof ref);
-    tap_key(key_at(0, 1));                            /* an empty step: picked too */
-    ok &= ui.cursor == 1u && !memcmp(t->step, ref, sizeof ref);
-    bad += check("DETAIL on a DRUM track: the white keys pick the step (no hit toggled)", ok);
-    tap_key(key_at(0, 4));
-    kt(EN_K2, 1);
-    want = ref[4]; step_set_ratchet(&want, 2);
-    ok = same_but1(t, ref, 4, &want);
-    memcpy(ref, t->step, sizeof ref);
-    key_down(key_at(0, 0)); key_down(key_at(0, 8)); key_down(key_at(0, 9));   /* 1, 9 and an empty 10 held */
-    frame();
-    kt(EN_K1, -50);
-    key_up(key_at(0, 0)); key_up(key_at(0, 8)); key_up(key_at(0, 9));
-    frame();
-    ok &= step_chance(&t->step[0]) == 50u && step_chance(&t->step[8]) == 50u && step_chance(&t->step[9]) == 100u &&
-          step_chance(&t->step[4]) == 100u && t->step[0].hit == 1u && t->step[8].hit == 1u && !t->step[9].hit;
-    bad += check("  KNOB 2 the step's RATCH; steps held together: each takes the turn (an empty one none)", ok);
-    leds = grid_leds();
-    ok = (leds >> key_at(0, 0) & 1u) && (leds >> key_at(0, 6) & 1u) && !(leds >> key_at(0, 1) & 1u);
-    bad += check("  the key LEDs: the steps holding any hit (the hat on 7 too)", ok);
-    t->step[0].probability = 0;                       /* (back to 100 %: the pass below plays every hit) */
-    t->step[8].probability = 0;
-    n = play(t, div_samples(2) / CTL * 16u, v, 16);
-    bad += check("  played: the ratcheted kick twice, the others once (4 + 1 + 1 note-ons)", n == 6u);
-    return bad;
-}
-
 static int step_unchanged(void)
 {
     int bad = 0, ok;
@@ -349,7 +298,7 @@ static int step_unchanged(void)
 
 int main(void)
 {
-    int bad = page_cycle() + knobs() + edit_undo() + chords_play() + drum() + step_unchanged();
+    int bad = page_cycle() + knobs() + edit_undo() + chords_play() + step_unchanged();
     printf("%s\n", bad ? "DETAIL TEST FAILED" : "detail tests passed");
     return bad != 0;
 }
