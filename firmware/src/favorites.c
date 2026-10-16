@@ -1,0 +1,84 @@
+/* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+#define FELUCCA_FAVORITES 1
+#define FAV_ROWS 14u             /* the engines with a row of favourites */
+#define FAV_VOID_BIT 8u          /* VOID's preset k: bit 8 + k of row ENGI_DIGITAL */
+/* Stable engine/preset references; fixed capacity independent of optional engines. */
+typedef struct {
+    uint8_t factory[16][32]; /* engine 0..13, preset 0..255 (14: the MIDI LEARN map, 15: settings). VOID (engine 14)
+                              * has no row of its own: its presets are bits 8.. of DIGITAL's (engine 1, retired, never
+                              * picked in a build with VOID; byte 0 is the one settings_persist.c moves to FM6) */
+    uint32_t user, filter;
+} favorites_t;
+static favorites_t favorites __attribute__((section(".pool")));
+/* where engine e's preset k is starred: its row and bit, 0 = none */
+static uint8_t *favorite_at(uint32_t e, uint32_t *k)
+{
+#if defined(FELUCCA_VOID) && FELUCCA_VOID           /* (the settings test builds this file without core.h) */
+    if (e == ENGI_VOID) {
+        *k += FAV_VOID_BIT;
+        return *k < 256u ? favorites.factory[ENGI_DIGITAL] : 0;
+    }
+#endif
+    return e < FAV_ROWS && *k < 256u ? favorites.factory[e] : 0;
+}
+static int favorite_has(uint32_t engine, uint32_t preset)
+{
+    if (engine == NENGINES)
+        return preset < UP_SLOTS && ((favorites.user >> preset) & 1u);
+    {
+        uint8_t *r = engine < NENGINES ? favorite_at(engine, &preset) : 0;
+        return r && ((r[preset / 8u] >> (preset % 8u)) & 1u);
+    }
+}
+static int favorite_set(uint32_t engine, uint32_t preset, int on)
+{
+    uint32_t k = preset;
+    if (engine > NENGINES || (engine == NENGINES ? preset >= UP_SLOTS : !favorite_at(engine, &k)))
+        return 0;
+    if (favorite_has(engine, preset) == !!on) return 0;
+    if (engine == NENGINES) {
+        if (on) favorites.user |= 1u << preset;
+        else favorites.user &= ~(1u << preset);
+    } else {
+        uint8_t *b = &favorite_at(engine, &preset)[preset / 8u];
+        if (on) *b |= (uint8_t)(1u << (preset % 8u));
+        else *b &= (uint8_t)~(1u << (preset % 8u));
+    }
+    return 1;
+}
+
+/* MENU > DISPLAY > COLOR's 11th value, CUSTOM (1.6, #244, Discussion #239): a palette of the user's, five RGB565 colours (BG
+ * SURF TEXT THEME ACCENT, 16 bits little endian) in favorites.factory[15][0..9], flags in [12] (bit 0: one is stored, bit 1:
+ * it is the palette in use), set from the editor (PALETTE_SET, editor_palette.c) and saved with the settings. settings.palette
+ * stays a built-in palette (the one in use before, or after): firmware before 1.6 shows that and keeps the bytes. The value
+ * is in COLOR only while one is stored. Zero (every older setting) = none */
+#define ui_cpal (&favorites.factory[15][0])
+#define ui_cpal_flags (favorites.factory[15][12])
+#define CPAL_STORED 1u
+#define CPAL_ACTIVE 2u
+static uint32_t cpal_on(void) { return (ui_cpal_flags & (CPAL_STORED | CPAL_ACTIVE)) == (CPAL_STORED | CPAL_ACTIVE); }
+static uint32_t palette_n(void) { return NPALETTES + ((ui_cpal_flags & CPAL_STORED) ? 1u : 0u); }     /* COLOR's values */
+static uint32_t palette_cur(void) { return cpal_on() ? NPALETTES : settings.palette % NPALETTES; }
+static const char *palette_name(uint32_t v) { return v == NPALETTES ? "CUSTOM" : UI_PALETTES[v % NPALETTES].name; }
+/* the palette in use into gfx.c (the settings changed under it: a start, an import, a restore, a STYLE change) */
+static void palette_apply(void)
+{
+    if (cpal_on()) {
+        palette_custom_load(ui_cpal);
+        palette_set(NPALETTES);
+    } else {
+        palette_set(settings.palette % NPALETTES);
+    }
+}
+
+/* the five colours into the settings' bytes (stored; not yet the palette in use: palette_choose / palette_apply) */
+static void cpal_store(const uint16_t *c)
+{
+    uint32_t i;
+    for (i = 0; i < 5u; i++) {
+        ui_cpal[2u * i] = (uint8_t)c[i];
+        ui_cpal[2u * i + 1u] = (uint8_t)(c[i] >> 8);
+    }
+    ui_cpal_flags |= CPAL_STORED;
+}
