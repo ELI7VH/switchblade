@@ -616,18 +616,15 @@ static int cc_map_test(void)
         queued(0xB0 + e, 74, 127, 1); queued(0xB0 + e, 71, 0, 1);
         ok &= trk[e].p[P_E4] == en->edit[4].max && trk[e].p[P_E5] == en->edit[5].min;
     }
-    for (e = 0; e < NENGINES; e++)
-        ok &= MIDI_CC_ENG[e] == 0x56;
-    bad += check("CC74 / CC71 on WAVE, ACID, DRIFT (channels 2..4): E5 / E6 as on OB-Z (MIDI_CC_ENG 0x56 for all four)", ok);
-    for (e = 0, ok = 1; e < NENGINES; e++) {   /* the table names a continuous EDIT value of every engine */
-        uint32_t m = MIDI_CC_ENG[e], k;
-        for (k = 0; k < 2u; k++) {
-            uint32_t n = (m >> (k ? 0 : 4)) & 15u;
-            const param_desc_t *d = n ? &ENGINES[e]->edit[n - 1u] : 0;
-            ok &= n <= 8u && (!d || (d->fmt != F_ENUM && d->max - d->min >= 24));
+    bad += check("CC74 / CC71 on WAVE, ACID, DRIFT (channels 2..4): CUT / RES (E5 / E6) as on OB-Z", ok);
+    for (e = 0, ok = 1; e < NENGINES; e++) {   /* the four controls name continuous values of every engine */
+        uint32_t k;
+        for (k = 0; k < 4u; k++) {
+            const param_desc_t *d = param_desc_of(e, ENGINES[e]->knob[k]);
+            ok &= d->fmt != F_ENUM && d->max - d->min >= 24;
         }
     }
-    bad += check("every engine's CC74 / CC71 target is a continuous EDIT value (or none)", ok);
+    bad += check("every engine's CC74 / 71 / 79 / 70 target (EDIT K1..K4) is a continuous value", ok);
     memcpy(before, trk[0].p, sizeof before);
     queued(0xB0, 121, 0, 1);
     bad += check("CC121 resets no mapped parameter (RP-015)", !memcmp(before, trk[0].p, sizeof before));
@@ -656,6 +653,28 @@ static int cc_map_test(void)
     song.rec = 0;
     queued(0xB0, 74, 77, 1);
     bad += check("not armed: the CC is the new value, no event", trk[0].p[P_E4] == 77 && motion.count == 1u);
+    return bad;
+}
+/* Task 2.1: the fixed CC map follows the 4-control contract (engine_t.knob: EDIT K1..K4 = CC74 71 79 70), in = out */
+static int test_cc_contract(void)
+{
+    int bad = 0; uint32_t e, k; char b[64];
+    midi_test_reset();
+    for (e = 0; e < NENGINES; e++) {
+        track_t *t = &trk[e];
+        t->engine = t->eng_req = (uint8_t)e;
+        for (k = 0; k < 4; k++) {
+            snprintf(b, sizeof b, "%s CC%u", ENGINES[e]->name, CC_KNOB[k]);
+            bad += check(b, cc_param(t, CC_KNOB[k]) == ENGINES[e]->knob[k]);
+            snprintf(b, sizeof b, "%s K%u out", ENGINES[e]->name, (unsigned)k + 1u);
+            bad += check(b, param_cc(t, ENGINES[e]->knob[k]) == CC_KNOB[k]);
+        }
+        bad += check("CC7", cc_param(t, CC_VOL) == P_LEVEL);
+        /* end to end: CC74 = 127 on channel e+1 puts CUT at its max */
+        midi_event(0xB0u, e, CC_CUT, 127);
+        snprintf(b, sizeof b, "%s CC74 127", ENGINES[e]->name);
+        bad += check(b, t->p[P_E4] == track_desc(t, P_E4)->max);
+    }
     return bad;
 }
 /* 1.5 (Discussion #170): MIDI LEARN. GLO + D4 on, a knob picks, a CC is learned; the map in favorites.factory[14] */
@@ -920,6 +939,6 @@ static int pc_test(void)
 int main(void)
 {
     int bad = controls_test() + sustain_test() + ownership_test() + clock_test(1) + clock_test(2) + clock_arp_and_boundaries() +
-              arp_ext_stop_test() + usb_burst_test() + route_test() + route_block_test() + route_track_test() + follow_test() + cc_map_test() + learn_test() + pc_test();
+              arp_ext_stop_test() + usb_burst_test() + route_test() + route_block_test() + route_track_test() + follow_test() + cc_map_test() + test_cc_contract() + learn_test() + pc_test();
     printf("%s\n", bad ? "MIDI CONTROL/CLOCK TEST FAILED" : "MIDI control/clock integration tests passed"); return bad != 0;
 }

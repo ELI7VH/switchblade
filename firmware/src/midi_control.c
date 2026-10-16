@@ -204,19 +204,49 @@ static int midi_track_held(uint32_t track)
     return 0;
 }
 
-/* The standard CC map (#103): always on, these CCs only, on the track the channel plays (ROUT as notes). A CC
- * sets its parameter as a knob would, 0..127 over the parameter's range (64: the middle of a bipolar one), and
- * AUTOMATION records it as a knob move (motion_capture: the selected track, armed and playing). CC74 / CC71 are
- * the engine's own brightness / resonance (MIDI_CC_ENG); an engine without one ignores them. CC121 resets none
- * of them (RP-015: they are the sound's) */
-#define MCC_CUT 0xFEu
-#define MCC_RES 0xFFu
-static const uint8_t MIDI_CC_MAP[][2] = {
-    {5, P_GLIDE}, {7, P_LEVEL}, {10, P_PAN}, {71, MCC_RES}, {72, P_REL}, {73, P_ATK}, {74, MCC_CUT}, {75, P_DEC},
+/* The fixed CC map (#103; FM1-Four Task 2.1): always on, these CCs only, on the track the channel plays (ROUT as notes),
+ * the same numbers in and out (MIDI OUT: mout_param). A CC sets its parameter as a knob would, 0..127 over the
+ * parameter's range (64: the middle of a bipolar one), and AUTOMATION records it as a knob move (motion_capture: the
+ * selected track, armed and playing). CC74 71 79 70 are the EDIT screen's four controls of the track's machine
+ * (engine_t.knob: CUT, RES, ENV and the machine's own), CC7 its VOLUME (LEVEL); the rest as Felucca had them. CC121
+ * resets none of them (RP-015: they are the sound's) */
+#define CC_VOL 7u
+#define CC_CUT 74u
+#define CC_RES 71u
+#define CC_ENV 79u
+#define CC_MAC 70u
+static const uint8_t CC_KNOB[4] = {CC_CUT, CC_RES, CC_ENV, CC_MAC};   /* EDIT K1..K4 */
+static const uint8_t MIDI_CC_MAP[][2] = {          /* the common rows, the same on every machine */
+    {5, P_GLIDE}, {CC_VOL, P_LEVEL}, {10, P_PAN}, {72, P_REL}, {73, P_ATK}, {75, P_DEC},
     {91, P_REV}, {93, P_CHOR}, {94, P_DLY},
 };
-/* per engine (ENGINES[] order): CC74's E index + 1 in the high nibble, CC71's in the low one, 0 = none */
-static const uint8_t MIDI_CC_ENG[NENGINES] = {0x56, 0x56, 0x56, 0x56};   /* OB-Z WAVE ACID DRIFT: CUT (E5) RES (E6) */
+/* the parameter CC cc sets on track t, -1 none */
+static int32_t cc_param(const track_t *t, uint32_t cc)
+{
+    const engine_t *e = ENGINES[eng_idx(t->eng_req)];
+    uint32_t i;
+    for (i = 0; i < 4u; i++)
+        if (CC_KNOB[i] == cc)
+            return e->knob[i];
+    for (i = 0; i < NELEM(MIDI_CC_MAP); i++)
+        if (MIDI_CC_MAP[i][0] == cc)
+            return MIDI_CC_MAP[i][1];
+    return -1;
+}
+/* .. and the inverse: the CC that parameter id of track t goes out on, -1 none (the four controls first: a machine's
+ * K4 could be a common parameter one day) */
+static int32_t param_cc(const track_t *t, uint32_t id)
+{
+    const engine_t *e = ENGINES[eng_idx(t->eng_req)];
+    uint32_t i;
+    for (i = 0; i < 4u; i++)
+        if (e->knob[i] == id)
+            return CC_KNOB[i];
+    for (i = 0; i < NELEM(MIDI_CC_MAP); i++)
+        if (MIDI_CC_MAP[i][1] == id)
+            return MIDI_CC_MAP[i][0];
+    return -1;
+}
 /* a CC sets parameter id of track t as a knob would: 0..127 over its range */
 static void midi_cc_set(track_t *t, uint32_t id, uint32_t value)
 {
@@ -276,21 +306,11 @@ static int __attribute__((noinline)) midi_learned(uint32_t cc, uint32_t value)
 
 static void __attribute__((noinline)) midi_cc_map(track_t *t, uint32_t cc, uint32_t value)
 {
-    uint32_t i, id = 0xFFFFu, e;
+    int32_t id;
     if (midi_learned(cc, value))                /* (a learned CC is the user's: not the map's) */
         return;
-    for (i = 0; i < NELEM(MIDI_CC_MAP); i++)
-        if (MIDI_CC_MAP[i][0] == cc)
-            id = MIDI_CC_MAP[i][1];
-    if (id >= MCC_CUT) {
-        if (id == 0xFFFFu)
-            return;
-        e = MIDI_CC_ENG[eng_idx(t->eng_req)] >> (id == MCC_CUT ? 4 : 0) & 15u;
-        if (!e)
-            return;
-        id = P_E0 + e - 1u;
-    }
-    midi_cc_set(t, id, value);
+    if ((id = cc_param(t, cc)) >= 0)
+        midi_cc_set(t, (uint32_t)id, value);
 }
 
 static void midi_control(uint32_t ch, uint32_t cc, uint32_t value)
