@@ -41,13 +41,15 @@ CODE = {0x2026: 0x85}                  # characters outside Latin-1 -> their one
 PHASES, PHASES_L = 4, 2                # horizontal phases per glyph (aa_raster.raster_font): S M, L
 # faces stored Huffman-coded (--huff): M and L. S, the most drawn and the least compressible (-15 %), stays
 # 2 px per byte, so the labels draw at full speed
-HUFF = [("M", "L")]
-# L draws only "FELUCCA", the UPDATE MODE countdown digit, the calibration's control names (panel.c
-# B_NAME / E_NAME) and MENU > LARGE's card values and page titles (ui_draw.c draw_column_tall, ui_graph.c
-# graph_title: # . / J W too; a value with another character is set in M): a sparse face of those glyphs, the
-# space as its range and the rest as extras
-# (ui_test.c checks that every L string is covered)
-L_CHARS = " #+-./0123456789ABCDEFGHIJKLMNOPQRSTUVWXY"
+HUFF = [("M", "L", "XL")]
+# L draws "FELUCCA", the UPDATE MODE countdown digit, the calibration's control names (panel.c B_NAME / E_NAME),
+# MENU > LARGE's card values and page titles (ui_draw.c draw_column_tall, ui_graph.c graph_title), and VOID FOUR's
+# machine, category and preset names and the EDIT / HOME labels (ui_big.c): capitals A-Z, figures, # % + - . /;
+# a value with another character is set in M. A sparse face: the space as its range and the rest as extras
+# (ui_test.c test_large_face checks that every L string is covered)
+L_CHARS = " #%+-./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+# XL: the EDIT cards' values (ui_big.c), 40 px figures and their signs only (ui_test.c: xl_face_has)
+XL_CHARS = "+-.0123456789"
 
 
 def preset(name):
@@ -55,7 +57,8 @@ def preset(name):
         v = str(FONTS.parent / "assets" / "fonts" / "InterTight[wght].ttf")   # SIL OFL 1.1, Google Fonts
         return [("S", v + "@400", 12, (32, 126), EXTRAS, 0.0, PHASES),
                 ("M", v + "@500", 15, (32, 126), EXTRAS, 0.0, PHASES),
-                ("L", v + "@600", 28, (32, 32), [ord(c) for c in L_CHARS[1:]], 0.0, PHASES_L)]
+                ("L", v + "@600", 28, (32, 32), [ord(c) for c in L_CHARS[1:]], 0.0, PHASES_L),
+                ("XL", v + "@600", 40, (32, 32), [ord(c) for c in XL_CHARS], 0.0, PHASES_L)]
     if name == "standin":
         if os.path.exists(LOCAL_INTER):
             reg, med, semi = LOCAL_INTER + "#0", LOCAL_INTER + "#10", LOCAL_INTER + "#12"
@@ -63,7 +66,8 @@ def preset(name):
             reg = med = semi = str(FONTS / "Inter-Regular.ttf")
         t = -0.025                             # Inter Tight is Inter with tighter spacing
         return [("S", reg, 12, (32, 126), EXTRAS, t, PHASES), ("M", med, 15, (32, 126), EXTRAS, t, PHASES),
-                ("L", semi, 28, (32, 32), [ord(c) for c in L_CHARS[1:]], t, PHASES_L)]
+                ("L", semi, 28, (32, 32), [ord(c) for c in L_CHARS[1:]], t, PHASES_L),
+                ("XL", semi, 40, (32, 32), [ord(c) for c in XL_CHARS], t, PHASES_L)]
     raise SystemExit(f"unknown preset {name}")
 
 
@@ -217,9 +221,10 @@ def emit(face, tracking, gamma, kern_min):
     lines.append(f"static const aafont_t AF_{name} = {{{r['h']}, {r['asc']}, {first}, {last}, {len(extras)}, {len(keys)}, "
                  f"AF_{name}_G, AF_{name}_DATA, {'AF_%s_KERN' % name if keys else '0'}, "
                  f"{'AF_%s_KD' % name if keys else '0'}, AF_{name}_EX, {psh}, {'AF_%s_HC' % name if hc else '0'}}};")
-    if "H" in chars:                                  # the capitals' band (gfx.c CAP_IN: centring text by it)
-        cap = table[chars.index("H") * phases]
-        lines.append(f"#define AF_{name}_CAP_Y {cap[3]}   /* the ink of H: rows {cap[3]} .. {cap[3] + cap[5] - 1} of the line */")
+    capc = "H" if "H" in chars else "1" if "1" in chars else None   # (a figures-only face: 1, flat as H)
+    if capc:                                          # the capitals' band (gfx.c CAP_IN: centring text by it)
+        cap = table[chars.index(capc) * phases]
+        lines.append(f"#define AF_{name}_CAP_Y {cap[3]}   /* the ink of {capc}: rows {cap[3]} .. {cap[3] + cap[5] - 1} of the line */")
         lines.append(f"#define AF_{name}_CAP_H {cap[5]}")
     cost = {"data": len(data) + len(hc), "glyph_table": 8 * len(table), "kern": 3 * len(keys), "extras": len(extras),
             "glyphs": len(chars), "phases": phases, "pairs": len(keys), "h": r["h"], "asc": r["asc"], "px": px,

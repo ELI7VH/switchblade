@@ -395,6 +395,15 @@ static int large_face_has(const char *s)                /* every glyph of s in t
             return 0;
     return 1;
 }
+static int xl_face_has(const char *s)                   /* every glyph of s in XL (40 px: + - . 0-9; the EDIT values) */
+{
+    if (!*s)
+        return 0;
+    for (; *s; s++)
+        if (glyph_at(&AF_XL, (uint8_t)*s) < 0)
+            return 0;
+    return 1;
+}
 static int32_t ink_w(const aafont_t *f, const char *s)
 {
     int32_t b[4];

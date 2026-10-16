@@ -4102,10 +4102,54 @@ static int test_large_face(void)
     static const char *const FIXED[] = {"FELUCCA", "0123456789"};   /* main.c, ui_menu.c; ui_draw.c draw_uboot */
     uint32_t i, missing = 0;
     const char *s;
+    int bad = 0;
     for (i = 0; i < NB + NE + 2u; i++)                              /* ui_input.c setup_show: the control names */
         for (s = i < NB ? B_NAME[i] : i < NB + NE ? E_NAME[i - NB] : FIXED[i - NB - NE]; *s; s++)
             missing += glyph_at(&AF_L, (uint8_t)*s) < 0;
-    return check("the L face holds every glyph of the strings drawn in it", !missing);
+    bad += check("the L face holds every glyph of the strings drawn in it", !missing);
+    {   /* VOID FOUR: HOME and EDIT draw the machines, the categories, the factory presets and the labels in L */
+        static const char *const LBL[] = {"CUTOFF", "RESONANCE", "ENV", "DETUNE", "POSITION", "DECAY", "DRIVE",
+                                          "TRACK", "PRESET", "VOLUME", "TEMPO"};
+        uint32_t e, k, ok = 1;
+        for (e = 0; e < NENGINES; e++) {
+            ok &= large_face_has(ENGINES[e]->name);
+            for (k = 0; k < ENGINES[e]->npresets; k++)
+                if (!large_face_has(ENGINES[e]->presets[k].name))
+                    ok = 0, printf("  not in L: preset \"%s\"\n", ENGINES[e]->presets[k].name);
+        }
+        for (k = 0; k < NCAT; k++)
+            ok &= large_face_has(CAT_NAME[k]);
+        for (k = 0; k < NELEM(LBL); k++)
+            ok &= large_face_has(LBL[k]);
+        bad += check("the L face holds every machine, category, factory preset and EDIT / HOME label", ok);
+    }
+    {   /* XL (40 px, + - . 0-9): every number the EDIT cards show, -100 .. +127 (signed: ENV) */
+        char v[8];
+        int32_t n;
+        uint32_t e, k, ok = 1;
+        for (n = -100; n <= 127; n++) {
+            fmt_int(v, n);
+            ok &= xl_face_has(v);
+            if (n > 0) {
+                v[0] = '+';
+                fmt_int(v + 1, n);
+                ok &= xl_face_has(v);
+            }
+        }
+        for (e = 0; e < NENGINES; e++)                /* the four controls' values as param_format sets them */
+            for (k = 0; k < 4u; k++) {
+                const param_desc_t *d = param_desc_of(e, ENGINES[e]->knob[k]);
+                const char *u;
+                for (n = d->min; n <= d->max; n++) {
+                    param_format(d, n, v, &u);
+                    if (d->fmt != F_ENUM && !xl_face_has(v))
+                        ok = 0, printf("  not in XL: %s %s\n", ENGINES[e]->name, v);
+                }
+            }
+        ok &= !xl_face_has("A") && !xl_face_has("OFF");
+        bad += check("the XL face holds + - . 0-9: every EDIT value -100 .. +127, no letters", ok);
+    }
+    return bad;
 }
 
 /* #38: the keys of the notes the selected track's sequencer and ARP sound light while it plays */

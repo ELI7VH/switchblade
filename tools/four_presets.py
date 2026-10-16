@@ -26,7 +26,7 @@ CATS = {                                                         # per machine: 
     "ACID": {"ACID": 32},
     "DRIFT": {"BASS": 12, "LEAD": 10, "KEYS": 10},
 }
-GLYPHS = set(" #%+-./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ")      # the planned AF_L face
+GLYPHS = set(" #%+-./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ")      # the AF_L face (gen_aa_font.py L_CHARS)
 PCT = (0, 127)
 RANGES = {                                                       # edit[0..7] min..max (eng_obx.c, eng_acid.c, eng_drift.c)
     "OBX": [(0, 6)] + [PCT] * 7,

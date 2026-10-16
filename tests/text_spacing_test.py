@@ -8,7 +8,8 @@ whole string (advances and GPOS kerning at 16 x the size).
 
 Per glyph: its displacement d = ink centroid (tables) - ink centroid (reference); area coverage keeps the first
 moment, so d is how far the glyph sits from its true place. Per pair: gap error = d[i+1] - d[i], the error of
-the space between two neighbours. Fails when a pair of S or M is off by more than 0.25 px or L by more than 0.5 px.
+the space between two neighbours. Fails when a pair of S or M is off by more than 0.25 px or L or XL by more than
+0.5 px (XL, figures only: against their tabular layout, each figure centred in its cell as aa_raster lays them).
 
   text_spacing_test.py [ui_fonts.h] [--png DIR [--tag NAME]] [--rule gfx|rounded] [--no-limit]
   (PNG: the specimen strings x4, gray on black; --rule rounded measures tables made before the phases)
@@ -33,7 +34,8 @@ LOWER = ["oeo", "coco", "eco", "nono", "minimum", "hello", "level", "decay", "re
 UPPER = ["CUTOFF", "RESO", "LEVEL", "DECAY", "RELEASE", "SOUND", "OCOE", "COCO", "NONO", "MINIMUM", "SUPER SAW",
          "FELUCCA", "PRESETS", "ANALOG", "DIGITAL", "PITCH", "SWING", "AV AW LT TA YO"]
 RULE = ["gfx"]   # "gfx": src/gfx.c cv_text; "rounded": the earlier rule (each glyph at the rounded pen, 1 phase)
-LIMIT = {"S": 0.25, "M": 0.25, "L": 0.5}
+LIMIT = {"S": 0.25, "M": 0.25, "L": 0.5, "XL": 0.5}
+DIGITS = ["0123456789", "127", "+100", "-64", "-100", "+32", "-12", "4.5", "10.5", "18", "84", "42", "99", "11", "707"]
 
 
 def parse(path):
@@ -131,9 +133,18 @@ def measure(f, font_hi, s):
         if ch == " " or not e[4]:
             d.append(None)
             continue
-        pen = (font_hi.getlength(s[:i + 1]) - font_hi.getlength(s[i])) / SS
+        feats = None
+        if f["first"] == f["last"] and glyph_at(f, ord("A")) is None:   # a figures-only face (XL): tabular, as
+            # aa_raster.raster_font lays them: each in its cell (the table's advance), a figure centred in it
+            feats = ["tnum"] if ch.isdigit() else None
+            pen = sum(e2[1] for _, _, e2 in placed[:i]) / 16
+            if ch in ar.WHOLE:
+                pen += (e[1] / 16 - font_hi.getlength(ch, features=feats) / SS) / 2
+        else:
+            pen = (font_hi.getlength(s[:i + 1]) - font_hi.getlength(s[i])) / SS
         w = int(pen + font_hi.getlength(s[i]) / SS) + 3 * f["h"]
-        img = ar.render_cell(font_hi, ch, (w * SS, 3 * f["h"] * SS), round((x0 + pen) * SS), 2 * f["h"] * SS)
+        img = ar.render_cell(font_hi, ch, (w * SS, 3 * f["h"] * SS), round((x0 + pen) * SS), 2 * f["h"] * SS,
+                             features=feats)
         a = img.reduce(SS)                               # box-filtered coverage on the pixel grid
         v = a.tobytes()
         ox = (x0 + pen) * SS                             # drawn at a whole 1/16 px: move the centroid the rest
@@ -179,7 +190,7 @@ def main():
     for name, f in faces.items():
         font, px = spec[name]
         font_hi = ar.open_font(font, px * SS)
-        words = LOWER if f["last"] >= ord("z") else UPPER
+        words = LOWER if f["last"] >= ord("z") else UPPER if glyph_at(f, ord("A")) is not None else DIGITS
         # a sparse face (L): the words it can draw (the firmware draws no others in it)
         words = [w for w in words if all(glyph_at(f, ord(ch.upper())) is not None for ch in w)]
         pairs = [p for s in words for p in measure(f, font_hi, s)]
