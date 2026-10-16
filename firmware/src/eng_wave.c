@@ -491,7 +491,7 @@ static void void_track_loaded(track_t *t)
 {
     const void_px_t *x;
     uint32_t k;
-    if (t->eng_req % NENGINES != ENGI_VOID || t->preset >= NELEM(VOID_PX))
+    if (t->eng_req % NENGINES != ENGI_WAVE || t->preset >= NELEM(VOID_PX))
         return;
     x = &VOID_PX[t->preset];
     t->p[P_FTYPE] = x->ftype;
@@ -519,8 +519,8 @@ static void void_track_loaded(track_t *t)
     }
 }
 
-static const engine_t ENG_VOID = {
-    .name = "VOID",
+static const engine_t ENG_WAVE = {
+    .name = "WAVE",
     .page_title = {"OSC", "FILTER"},
     .edit = {
         {"TBL1", F_ENUM, 0, VOID_NTBL - 1, 1, N_VOID_TBL, 0},
@@ -534,7 +534,7 @@ static const engine_t ENG_VOID = {
     },
     .presets = VOID_PRESETS,
     .npresets = NELEM(VOID_PRESETS),
-    .knob = {P_E1, P_E4, P_E5, P_E3},
+    .knob = {P_E4, P_E5, P_ED_FLT, P_E1},
     .poly = VOID_POLY,
     .note_on = void_note_on,
     .render = void_render,

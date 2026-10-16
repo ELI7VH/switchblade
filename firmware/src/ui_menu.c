@@ -38,43 +38,16 @@ typedef struct { const char *text; uint8_t kind; } menu_credit_t;
 static const menu_credit_t MENU_CREDITS[] = {
     {"H\xFCgelton Instruments", MC_TITLE},  /* Felucca's own: above; these are ours too */
     {"Leo Kuroshita", MC_TEXT},
-    {"CrispyZebra (PHASE waveforms), the DRUM voices, the Sample Pack: GPL-3.0", MC_TEXT},
     {"Fukiai icon font: MIT", MC_TEXT},
     {"https://github.com/hugelton", MC_URL},
-    {"", MC_TEXT},
-    {"KLATTSCH", MC_TITLE},
-    {"Tony Gies / MIT", MC_TEXT},
-    {"https://github.com/tgies/klattsch", MC_URL},
-    {"", MC_TEXT},
-    {"DAISYSP", MC_TITLE},
-    {"Electrosmith, Emilie Gillet", MC_TEXT},
-    {"MIT", MC_TEXT},
-    {"https://github.com/electro-smith/DaisySP", MC_URL},
-    {"", MC_TEXT},
-    {"DEXED + MSFA", MC_TITLE},
-    {"Pascal Gauthier, Google Inc.", MC_TEXT},
-    {"msfa: Apache-2.0, Dexed: GPL-3.0", MC_TEXT},
-    {"https://github.com/asb2m10/dexed", MC_URL},
-    {"", MC_TEXT},
-    {"RINGS", MC_TITLE},
-    {"Emilie Gillet / MIT", MC_TEXT},
-    {"https://github.com/pichenettes/eurorack", MC_URL},
     {"", MC_TEXT},
     {"INTER TIGHT", MC_TITLE},
     {"The Inter Project Authors", MC_TEXT},
     {"SIL Open Font License 1.1", MC_TEXT},
     {"https://github.com/rsms/inter-tight", MC_URL},
     {"", MC_TEXT},
-    {"VSCO-2 CE + VCSL", MC_TITLE},
-    {"Versilian Studios / CC0 1.0", MC_TEXT},
-    {"https://github.com/sgossner/VSCO-2-CE", MC_URL},
-    {"https://github.com/sgossner/VCSL", MC_URL},
-    {"", MC_TEXT},
-    {"VOICE", MC_TITLE},
-    {"Dennis H. Klatt (1980)", MC_TEXT},
-    {"https://doi.org/10.1121/1.383940", MC_URL},
-    {"Hillenbrand, Getty, Clark and Wheeler (1995)", MC_TEXT},
-    {"https://doi.org/10.1121/1.411872", MC_URL},
+    {"VOID WAVE", MC_TITLE},                     /* WAVE: the VOID WAVE plugin's voice (eng_wave.c) */
+    {"Void Audio", MC_TEXT},
 };
 
 static int32_t menu_text(const char *s, int32_t y, uint16_t col, int draw)
@@ -134,7 +107,6 @@ static int32_t menu_document(int32_t y, int draw)
         else y = menu_text(text, y, c->kind == MC_TITLE ? T_THEME : c->kind == MC_URL ? T_MID : T_TEXT, draw);
     }
     y = menu_text("LICENSES + SOURCE", y + 12, T_THEME, draw);
-    y = menu_text("DRUM + own samples: GPL-3.0-only", y, T_TEXT, draw);
     y = menu_text("Fonts and icons: their licences travel with the source and the release files.", y, T_TEXT, draw);
     y = menu_text("NO WARRANTY", y, T_TEXT, draw);
     y = menu_text("Full notices in source:", y + 8, T_TEXT, draw);

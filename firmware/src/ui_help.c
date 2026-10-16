@@ -6,13 +6,11 @@
  *            steps or the OCT+ / OCT- hint, which come back after), ui_draw.c draw_foot
  *   a layer  while its map shows: a second footer row under the layer's own (ui_layer.c draw_layer)
  * A hint is "[KEYCAP]WORDS" up to three times (gfx.c kc_tag names the keycaps); help_parse splits it for cv_key_row.
- * Pages by their title (a page added later has none until it is written here); HOME, HOME LEVELS and the DRUM grid by
+ * Pages by their title (a page added later has none until it is written here); HOME and HOME LEVELS by
  * what they are. Every hint fits its row with every word (tests/ui_test.c test_help: no word dropped). The setting and
  * the timer: ui.c help_on, help_start (PREF_HELP, ui.help_t) */
 
 static const char H_EDIT[] = "[K1-4]SOUND[EDIT]HOLD: ENGINES";
-static const char H_LANES[] = "[K1-4]LANE LEVELS[EDIT]HOLD: MUTES";
-static const char H_FMOP[] = "[K1]OPERATOR[SAVE]HOLD: UNDO";
 static const struct { const char *title, *hint; } HELP_PAGE[] = {
     {"ENV", "[K1-4]A D S R[ENV]ENV DEST"},
     {"ENV DEST", "[K1-4]ENV AMOUNTS[ENV]ENV"},
@@ -32,12 +30,6 @@ static const struct { const char *title, *hint; } HELP_PAGE[] = {
     {"EDIT 1", H_EDIT},
     {"EDIT 2", H_EDIT},
     {"FILTER", "[K1]LP BP HP[K2]CUTOFF[EDIT]VOICE"},
-    {"LANES", H_LANES},
-    {"LANES 2", H_LANES},
-    {"SLICES", "[K1]SLICE[K2]MOVE[OCT+]SPLIT, JOIN"},
-    {"OPERATOR", H_FMOP},
-    {"OP ENV", H_FMOP},
-    {"OPERATOR 2", H_FMOP},
     {"VOICE", "[K1]POLY, MONO[K2]GLIDE"},
     {"VOICE 2", "[K2]DETUNE[K3]PAN[K4]MUTE"},
     {"VOICE 3", "[K1]STEREO SPREAD[EDIT]EDIT 1"},
@@ -57,7 +49,6 @@ static const struct { const char *title, *hint; } HELP_PAGE[] = {
 };
 #define H_HOME "[PRESETS]SOUND[HOME]HOLD: MENU"
 #define H_LEVELS "[K1-4]T1-T4 LEVEL[HOME]MIXER"
-#define H_GRID "[KEYS]STEPS[K2]LANE[SEQ]RATCH"
 /* a layer's (LAYER_*): what its footer row (LAYERS[].foot) does not say */
 static const char *const HELP_LAYER[LAYER_N] = {
     "", "[KEYS]BLACK: MUTES[FX]2 TAPS: LOCK", "[KEYS]SOLO MUTE FILL TAP[K1-4]LEVELS", "[KEYS]ROOT[K1-4]ROOT SCL CHORD",
@@ -72,8 +63,6 @@ static const char *help_page(void)
     const char *t;
     if (ui.home)
         return home_levels() ? H_LEVELS : H_HOME;
-    if (grid_on() && !detail_on())
-        return H_GRID;
     t = cur_page()->title;
     if (sel_mode() != SEL_BPM && str_eq(t, "CLOCK"))   /* (1.5.5: SELECT steps the pages; 1.5.6: or plays) */
         return "[K1]TEMPO[GLO]HOLD: TAP";

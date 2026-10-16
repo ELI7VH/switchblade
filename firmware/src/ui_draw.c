@@ -769,8 +769,6 @@ static void draw_foot(void)
         foot_hint(ha, hb);
         sig += str_hash(str_hash(act_ready() ? 7u : 3u, ha), hb) + foot_rename() * 7717u;
     }
-    if (grid_on())
-        sig += 0x51EDu + (uint32_t)black_held(GK_ACC) * 977u;
     help = ui.help_t && !ui.ml.on ? help_page() : 0;   /* 1.5, HELP ON: the page's hint for ~2 s after it was entered
                                                        * (not while MIDI LEARN shows its line) */
     if (help)
@@ -804,18 +802,6 @@ static void draw_foot(void)
         int32_t kw = kh_w(KC_OCTUP, "DONE");
         cv_free_text(8, 2, &AF_S, ln, T_ACCENT, T_BG, 232 - kw - 8 - 8);
         cv_key_row(232 - kw, 232, 2, &kh, 1, 1u, T_BG);
-    } else if (grid_on() && !detail_on()) {          /* row 1: the page, and what the keys do (DETAIL: the steps) */
-        char b[16];
-        uint32_t len = (uint32_t)t->p[P_SLEN];
-        str_cpy(b, "PAGE ", sizeof b);
-        fmt_int(b + 5, (int32_t)ui.bank + 1);
-        str_cpy(b + str_len(b), "/", 4);
-        fmt_int(b + str_len(b), (int32_t)((len + 15u) / 16u));
-        cv_text(8, 2, &AF_S, b, T_THEME);
-        if (black_held(GK_ACC))
-            cv_text_r(232, 2, &AF_S, "ACCENT", T_ACCENT, T_BG);
-        else
-            cv_key_hint(232 - kh_w(KC_KEYS, "STEPS"), 2, KC_KEYS, "STEPS", 1, T_BG);   /* the keys are the steps */
     } else {
         uint32_t i;
         if ((ui.bank + 1u) * 16u <= (uint32_t)t->p[P_SLEN])
@@ -982,7 +968,7 @@ static void draw_columns(void)
         if (id == EV_CHANCE || id == EV_RATCH) {       /* a step's CHANCE (the die) / RATCH; + ADD: what it adds */
             const step_t *cs = &t->step[step % NSTEP];
             uint32_t sk = ev_skind(id), sv = (uint32_t)(k == EVK_ADD ? ev_sadd(sk) : ev_sval(cs, sk));
-            int plays = sk == EVK_CHANCE || (cs->time == ST_NOTE && (cs->n || cs->hit));   /* (RATCH does nothing on a
+            int plays = sk == EVK_CHANCE || (cs->time == ST_NOTE && cs->n);   /* (RATCH does nothing on a
                                                                                             * REST, a TIE, empty: DIM) */
             const char *u = "";
             if (sk == EVK_CHANCE) {                    /* (1.5.5: a condition, "1:4") */
@@ -1058,41 +1044,6 @@ static void draw_columns(void)
         draw_act_column(3, "SAVE", T_THEME, ICON_AUTO);
         return;
     }
-#if FELUCCA_SLICE
-    if (cur_page()->graph == GR_SLICES) {                /* SLICE POS, then SPLIT JOIN (ui_slice.c) */
-        uint32_t n = slice_count(), j = slice_sel(), src, div, ok = slice_src(&src, &div) && src;
-        char u[8];
-        if (j < n) {
-            fmt_int(val, (int32_t)j + 1);
-            str_cpy(u, "/", 8);
-            fmt_int(u + 1, (int32_t)n);
-        } else {
-            str_cpy(val, n ? "END" : "--", sizeof val);
-            u[0] = 0;
-        }
-        draw_column(0, "SLICE", val, u, VAL(0u), -1, ICON_SLICE);
-        slice_time(val, slice_mark(j));
-        draw_column(1, "POS", val, "S", ok ? VAL(1u) : T_DIM, -1, ICON_AUTO);
-        draw_act_column(2, "SPLIT", ok ? T_THEME : T_DIM, ICON_AUTO);
-        draw_act_column(3, "JOIN", ok ? T_THEME : T_DIM, ICON_AUTO);
-        return;
-    }
-#endif
-    if (fop_page(cur_page()->graph)) {                   /* FM6: OP, then three of its bytes (ui_fm6op.c) */
-        for (c = 0; c < 4u; c++) {
-            const char *lb, *u;
-            int32_t r;
-            uint32_t ic;
-            int on;
-            if (!fop_ok()) {                             /* (the engine changed before ui_draw left the page) */
-                draw_column(c, "", "", "", T_THEME, -1, ICON_NONE);
-                continue;
-            }
-            on = fop_card(c, &lb, val, &u, &r, &ic);
-            draw_column(c, lb, val, u, on ? VAL(c) : T_DIM, r, ic);
-        }
-        return;
-    }
     if (cur_page()->graph == GR_MOD) {                   /* SLOT, then that slot's SRC DST AMT */
         const track_t *t = TSEL;
         uint32_t id = P_M1SRC + 3u * mod_ui_slot;
@@ -1159,30 +1110,11 @@ static void draw_columns(void)
         }
         return;
     }
-    if (cur_page()->scope == SC_STEP && drum_track(TSEL)) {   /* the grid: STEP LANE HIT ACC */
-        const step_t *st = &seq_steps(TSEL)[ui.cursor];
-        uint32_t b = 1u << ui.lane, on = (step_lanes(st) & b) != 0u, ac = (step_accents(st) & b) != 0u;
-        char sn[8], sl[8];
-        fmt_int(sn, (int32_t)ui.cursor + 1);
-        str_cpy(sl, "/", 8);
-        fmt_int(sl + 1, TSEL->p[P_SLEN]);
-        draw_column(0, "STEP", sn, sl, VAL(0u), -1, ICON_AUTO);
-        draw_column(1, "LANE", drum_lane_name(TSEL, ui.lane), "", VAL(1u), -1, ICON_AUTO);
-        draw_column(2, "HIT", on ? "ON" : "--", "", on ? VAL(2u) : T_DIM, -1, ICON_AUTO);
-        draw_column(3, "ACC", ac ? "ON" : "--", "", ac ? VAL(3u) : T_DIM, -1, ICON_AUTO);
-        return;
-    }
     if (cur_page()->scope == SC_STEP) {
         static const char *const TIME_N[3] = {"NOTE", "TIE", "REST"};
         const step_t *st = &seq_steps(TSEL)[ui.cursor];
         char u[8];
-        uint32_t cnt = st->n, first = st->note[0], l;
-        for (l = NLANE; l-- > 0;)                         /* (lane hits count as their notes) */
-            if ((st->hit >> l) & 1u) {
-                cnt++;
-                if (!st->n)
-                    first = DRUM_LANE_NOTE[l];
-            }
+        uint32_t cnt = st->n, first = st->note[0];
         if (cnt) {
             note_name(val, first);
             u[0] = 0;
@@ -1527,8 +1459,8 @@ static void ui_draw_page(uint32_t counting)
         ui.force = 0;
         return;
     }
-    if (!ui.home && !page_visible(ui.page)) {          /* an OP page of a track that is not DIGITAL (without
-                                                         * FELUCCA_FM4: any track): EDIT 1 */
+    if (!ui.home && !page_visible(ui.page)) {          /* an engine's page (FILTER, FLT ENV) on a track of another
+                                                         * engine: EDIT 1 */
         ui.page = (uint8_t)page_first(FAM_EDIT);
         page_entered();
     }

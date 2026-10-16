@@ -14,8 +14,7 @@
  *   VEL      (1.5, #173) a step's velocity (step_t.vel), the level its notes and its hits play at (seq.c seq_step; a
  *            step that never had one, 0, plays 96; live recording stores the played one: the panel's keys 100). Not
  *            listed until + ADD VEL's OCT+ (SHOW) lists every note step inside LEN, until HIDE or the page is left (a
- *            recorded pattern would fill the list otherwise). An ACC step plays 127 whatever its VEL (DIM), a DRUM
- *            step's accented hits too; the others one value for all of the step's hits (no velocity per lane)
+ *            recorded pattern would fill the list otherwise). An ACC step plays 127 whatever its VEL (DIM)
  *   + ADD    the last
  * in the order of the steps (a step's CHANCE, its RATCH, its NUDGE, its VEL, then its records in the order they were
  * added; 1.5.5, #199: by parameter before, so KNOB 3 moved the row it edited past the step's other records).
@@ -50,8 +49,8 @@ enum { EVK_TOP, EVK_REC, EVK_CHANCE, EVK_RATCH, EVK_ADD, EVK_NUDGE, EVK_QNT, EVK
 static int ev_sid(uint32_t id) { return id >= EV_VEL && id <= EV_RATCH; }   /* a step's own field */
 static int ev_skd(uint32_t k) { return k == EVK_CHANCE || k == EVK_RATCH || k == EVK_NUDGE || k == EVK_VEL; }
 
-/* id has a row's name on track t: motion records it, and the track's sound has it (DRUM's lane levels on a DRUM
- * track, the engine's own E1..E8 that it labels; not DIGITAL's operators, retired); CHANCE, RATCH, NUDGE, VEL always */
+/* id has a row's name on track t: motion records it, and the track's sound has it (the engine's own E1..E8 that it
+ * labels; not DIGITAL's operators, retired); CHANCE, RATCH, NUDGE, VEL always */
 static int ev_id_ok(const track_t *t, uint32_t id)
 {
     const param_desc_t *d;
@@ -59,8 +58,6 @@ static int ev_id_ok(const track_t *t, uint32_t id)
         return 1;
     if (id >= P_COUNT || !motion_param(id) || id == P_ED_FX || (id >= P_FM1_ATK && id <= P_FM4_LEVEL))
         return 0;
-    if (id >= P_LN0 && id <= P_LN7)
-        return drum_track(t);
     d = track_desc(t, id);
     return d && d->label && d->label[0] && d->label[0] != '-' && d->max > d->min;
 }

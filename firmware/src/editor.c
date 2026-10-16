@@ -57,10 +57,7 @@ static void ed_send(void)
 }
 static int32_t ed_rv(const uint8_t *p) { return (int32_t)(p[0] | p[1] << 7) - 8192; }
 
-/* ---- user sample slots (eng_sample.c): flash SMP_USER_BASE + k * SMP_USER_SIZE ----
- * BEGIN erases the header sector (the slot is invalid from then on), WRITE fills the data
- * (offset >= 512, erasing each further sector when the write reaches its start), END sends
- * the header: the device checks the data CRC and writes the header last. */
+/* 7-bit groups (a backup PUT's data, editor_backup.c) -> out: their bytes, 0 = malformed */
 static uint32_t ed_unpack7(const uint8_t *a, uint32_t na, uint8_t *out, uint32_t max)
 {
     uint32_t n = 0;                                 /* groups: msb byte, then up to 7 bytes */
@@ -75,52 +72,7 @@ static uint32_t ed_unpack7(const uint8_t *a, uint32_t na, uint8_t *out, uint32_t
     }
     return na ? 0u : n;
 }
-static uint8_t ed_smp_buf[512] __attribute__((aligned(4), section(".pool")));
-static uint32_t ed_smp_slot(uint32_t k) { return SMP_USER_BASE + k * SMP_USER_SIZE; }
-static void ed_smp_inval(uint32_t k)
-{
-    fm1_irq_off();
-    fl_inval(ed_smp_slot(k), SMP_USER_SIZE);
-    fm1_irq_on();
-}
-static int ed_smp_erase(uint32_t k, uint32_t all)  /* header sector, or the whole slot */
-{
-    uint32_t i, took;
-    int rc = 0;
-    usr_nz[k] = 0;
-    for (i = 0; i < 16u; i++)
-        usr_zone[k][i].n = 0;                     /* a sounding voice ends instead of reading 0xFF */
-    for (i = 0; i < (all ? SMP_USER_SIZE / 0x1000u : 1u) && !rc; i++) {
-        audio_silence();
-        rc = fl_erase4k(ed_smp_slot(k) + i * 0x1000u, &took);
-        fm1_wdt_feed();
-    }
-    ed_smp_inval(k);
-    return rc;
-}
-static int ed_flash_stop(void);
-static int ed_smp_end(uint32_t k, const uint8_t *a, uint32_t na)
-{
-    const smp_user_hdr_t *h = (const smp_user_hdr_t *)ed_smp_buf;
-    if (ed_unpack7(a, na, ed_smp_buf, sizeof(smp_user_hdr_t)) != sizeof(smp_user_hdr_t))
-        return 1;
-    if (h->magic != SMP_USER_MAGIC || h->version != 1 || !h->nz || h->nz > 16u ||
-        h->data_len > SMP_USER_SIZE - SMP_USER_DATA)
-        return 2;
-    if (usr_nz[k])                                     /* published zones may still be read by live voices */
-        return memcmp(h, smp_user_xip(k), sizeof *h) ? 2 : 0;
-    if (ed_flash_stop())                               /* (only a header that will be written stops the transport) */
-        return 1;
-    ed_smp_inval(k);
-    if (st_crc32(smp_user_xip(k) + SMP_USER_DATA, h->data_len) != h->crc)
-        return 3;
-    if (fl_write(ed_smp_slot(k), ed_smp_buf, sizeof(smp_user_hdr_t)))
-        return 4;
-    ed_smp_inval(k);
-    smp_user_scan(k);
-    return usr_nz[k] ? 0 : 5;
-}
-
+static uint8_t ed_smp_buf[512] __attribute__((aligned(4), section(".pool")));   /* (a backup PUT's chunk) */
 /* the engine byte of DUMP / RELOAD / TRACK */
 static uint32_t ed_eng(const track_t *t) { return t->eng_req % NENGINES; }
 
@@ -291,10 +243,10 @@ static const param_desc_t *ed_desc(uint32_t scope, uint32_t id, int16_t **vp)
     return 0;
 }
 
-/* a step as STEP_SET / TRACK_STEP send it (na bytes): n, 4 notes, time, flags, vel, then (v5) the lane hits
- * and their accents: hit & 127, acc & 127, bit 7 of each (bit 0 hit, bit 1 acc), (v7) the chance, (RATCH, INFO
+/* a step as STEP_SET / TRACK_STEP send it (na bytes): n, 4 notes, time, flags, vel, then (v5) the retired DRUM grid's
+ * lane hits and accents (3 bytes, ignored; replied 0), (v7) the chance, (RATCH, INFO
  * 52 01) the hits 1..4, (NUDGE, INFO 54 01, 1.2) the nudge + 8 (0..15: -8..+7 sixteenths of the step); each value
- * made valid. 8 bytes (an editor of before the grid): the hits stay; without the chance, the ratchet or the nudge
+ * made valid. 8 bytes (an editor of before the grid): without the chance, the ratchet or the nudge
  * the step keeps its own (flags carry accent and slide only). 1.5.5 (#209, INFO 4B 01 0B): then the condition, 0 none,
  * 1..11 (core.h step_cond: it takes the chance's place). Without it a chance of 100 keeps the step's condition (an
  * editor that does not know them saw 100 there and writes it back); another chance replaces it */
@@ -307,10 +259,6 @@ static void ed_step_put(step_t *st, const uint8_t *a, uint32_t na)
     st->time = (uint8_t)(a[5] > ST_REST ? ST_REST : a[5]);
     st->flags = (uint8_t)((a[6] & (SF_ACCENT | SF_SLIDE)) | (st->flags & (SF_RATCH | SF_NUDGE)));
     st->vel = a[7] & 0x7Fu;
-    if (na >= 11u) {
-        st->hit = (uint8_t)((a[8] & 0x7Fu) | (a[10] & 1u) << 7);
-        st->acc = (uint8_t)(((a[9] & 0x7Fu) | (a[10] & 2u) << 6) & st->hit);
-    }
     if (na >= 15u && a[14] && a[14] <= NCOND) step_set_chance_v(st, 100u + a[14]);
     else if (na >= 12u && (na >= 15u || a[11] < 100u || !step_cond(st))) step_set_chance(st, a[11] <= 100u ? a[11] : 100u);
     if (na >= 13u) step_set_ratchet(st, a[12]);
@@ -326,9 +274,9 @@ static void ed_step_reply(const step_t *st)              /* the same 15 bytes */
     ed_b(st->time);
     ed_b(st->flags & (SF_ACCENT | SF_SLIDE));
     ed_b(st->vel);
-    ed_b(st->hit & 0x7Fu);
-    ed_b(st->acc & 0x7Fu);
-    ed_b((uint32_t)(st->hit >> 7) | (uint32_t)(st->acc >> 7) << 1);
+    ed_b(0);                                             /* (the retired DRUM grid's hits and accents) */
+    ed_b(0);
+    ed_b(0);
     ed_b(step_chance(st));
     ed_b(step_ratchet(st));
     ed_b((uint32_t)(step_nudge(st) + 8));
@@ -350,7 +298,6 @@ static int ed_flash_stop(void)
 
 #include "editor_preferences.c"
 #include "editor_backup.c"
-#include "editor_fm6.c"
 #include "editor_menu.c"
 #include "editor_learn.c"                    /* 1.5: MIDI LEARN's map (cmds 78, 79) */
 #include "editor_palette.c"                  /* 1.6: CUSTOM, the user's palette (cmds 80, 81) */
@@ -387,7 +334,7 @@ static void ed_motion_reply(uint32_t k, uint32_t rc, uint32_t kinds, uint32_t fu
 static int ed_args_ok(uint32_t cmd, const uint8_t *a, uint32_t n)
 {
     switch (cmd) {
-    case ED_INFO: case ED_DUMP: case ED_SMP_INFO: case ED_PING:
+    case ED_INFO: case ED_DUMP: case ED_PING:
     case ED_UI_STATE: case ED_UI_PALETTES: case ED_LEARN_GET: case ED_PALETTE_GET:
         return !n;
     case ED_GET: case ED_DESC: case ED_PRESET: case ED_PROJECT: case ED_UP_LIST:
@@ -395,7 +342,7 @@ static int ed_args_ok(uint32_t cmd, const uint8_t *a, uint32_t n)
         return n == 2u || (cmd == ED_TRACK_PARAM && n == 4u);
     case ED_SET:
         return n == 4u;
-    case ED_STEP_GET: case ED_NAMES: case ED_SMP_BEGIN: case ED_SMP_ERASE:
+    case ED_STEP_GET: case ED_NAMES:
     case ED_UP_GET: case ED_UP_LOAD: case ED_UP_ERASE: case ED_WATCH: case ED_TRACK_DUMP: case ED_MENU_DESC:
         return n == 1u;
     case ED_MENU_SET:
@@ -435,13 +382,11 @@ static void ed_handle(const uint8_t *f, uint32_t n)   /* f: the bytes between F0
     const param_desc_t *d;
     if (!ed_args_ok(cmd, a, na))
         return;
-    if ((cmd >= ED_SMP_BEGIN && cmd <= ED_SMP_INFO) || (cmd >= ED_BACKUP_LIST && cmd <= ED_BACKUP_PUT) ||
-        (cmd >= ED_FM6B_BEGIN && cmd <= ED_FM6B_END))
+    if (cmd >= ED_BACKUP_LIST && cmd <= ED_BACKUP_PUT)
         autosave_hold();                                /* (a transfer: no autosave meanwhile, project.c) */
     ed_begin(cmd);
     if (ed_ui_handle(cmd, a, na)) { ed_send(); return; }
     if (ed_backup_handle(cmd, a, na)) { ed_send(); return; }
-    if (ed_fm6_handle(cmd, a, na)) { ed_send(); return; }
     if (ed_menu_handle(cmd, a, na)) { ed_send(); return; }
     if (ed_learn_handle(cmd, a, na)) { ed_send(); return; }
     if (ed_palette_handle(cmd, a, na)) { ed_send(); return; }
@@ -478,17 +423,13 @@ static void ed_handle(const uint8_t *f, uint32_t n)   /* f: the bytes between F0
         ed_b(0x55); ed_b(1); ed_b(ed_ui_caps());             /* tagged preferences v1: commands 34..38 */
         ed_b(0x4d); ed_b(1); ed_b(64); ed_b(1);   /* motion + chance v1 (64: what it said before 1.2; 41 01 has the real count) */
         ed_b(0x42); ed_b(1); ed_b(3); /* bounded full-backup read + restore */
-        ed_b(0x46); ed_b(1); ed_b(FM6_NFACTORY); ed_b(0);   /* FM6 patches: cmds 68..71 (no bank since 1.0.3) */
         ed_b(0x53); ed_b(1); ed_b(3);   /* live sync: bit 0 WATCH while on keeps the shadow, bit 1 no RELOAD echo */
-        ed_b(0x50); ed_b(1); ed_b(3);   /* FM6 patches v2: bit 0 no bank (SLOT F1..F8, 8 OWN), bit 1 user preset
-                                         * patches (FM6 target 3, backup id 9) */
         ed_b(0x4E); ed_b(1); ed_b(ED_MENU_N);   /* MENU settings: cmds 72, 73; the items MENU_DESC offers */
         ed_b(0x52); ed_b(1); ed_b(4);   /* RATCH: a step's ratchet (1..4 hits) after its chance */
         ed_b(0x4C); ed_b(1); ed_b(1);   /* 1.1 parameter locks: MOTION ops 5..7, the kinds after the records */
         ed_b(0x41); ed_b(1); ed_b(MOTION_MAX); ed_b(MOTION_MAX >> 7);   /* 1.2: 128 motion records, MOTION op 8 */
         ed_b(0x54); ed_b(1); ed_b(NUDGE_DIV);   /* 1.2: a step's nudge (1/16 step) after its ratchet; LFO 2, QNTZ */
         ed_b(0x57); ed_b(1); ed_b(NTRK);   /* 1.2: song sections with a slot per track (SONG ops 4..7) */
-        ed_b(0x56); ed_b(1); ed_b(FM6_NBANK);   /* 1.4.1: FM6's voice bank (cmds 74..77; SLOT 9..40 = B1..B32) */
         ed_b(0x43); ed_b(1); ed_b(ML_N);   /* 1.5: MIDI LEARN's map (cmds 78, 79; editor_learn.c) */
         ed_b(0x4B); ed_b(1); ed_b(NCOND);   /* 1.5.5: a step's condition (1..11) after its nudge */
         ed_b(0x45); ed_b(1); ed_b(ED_PAL_N);   /* 1.6: CUSTOM, the user's palette: 5 colours (cmds 80, 81; editor_palette.c) */
@@ -498,14 +439,13 @@ static void ed_handle(const uint8_t *f, uint32_t n)   /* f: the bytes between F0
         if (na < 2u || !(d = ed_desc(a[0], a[1], &vp)))
             return;
         if (cmd == ED_SET && na >= 4u && !(chain_busy() && !a[0] && chain_owns(a[1]))) {
-            if (a[0] == 1 && a[1] == G_ENGSEL) {          /* engine change: the safe path (1 without FELUCCA_FM4:
-                                                           * DIGITAL's first preset, as FM6) */
+            if (a[0] == 1 && a[1] == G_ENGSEL) {          /* engine change: the safe path */
                 ed_load_t b;
                 ed_load_before(&b);
                 set_engine((uint32_t)clamp(ed_rv(a + 2), 0, NENGINES - 1));
                 ed_load_after(&b);
             } else if (d->max > d->min) {
-                *vp = (int16_t)enum_orig(d, clamp(ed_rv(a + 2), d->min, d->max));
+                *vp = (int16_t)clamp(ed_rv(a + 2), d->min, d->max);
                 if (a[0] == 0) {
                     (void)motion_capture(TSEL, a[1], *vp);
                     load_extend(TSEL);                      /* (ui.c undo: an audition's values after G_ENGSEL) */
@@ -562,16 +502,9 @@ static void ed_handle(const uint8_t *f, uint32_t n)   /* f: the bytes between F0
         if (na < 2u || a[0] >= NENGINES)
             return;
         ed_load_before(&b);
-#if !FELUCCA_FM4
-        if (a[0] == ENGI_DIGITAL)                          /* a DIGITAL preset (retired): its sound, as FM6 */
-            fm4_load_preset(TSEL, a[1]);
-        else
-#endif
-        {
-            if (a[0] != TSEL->eng_req)
-                set_engine(a[0]);
-            apply_preset(a[1]);
-        }
+        if (a[0] != TSEL->eng_req)
+            set_engine(a[0]);
+        apply_preset(a[1]);
         ed_load_after(&b);
         ui.force = 1;
         ed_b(ed_eng(TSEL));
@@ -600,60 +533,6 @@ static void ed_handle(const uint8_t *f, uint32_t n)   /* f: the bytes between F0
             ed_str(ENGINES[a[0]]->presets[i].name, 12);
         for (i = 0; i < 2u; i++)                           /* then the two edit-page titles */
             ed_str(ENGINES[a[0]]->page_title[i], 8);
-        break;
-    case ED_SMP_BEGIN:                                     /* slot -> slot, rc */
-    case ED_SMP_ERASE:
-        if (na < 1u || a[0] >= SMP_USER_SLOTS || !flash_ok)
-            return;
-        ed_b(a[0]);
-        ed_b(ed_flash_stop() || ed_smp_erase(a[0], cmd == ED_SMP_ERASE) ? 1u : 0u);
-        break;
-    case ED_SMP_WRITE: {                                   /* slot, off (3 x 7 bit), pack7 data -> slot, off, rc */
-        uint32_t off, len, rc = 0, took;
-        if (na < 5u || a[0] >= SMP_USER_SLOTS || !flash_ok)
-            return;
-        off = (uint32_t)a[1] | (uint32_t)a[2] << 7 | (uint32_t)a[3] << 14;
-        len = ed_unpack7(a + 4, na - 4u, ed_smp_buf, 256u);
-        if (off < SMP_USER_DATA || (off & 0xFFu) || !len || off + len > SMP_USER_SIZE)
-            rc = 1;
-        else if (usr_nz[a[0]])
-            rc = 4;                                        /* slot in use: SMP_BEGIN first (voices read it) */
-        else if (ed_flash_stop())
-            rc = 1;
-        else {
-            if (!(off & 0xFFFu)) {                         /* first write into a sector: erase it */
-                audio_silence();
-                rc = fl_erase4k(ed_smp_slot(a[0]) + off, &took) ? 2u : 0u;
-            }
-            if (!rc && fl_write(ed_smp_slot(a[0]) + off, ed_smp_buf, len))
-                rc = 3;
-        }
-        ed_b(a[0]);
-        ed_b(off);
-        ed_b(off >> 7);
-        ed_b(off >> 14);
-        ed_b(rc);
-        break;
-    }
-    case ED_SMP_END:                                       /* slot, pack7 header -> slot, rc */
-        if (na < 2u || a[0] >= SMP_USER_SLOTS || !flash_ok)
-            return;
-        ed_b(a[0]);
-        ed_b((uint32_t)ed_smp_end(a[0], a + 1, na - 1u));
-        break;
-    case ED_SMP_INFO:                                      /* -> per slot: zones (0 = empty), name, data KiB */
-        ed_b(SMP_USER_SLOTS);
-        ed_b(SMP_USER_SIZE / 1024u);
-        for (i = 0; i < SMP_USER_SLOTS; i++) {
-            const smp_user_hdr_t *h = (const smp_user_hdr_t *)smp_user_xip(i);
-            char nm[9] = {0};
-            uint32_t j;
-            ed_b(usr_nz[i]);
-            for (j = 0; usr_nz[i] && j < 8u; j++)
-                nm[j] = h->name[j] >= 32 && h->name[j] < 127 ? h->name[j] : 0;
-            ed_str(nm, 8);
-            ed_b(usr_nz[i] ? (h->data_len + 1023u) / 1024u : 0u);
-        }
         break;
     case ED_UP_LIST: {                                     /* start, count -> start, count, total, per slot: used, engine, name;
                                                             * (1.2) then per slot its category (category.c CAT_*, 0 unused):
@@ -708,9 +587,7 @@ static void ed_handle(const uint8_t *f, uint32_t n)   /* f: the bytes between F0
             ed_b(u ? r->note[i] & 0x7Fu : 0u);
             ed_b(u ? r->flags[i] & 0x7Fu : 0u);
         }
-        ed_b(u && up_grid(r));                  /* kind: 1 = a drum grid, then bit 7 of each step's */
-        for (i = 0; u && up_grid(r) && i < 16u; i++)   /* hits (bit 0) and accents (bit 1) */
-            ed_b((uint32_t)(r->note[i] >> 7) | (uint32_t)(r->flags[i] >> 7) << 1);
+        ed_b(0);                                /* kind: 0, a note pattern (1 was the retired drum grid) */
         ed_b(u ? up_cat_of(r) : 0u);            /* 1.2: the category (an older editor stops before it) */
         break;
     }
@@ -849,7 +726,7 @@ static void ed_handle(const uint8_t *f, uint32_t n)   /* f: the bytes between F0
         d = ed_tdesc(t, a[1]);
         if (na >= 4u && !(chain_busy() && chain_owns(a[1]))) {
             if (d->max > d->min)                           /* as SET: clamped; a fixed value stays */
-                t->p[a[1]] = (int16_t)enum_orig(d, clamp(ed_rv(a + 2), d->min, d->max));
+                t->p[a[1]] = (int16_t)clamp(ed_rv(a + 2), d->min, d->max);
             (void)motion_capture(t, a[1], t->p[a[1]]);
             ed_known(a[0], a[1]);
             ui.force = 1;

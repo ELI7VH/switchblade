@@ -5,7 +5,7 @@
  * Where: SAVE > USER, SAVE (KNOB 4, OCT+) and SAVE > PROJECT, SAVE: after the OVERWRITE? dialog when the slot is
  * used, the NAME screen opens before anything is written; OCT+ writes, OCT- cancels (back to the page, nothing
  * written). EDIT on those pages renames the selected slot (only its name is written). The name is prefilled:
- * USER the sound's own (the user preset it came from) or the automatic one ("DIGITAL 14"), PROJECT the current
+ * USER the sound's own (the user preset it came from) or the automatic one ("OB-Z 14"), PROJECT the current
  * project's (as loaded or last saved; none: "PROJECT A"), so SAVE, OCT+, OCT+ saves with the default name.
  * Writing needs the transport stopped (STOP TO SAVE; the screen stays).
  *
@@ -57,9 +57,8 @@ static void name_close(void)
         ui.force = 1;
     nm.kind = NK_NONE;
 }
-/* the keys: 2 = NAME's (silent), 1 = the DRUM grid, 3 = SONG's A..D (ui.c song_keys_on), 0 = notes (seq.c keyboard_block
- * reads song.grid) */
-static uint32_t keys_mode(void) { return name_on() ? 2u : grid_on() ? 1u : song_keys_on() ? 3u : 0u; }
+/* the keys: 2 = NAME's (silent), 3 = SONG's A..D (ui.c song_keys_on), 0 = notes (seq.c keyboard_block reads song.grid) */
+static uint32_t keys_mode(void) { return name_on() ? 2u : song_keys_on() ? 3u : 0u; }
 
 static const char *nm_group(uint32_t p)                /* white key place p's characters */
 {

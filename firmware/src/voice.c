@@ -29,7 +29,7 @@ static int32_t lfo_wave(track_t *t, uint32_t ph)
 }
 
 /* the S&H value of a new LFO cycle. Parts 1..3 draw it from the shared generator (rng); part 4 has its
- * own xorshift, so the shared sequence, which also seeds the engines' noise (PHYS, VOICE, ..), does not
+ * own xorshift, so the shared sequence, which also seeds the engines' noise, does not
  * depend on part 4's LFO (the golden renders rely on it) */
 #define LFO_SHARED_RNG 3u
 static uint32_t lfo_rand(track_t *t)
@@ -83,10 +83,10 @@ static uint32_t trk_nvoice(const track_t *t)
     return c && c < NVOICE ? c : NVOICE;
 }
 
-/* the part's voice mode: P_VOICE, POLY for an engine of hits (engine_t.oneshot: DRUM) */
+/* the part's voice mode: P_VOICE */
 static uint32_t trk_vmode(const track_t *t)
 {
-    return ENGINES[t->engine]->oneshot ? V_POLY : (uint32_t)t->p[P_VOICE];
+    return (uint32_t)t->p[P_VOICE];
 }
 
 /* ------------------------------------------------- the shared voice budget --- */
@@ -173,7 +173,7 @@ static voice_t *voice_reuse(track_t *t, voice_t *v)
     return v;
 }
 
-/* POLY allocation (within the engine's voice cap). DRUM: reuse its lane; other engines: the same note.
+/* POLY allocation (within the engine's voice cap): the same note.
  * Else a free voice: ROTATE takes
  * the next one round-robin (release tails ring out), REUSE (or any GLIDE) takes
  * the free voice whose last pitch is closest, so poly portamento moves each
@@ -185,11 +185,6 @@ static voice_t *voice_alloc(track_t *t, uint32_t note)
 {
     uint32_t i, np = trk_nvoice(t), best = np, low = np, nfree = 0;
     int32_t bd = 0x7FFFFFFF;
-    if (t->engine == ENGI_DRUM) {
-        voice_t *v = drum_reuse(t, note);
-        if (v)
-            return voice_reuse(t, v);
-    }
     for (i = 0; i < np; i++) {
         if (t->v[i].active && t->v[i].note == note)
             return voice_reuse(t, &t->v[i]);
@@ -281,7 +276,7 @@ static void voice_start(track_t *t, voice_t *v, uint32_t note, uint32_t vel, int
         t->sp_alt ^= 1u;                                /* sounding voice keeps its side (no jump) */
     }                                                   /* sounding: the attack starts from the current level */
     e->note_on(t, v);
-    if (sounding && !e->sampled) {                     /* retrigger / steal: keep phases and filter */
+    if (sounding) {                                     /* retrigger / steal: keep phases and filter */
         v->ph[0] = ph0;                                 /* states (resetting them clicks) */
         v->ph[1] = ph1;
         v->ph[2] = ph2;
@@ -317,7 +312,7 @@ static void mono_play(track_t *t, uint32_t note, uint32_t vel, int retrig, int g
             /* level: about the same sum for 8 or 4 voices at random phases */
             voice_start(t, v, note, nv >= NVOICE ? vel * 36u / 100u : nv > 1u ? vel / 2u : vel, glide);
             v->side = (uint8_t)(i & 1u);                    /* SPREAD: the detuned voices alternate */
-            if (nv > 1u && i && !ENGINES[t->engine]->sampled) {   /* random start phases: */
+            if (nv > 1u && i) {                             /* random start phases: */
                 static uint32_t seed = 0x1234567u;          /* in phase they stack, evenly spread they cancel */
                 seed = seed * 1664525u + 1013904223u;
                 v->ph[0] += seed;
@@ -388,7 +383,7 @@ static void trk_note_on(track_t *t, uint32_t note, uint32_t vel)
         t->nmono = 0;                                   /* no stale mono stack after a mode change */
         t->mono_note = 0;
         v->fine = 0;
-        voice_start(t, v, note, vel, t->p[P_GLIDE] != 0 && !ENGINES[t->engine]->oneshot);
+        voice_start(t, v, note, vel, t->p[P_GLIDE] != 0);
         return;
     }
     {
@@ -608,9 +603,7 @@ static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
     int32_t tune_fine = (song.g[G_TUNE] * 16 - tune * 100) * 2367 / 16000;   /* rest, in 1/4096 (1 ct = 2.367) */
     int32_t bend, bend16, bend_fine;
     uint32_t ti = (uint32_t)(t - trk);
-    if (ENGINES[eng_idx(t->eng_req)] == &ENG_DRUM) {
-        midi_bend_q8[ti] = midi_bend_target[ti] = 0;
-    } else {
+    {
         int32_t d = midi_bend_target[ti] - midi_bend_q8[ti];
         /* ~6 ms smoothing, with an exact landing (no permanent small offset). */
         midi_bend_q8[ti] += d > 0 ? (d < 4 ? d : (d + 3) / 4) : (d > -4 ? d : (d - 3) / 4);
@@ -633,8 +626,6 @@ static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
         }
     track_lfo_tick(t);
     esync_coef(t);                                      /* this block's envelope steps for env_tick (ENV SYNC) */
-    if (e->block)                                       /* the engine's per-part work (WHEEL: bars, rotor) */
-        e->block(t);
     for (i = 0; i < NVOICE; i++) {
         voice_t *v = &t->v[i];
         vmod_t m;
@@ -643,20 +634,8 @@ static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
             continue;
         {
             env = env_tick(t, v);
-            if (e->ownenv && v->active) {               /* the engine's envelopes (FM6): they end the voice */
-                if (e->done(t, v)) {
-                    v->active = v->gate = 0;
-                    v->stage = 0;
-                    v->env = v->env_out = 0;
-                    continue;
-                }
-                v->env = 1 << 24;                       /* (the ADSR's release never ends it) */
-                env = 32767;
-            }
-            if (e->amp)                                 /* the engine's own amplitude curve */
-                env = e->amp(t, v, env);
-            m.envq15 = e->ownenv ? 0 : env;
-            m.amp1 = e->ownenv ? env : mulq15(env, v->vel * 258);
+            m.envq15 = env;
+            m.amp1 = mulq15(env, v->vel * 258);
             if (p[P_LD_AMP])
                 m.amp1 = mulq15(m.amp1, 32767 - mulq15(p[P_LPOL] ? lfo : (lfo + 32768) >> 1, p[P_LD_AMP] * 258));
             if (fade)                                   /* linear to 0 over the fade */
@@ -671,7 +650,7 @@ static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
                 st = 1;
             v->pitch_cur += d > 0 ? (d < st ? d : st) : (-d < st ? d : -st);
         }
-        if (!env && !m.amp0 && v->stage == 2 && !e->sampled)
+        if (!env && !m.amp0 && v->stage == 2)
             continue;                                   /* held at a silent sustain (SUS 0): nothing to render */
         pitch = v->pitch_cur + tune + bend16 + ((lfo * p[P_LD_PIT] * 3) >> 15) + ((m.envq15 * p[P_ED_PIT] * 3) >> 15);
         m.pitch16 = clamp(pitch, 0, 2047);

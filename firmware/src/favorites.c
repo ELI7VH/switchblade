@@ -1,25 +1,16 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
 #define FELUCCA_FAVORITES 1
-#define FAV_ROWS 14u             /* the engines with a row of favourites */
-#define FAV_VOID_BIT 8u          /* VOID's preset k: bit 8 + k of row ENGI_DIGITAL */
+#define FAV_ROWS 4u              /* the engines with a row of favourites: the four machines (Task 1.3 rewrites this) */
 /* Stable engine/preset references; fixed capacity independent of optional engines. */
 typedef struct {
-    uint8_t factory[16][32]; /* engine 0..13, preset 0..255 (14: the MIDI LEARN map, 15: settings). VOID (engine 14)
-                              * has no row of its own: its presets are bits 8.. of DIGITAL's (engine 1, retired, never
-                              * picked in a build with VOID; byte 0 is the one settings_persist.c moves to FM6) */
+    uint8_t factory[16][32]; /* engine 0..3, preset 0..255 (rows 4..13 unused; 14: the MIDI LEARN map, 15: settings) */
     uint32_t user, filter;
 } favorites_t;
 static favorites_t favorites __attribute__((section(".pool")));
 /* where engine e's preset k is starred: its row and bit, 0 = none */
 static uint8_t *favorite_at(uint32_t e, uint32_t *k)
 {
-#if defined(FELUCCA_VOID) && FELUCCA_VOID           /* (the settings test builds this file without core.h) */
-    if (e == ENGI_VOID) {
-        *k += FAV_VOID_BIT;
-        return *k < 256u ? favorites.factory[ENGI_DIGITAL] : 0;
-    }
-#endif
     return e < FAV_ROWS && *k < 256u ? favorites.factory[e] : 0;
 }
 static int favorite_has(uint32_t engine, uint32_t preset)
