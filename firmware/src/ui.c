@@ -162,7 +162,7 @@ static struct {
     uint8_t hot_col, hot_t;      /* column whose knob was just turned (drawn white) */
     uint8_t menu;                /* 0 off, 1 list, 2 about + credits, 3 info (1.2) (HOME held) */
     uint8_t menu_sel;            /* MENU: the row (menu_items.c MI_*; its tab MI_TAB), kept while the device runs */
-    uint8_t menu_row[5];         /* MENU: the row last picked in each tab, from its first (ALGORITHM comes back to it) */
+    uint8_t menu_row[6];         /* MENU: the row last picked in each tab, from its first (ALGORITHM comes back to it) */
     uint16_t menu_scroll;        /* continuous ABOUT + CREDITS position, pixels */
     uint32_t menu_sig, home_t0;  /* HOME press time (btn_hold) */
     uint8_t force;               /* full redraw pending */
@@ -869,8 +869,10 @@ static void mom_back(const track_t *t)            /* a sound load into t (0: a p
 static void load_begin(track_t *t, uint32_t what)
 {
     uint32_t i = trk_index(t);
-    if (what & UNDO_SOUND)
+    if (what & UNDO_SOUND) {
         mom_back(t);                              /* (MOMENTARY: the sound as it was, then the load) */
+        mout_load[i] = 1;                         /* (MIDI OUT: its values are a load's, not knob turns) */
+    }
     if (undo_depth++)
         return;
     motion_restore(t);
@@ -896,6 +898,12 @@ static void load_begin(track_t *t, uint32_t what)
 
 static void load_end(track_t *t)
 {
+    uint32_t k;
+    for (k = 0; k < NTRK; k++)                    /* MIDI OUT (midi_control.c mout_block): the load's PC, if a factory */
+        if (mout_load[k] == 1u) {                 /* preset chosen here; its values taken as sent. At every end, nested */
+            mout_load[k] = (uint8_t)(mout_pcw[k] && trk[k].p[P_MOUT] != MOUT_INT ? 2u : 3u);   /* too (the power-on and */
+            mout_pcw[k] = 0;                      /* project loads count undo_depth themselves: never left held) */
+        }
     if (--undo_depth)
         return;
     if (load_mo & 1u) {                           /* a sound load: the motion on the common parameters stays */
@@ -1121,16 +1129,17 @@ static void pat_load_ui(track_t *t, uint32_t n)
 /* the track's settings, not the sound's: what a sound load (factory or user preset, an engine jump,
  * TOOLS INIT) leaves alone. The mix (LEVEL, PAN, MUTE: the TRACKS faders), the arpeggiator (ARP, ARP 2),
  * the scale and key map (SCL), the pattern parameters (LEN, DIV, SWING, GATE; 1.2: QUANTIZE) and the SLICER
- * insert, which chops whatever the track plays in time with its sequencer */
+ * insert, which chops whatever the track plays in time with its sequencer; MIDI OUT (FM1-Four), where it plays */
 static int param_kept(uint32_t i)
 {
     return i == P_LEVEL || i == P_PAN || i == P_MUTE || (i >= P_AMODE && i <= P_SGATE) ||
-           (i >= P_SLCR && i <= P_SLDEPTH) || i == P_CHRD || i == P_VOIC || i == P_SQNT;
+           (i >= P_SLCR && i <= P_SLDEPTH) || i == P_CHRD || i == P_VOIC || i == P_SQNT || i == P_MOUT;
 }
 
 #define preset_shown(e) (ENGINES[e]->npresets)
 
 static void set_engine_of(track_t *t, uint32_t ei);
+static uint8_t mpc_loading;                          /* midi_pc_poll's load: a PC received (MIDI OUT sends none back) */
 /* preset pi of the engine the track asked for: the sound only (not the steps, not param_kept) */
 static void apply_preset_to(track_t *t, uint32_t pi)
 {
@@ -1147,6 +1156,7 @@ static void apply_preset_to(track_t *t, uint32_t pi)
     }
     pi %= e->npresets;
     t->preset = (uint8_t)pi;
+    mout_pcw[trk_index(t)] = !mpc_loading;            /* (MIDI OUT: its Program Change; not for one a PC received) */
     for (i = 0; i < P_E0; i++)                        /* the rest of the sound to its defaults: a preset */
         if (!param_kept(i))                           /* sounds the same after any edit */
             t->p[i] = TP[i].def;
@@ -1234,7 +1244,9 @@ static void midi_pc_poll(void)                       /* main loop (ui_input) */
         v = ui.mpc[k];
         ui.mpc[k] = 0;
         fm1_irq_on();
+        mpc_loading = 1;
         midi_pc_load(&trk[k], v & 127u);
+        mpc_loading = 0;
         ui.force = 1;
     }
 }

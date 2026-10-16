@@ -27,6 +27,7 @@ static void reset(void)
     memset(kb_chn, 0, sizeof kb_chn); memset(mchord, 0, sizeof mchord); memset(chord_last, 0, sizeof chord_last);
     fm1_in.notes = kb_prev = 0; mo_w = mo_r = 0; usb.config = 1;
     trk[0].p[P_VOICE] = V_POLY; trk[0].p[P_SCALE] = 1; trk[0].p[P_ROOT] = 0;   /* C major, POLY */
+    trk[0].p[P_MOUT] = MOUT_BOTH;                   /* (FM1-Four: sounding and sent, as the keys were before MOUT) */
     events_block(CTL);
 }
 /* the chord track 0 plays on note r: "n1 n2 n3 [n4]" compared with want (0-terminated) */

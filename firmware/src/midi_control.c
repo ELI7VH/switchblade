@@ -18,6 +18,7 @@ static uint8_t midi_sel_on[16][128];
 #define midi_notes midi_sel_on
 static uint16_t midi_owners[NTRK];           /* avoids rescanning all 2048 entries for CC123 */
 #define MIDI_PEDAL_NOTE 0x80u
+static uint8_t mout_from_midi;               /* MIDI OUT: set while a note received is played (not sent back out) */
 
 static midi_channel_t *midi_channel(uint32_t ch)
 {
@@ -124,7 +125,16 @@ static void midi_play(track_t *t, uint32_t ch, uint32_t note, uint32_t vel)
     }
 }
 
+static void midi_note_event_in(uint32_t ch, uint32_t note, uint32_t vel);
+/* a note received: played as ever, never echoed to MIDI OUT (mout_note: mout_from_midi) */
 static void midi_note_event(uint32_t ch, uint32_t note, uint32_t vel)
+{
+    uint8_t f = mout_from_midi;
+    mout_from_midi = 1;
+    midi_note_event_in(ch, note, vel);
+    mout_from_midi = f;
+}
+static void midi_note_event_in(uint32_t ch, uint32_t note, uint32_t vel)
 {
     midi_channel_t *c = midi_channel(ch);
     uint32_t id = midi_notes[ch][note] & 0x7Fu;
@@ -247,6 +257,195 @@ static int32_t param_cc(const track_t *t, uint32_t id)
             return MIDI_CC_MAP[i][0];
     return -1;
 }
+/* ---------------------------------------------------------- MIDI OUT --- */
+/* FM1-Four (Task 2.2): per track P_MOUT, INT the machine only (as before: nothing sent), EXT external gear only (the
+ * voice silent), BOTH. USB only (the TRS jack is an input). Track N sends on its MIDI channel (trk_midi_ch: ROUT's
+ * block, TRACK its own).
+ * One context: the USB out ring (usb.c midi_out_event) has one producer, the audio ISR's control block. Notes go out
+ * from trk_note_on / trk_note_off (voice.c), which only the block calls (sequencer, arp, keys, chords, MIDI in; the one
+ * exception, project.c's seq_stop, runs with the interrupts off, so never beside the ISR);
+ * a note received is not sent back (mout_from_midi). Every note sent is remembered (mout_held) until its note-off,
+ * whatever MOUT says by then, and trk_all_off ends them all, so external gear is never left with a hung note.
+ * Knobs, VOLUME, a preset load and the mod wheel are never sent from the UI: mout_block compares, once per control
+ * block, each mapped value with the byte last sent (a CC received sets that byte: not sent back) and sends a change;
+ * a sound load (ui.c load_begin / load_end: mout_load) holds them, then sends its Program Change (t->preset, a factory
+ * preset loaded on the FM-1; none for one a PC received loaded, none for a user preset) and takes the new values as
+ * sent, so the external patch the PC chose is not overwritten by the FM-1's. Turning a track to EXT / BOTH sends
+ * nothing until a value changes. The clock (G_CLKOUT): F8 at 24 ppqn locked to the sequencer's samples, FA on PLAY
+ * (and RESTART), FC on STOP; none while the transport follows an external clock (no loop) */
+#define MOUT_NCC (4u + NELEM(MIDI_CC_MAP))          /* a track's CCs out: EDIT K1..K4, then the common rows */
+#define MOUT_CC_BLOCK 8u                            /* at most this many CCs a block (all tracks) ... */
+#define MOUT_ROOM 16u                               /* .. while the ring keeps this much free for notes and the clock */
+static uint8_t mout_held[NTRK][16];                 /* notes sent and not ended yet, a bit per note */
+static uint8_t mout_hch[NTRK];                      /* .. the channel they went out on */
+static uint8_t mout_last[NTRK][MOUT_NCC];           /* the CC values last sent (or received) */
+static uint8_t mout_mode[NTRK], mout_eng[NTRK];     /* MOUT and the machine as the block last saw them */
+static volatile uint8_t mout_load[NTRK];            /* a sound load: 1 under way, 2 done (send its PC), 3 done (no PC) */
+static uint8_t mout_pcw[NTRK];                      /* the load is a factory preset chosen on the FM-1 (ui.c) */
+static volatile uint8_t mout_mw[NTRK];              /* MENU > SELECT MODW turned: CC1 to send (ui_input.c sel_play) */
+static uint8_t mout_run;                            /* the transport as the clock last saw it */
+static uint32_t mout_cpos;                          /* clock: samples x 6 into the current 1/16 */
+
+static void mout_send(uint32_t st, uint32_t d1, uint32_t d2)
+{
+    midi_out_event(st >> 4 | st << 8 | d1 << 16 | d2 << 24);
+}
+static uint32_t mout_slot_param(const track_t *t, uint32_t s)
+{
+    return s < 4u ? ENGINES[eng_idx(t->eng_req)]->knob[s] : MIDI_CC_MAP[s - 4u][1];
+}
+static uint32_t mout_slot_cc(uint32_t s) { return s < 4u ? CC_KNOB[s] : MIDI_CC_MAP[s - 4u][0]; }
+static int32_t mout_slot(const track_t *t, uint32_t id)       /* the slot of parameter id, -1 not mapped */
+{
+    uint32_t s;
+    for (s = 0; s < MOUT_NCC; s++)
+        if (mout_slot_param(t, s) == id)
+            return (int32_t)s;
+    return -1;
+}
+/* parameter id of t as a CC value 0..127, the inverse of midi_cc_set; -1 none (no range) */
+static int32_t mout_value(const track_t *t, uint32_t id)
+{
+    const param_desc_t *d = param_desc_of(eng_idx(t->eng_req), id);
+    int32_t v = t->p[id];
+    if (d->max <= d->min)
+        return -1;
+    v = v < d->min ? d->min : v > d->max ? d->max : v;
+    return (v - d->min) * 127 / (d->max - d->min);
+}
+static void mout_resync(const track_t *t)           /* every mapped value taken as sent */
+{
+    uint32_t s, k = trk_index(t);
+    int32_t v;
+    for (s = 0; s < MOUT_NCC; s++)
+        if ((v = mout_value(t, mout_slot_param(t, s))) >= 0)
+            mout_last[k][s] = (uint8_t)v;
+}
+/* parameter id of t was set by a CC received: its value is the external gear's already */
+static void mout_heard(const track_t *t, uint32_t id)
+{
+    int32_t s = mout_slot(t, id), v;
+    if (s >= 0 && (v = mout_value(t, id)) >= 0)
+        mout_last[trk_index(t)][s] = (uint8_t)v;
+}
+/* every note t has sent ends (note-offs on the channel they went on) */
+static void mout_off_all(track_t *t)
+{
+    uint32_t k = trk_index(t), b, n;
+    for (b = 0; b < 16u; b++)                       /* (nothing held, the usual case: 16 tests) */
+        for (n = 0; mout_held[k][b] && n < 8u; n++)
+            if ((mout_held[k][b] >> n) & 1u) {
+                mout_held[k][b] &= (uint8_t)~(1u << n);
+                mout_send(0x80u | mout_hch[k], b * 8u + n, 0);
+            }
+}
+/* note on (vel 1..127) / off (vel 0) of track t: sent if MOUT is EXT or BOTH (a note-off: if its note-on was sent) */
+static void mout_note(track_t *t, uint32_t note, uint32_t vel)
+{
+    uint32_t k = trk_index(t), ch, bit = 1u << (note & 7u);
+    uint8_t *h = &mout_held[k][(note >> 3) & 15u];
+    if (note > 127u)
+        return;
+    if (!vel) {
+        if (*h & bit) {
+            *h &= (uint8_t)~bit;
+            mout_send(0x80u | mout_hch[k], note, 0);
+        }
+        return;
+    }
+    if (t->p[P_MOUT] == MOUT_INT || mout_from_midi)
+        return;
+    ch = trk_midi_ch(k);
+    if (ch != mout_hch[k]) {                         /* the channel moved: what went out before ends there */
+        mout_off_all(t);
+        mout_hch[k] = (uint8_t)ch;
+    }
+    if (*h & bit)                                   /* again while held: one note-on per note-off out there */
+        mout_send(0x80u | ch, note, 0);
+    *h |= (uint8_t)bit;
+    mout_send(0x90u | ch, note, vel > 127u ? 127u : vel);
+}
+/* parameter id of t out on its CC (param_cc), scaled 0..127, if MOUT sends and it is mapped */
+static void mout_param(track_t *t, uint32_t id)
+{
+    int32_t s = mout_slot(t, id), v = s >= 0 ? mout_value(t, id) : -1;
+    if (v < 0 || t->p[P_MOUT] == MOUT_INT)
+        return;
+    mout_last[trk_index(t)][s] = (uint8_t)v;
+    mout_send(0xB0u | trk_midi_ch(trk_index(t)), mout_slot_cc((uint32_t)s), (uint32_t)v);
+}
+static void mout_program(track_t *t)                /* Program Change: the track's preset number */
+{
+    if (t->p[P_MOUT] != MOUT_INT)
+        mout_send(0xC0u | trk_midi_ch(trk_index(t)), t->preset & 127u, 0);
+}
+static void mout_clock(uint32_t rt)                 /* 0xF8 / 0xFA / 0xFC (mout_block: CLOCK OUT on, INT clock) */
+{
+    midi_out_event(0x0Fu | rt << 8);
+}
+static int mout_room(void) { return MQ - (mo_w - mo_r) > MOUT_ROOM; }
+/* the control block's MIDI OUT (events_block, after the sequencer): the CC map's changes, a load's PC, CC1, the clock */
+static __attribute__((noinline)) void mout_block(uint32_t seq_n, uint32_t clock_mode)
+{
+    uint32_t k, s, sent = 0, p;
+    for (k = 0; k < NTRK; k++) {
+        track_t *t = &trk[k];
+        uint32_t m = (uint32_t)t->p[P_MOUT], ld = mout_load[k];
+        if (m == MOUT_INT) {                         /* (the default: next to nothing each block) */
+            mout_mode[k] = MOUT_INT;
+            mout_mw[k] = 0;
+            if (ld >= 2u)
+                mout_load[k] = 0;
+            continue;
+        }
+        if (ld == 1u)                                /* a sound load under way: its values are not changes */
+            continue;
+        if (mout_mw[k]) {
+            mout_mw[k] = 0;
+            mout_send(0xB0u | trk_midi_ch(k), 1, t->mw & 127u);
+        }
+        if (ld || mout_mode[k] != m || mout_eng[k] != t->eng_req) {
+            if (ld == 2u && mout_mode[k] == m)       /* (a load before EXT / BOTH came on: its PC is not news) */
+                mout_program(t);
+            mout_resync(t);                          /* (EXT / BOTH just on, another machine, a load: nothing sent) */
+            mout_mode[k] = (uint8_t)m;
+            mout_eng[k] = t->eng_req;
+            mout_load[k] = 0;
+            continue;
+        }
+        for (s = 0; s < MOUT_NCC && sent < MOUT_CC_BLOCK; s++) {
+            int32_t v = mout_value(t, mout_slot_param(t, s));
+            if (v < 0 || v == mout_last[k][s])
+                continue;
+            if (!usb.config)                         /* (nobody listens: taken as sent) */
+                mout_last[k][s] = (uint8_t)v;
+            else if (mout_room()) {
+                mout_last[k][s] = (uint8_t)v;
+                mout_send(0xB0u | trk_midi_ch(k), mout_slot_cc(s), (uint32_t)v);
+                sent++;
+            }                                        /* (else: the next block) */
+        }
+    }
+    if (song.g[G_CLKOUT] && !clock_mode) {
+        if (song.playing && (!mout_run || !song.tick)) {   /* PLAY (or RESTART): Start, then the first pulse with step 1 */
+            mout_clock(0xFAu);
+            mout_clock(0xF8u);
+            mout_cpos = 0;
+        } else if (song.playing) {
+            p = div_samples(2);                      /* a 1/16 is 6 pulses: exactly the sequencer's samples */
+            mout_cpos += seq_n * 6u;
+            for (s = 0; mout_cpos >= p && s < 4u; s++) {
+                mout_cpos -= p;
+                mout_clock(0xF8u);
+            }
+            if (mout_cpos >= p)                      /* (a tempo jump: no burst) */
+                mout_cpos = 0;
+        } else if (mout_run)
+            mout_clock(0xFCu);
+    }
+    mout_run = song.playing;
+}
+
 /* a CC sets parameter id of track t as a knob would: 0..127 over its range */
 static void midi_cc_set(track_t *t, uint32_t id, uint32_t value)
 {
@@ -256,6 +455,7 @@ static void midi_cc_set(track_t *t, uint32_t id, uint32_t value)
         return;
     t->p[id] = (int16_t)v;
     (void)motion_capture(t, id, (int16_t)v);
+    mout_heard(t, id);                         /* (received: not sent back out) */
 }
 /* MIDI LEARN (1.5, Discussion #170): up to ML_N CCs, each set to one parameter of one track, whatever channel it
  * comes on (a channel ROUT ignores stays ignored) and whichever track that channel plays. Kept with the settings in

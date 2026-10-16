@@ -336,12 +336,12 @@ static int route_block_test(void)
     ok &= !song.playing;
     song.g[G_CLOCK] = 0; events_block(CTL);
     bad += check("ROUT CH13-16: the USB clock (Start, pulses, Stop) runs the transport as ever", ok);
-    /* MIDI out: the keys send on the selected track's channel of the block (SEL, CH1-4: 1..4) */
+    /* MIDI out (T3 OUT BOTH): the keys send on the selected track's channel of the block (SEL, CH1-4: 1..4) */
     usb.config = 1;
     ok = 1;
     for (r = 0; r <= 4u; r++) {
         uint32_t want = (r >= 2u ? (r - 1u) * 4u : 0u) + 2u;
-        midi_test_reset(); song.g[G_ROUTE] = (int16_t)r; song.sel = 2; mo_r = mo_w; events_block(CTL);
+        midi_test_reset(); song.g[G_ROUTE] = (int16_t)r; song.sel = 2; trk[2].p[P_MOUT] = MOUT_BOTH; mo_r = mo_w; events_block(CTL);
         fm1_in.notes = 1u << 7; events_block(CTL);
         ok &= ((out_last() >> 8) & 0xFFu) == (0x90u | want);
         fm1_in.notes = 0; events_block(CTL);
@@ -458,12 +458,12 @@ static int route_track_test(void)
     frame();
     ok &= trk[0].preset == 3 && trk[2].preset == 0;
     bad += check("TRACK: a PC on channel 10 loads T1's; on 3 (T3 OFF) and 1 (no track) nothing", ok);
-    /* MIDI out: the keys of a track send on its channel (OMNI, OFF: its CH1-4 one) */
+    /* MIDI out (T3 OUT BOTH): the keys of a track send on its channel (OMNI, OFF: its CH1-4 one) */
     usb.config = 1;
     ok = 1;
     for (r = 0; r < 3u; r++) {
         uint32_t set = r == 0u ? 11u : r == 1u ? MCH_OMNI : MCH_OFF, want = r ? 2u : 11u;
-        midi_test_reset(); song.g[G_ROUTE] = ROUTE_TRACK; song.sel = 2; events_block(CTL);
+        midi_test_reset(); song.g[G_ROUTE] = ROUTE_TRACK; song.sel = 2; trk[2].p[P_MOUT] = MOUT_BOTH; events_block(CTL);
         tch(2, set); mo_r = mo_w;
         fm1_in.notes = 1u << 7; events_block(CTL);
         ok &= ((out_last() >> 8) & 0xFFu) == (0x90u | want);
@@ -814,7 +814,7 @@ static int learn_test(void)
 
     /* the stored codes with 1.5's parameters (the INSERT 96..100, TYPE 101, ESYNC 102, P_E0 103): a common parameter
      * id + 1, below ML_E0; an engine one ML_E0 + k whatever P_E0 is; every id back as it went in */
-    ok = P_E0 == 103u && P_COUNT == 111u && P_E0 < ML_E0;
+    ok = P_E0 == 104u && P_COUNT == 112u && P_E0 < ML_E0;
     for (i = 0; i < P_COUNT; i++)
         ok &= ml_id(ml_code(i)) == i && (i < P_E0 ? ml_code(i) == i + 1u && ml_code(i) < ML_E0 : ml_code(i) == ML_E0 + i - P_E0);
     ok &= ml_id(0) == P_COUNT && ml_id(P_E0 + 1u) == P_COUNT && ml_id(ML_E0 - 1u) == P_COUNT;   /* (no such parameter) */
@@ -936,9 +936,164 @@ static int pc_test(void)
     bad += check("  MIDI LEARN waiting: a PC is not taken for a CC, it loads", ok);
     return bad;
 }
+/* Task 2.2: MIDI OUT per track (P_MOUT INT / EXT / BOTH, MENU > MIDI OUT), notes from trk_note_on/off only, the fixed
+ * CC map out once per control block on a change, Program Change on a preset load, the clock (G_CLKOUT) */
+static uint32_t out_n(void) { return mo_w - mo_r; }
+static uint32_t out_pop(void) { return midi_out_q[mo_r++ % MQ]; }
+static uint32_t trk_voices_sounding(const track_t *t)    /* voices of t not idle (voice.c: stage 0 off) */
+{
+    uint32_t i, n = 0;
+    for (i = 0; i < NVOICE; i++)
+        n += t->v[i].active && t->v[i].stage != 0;
+    return n;
+}
+
+static int test_mout(void)
+{
+    int bad = 0, ok; uint32_t i, n, f8;
+    track_t *t = &trk[2];
+    int32_t quiet[2 * CTL];
+    midi_test_reset();
+    midi_silence_track(2);                                 /* (the earlier tests' voices: gone) */
+    for (i = 0; i < 4000u && trk_voices_sounding(t); i++) track_render(t, quiet, CTL);
+    bad += check("MOUT: a common parameter, INT EXT BOTH, INT by default; CLOCK OUT ON by default",
+                 P_MOUT + 1u == P_E0 && P_COUNT == 112u && TP[P_MOUT].max == 2 && TP[P_MOUT].def == MOUT_INT &&
+                 str_eq(TP[P_MOUT].names[MOUT_BOTH], "BOTH") && t->p[P_MOUT] == MOUT_INT && GP[G_CLKOUT].def == 1 &&
+                 song.g[G_CLKOUT] == 1);
+    usb.config = 1; mo_r = mo_w;
+    t->p[P_MOUT] = MOUT_INT;  trk_note_on(t, 48, 100);  trk_note_off(t, 48);
+    bad += check("INT sends nothing", out_n() == 0);
+    midi_silence_track(2);                                 /* (INT's C3 released: its voice let go, so "silent" is EXT's) */
+    for (i = 0; i < 4000u && trk_voices_sounding(t); i++) track_render(t, quiet, CTL);
+    t->p[P_MOUT] = MOUT_EXT;  trk_note_on(t, 48, 100);
+    bad += check("EXT note on ch3", out_n() == 1 && out_pop() == (0x09u | 0x92u << 8 | 48u << 16 | 100u << 24));
+    bad += check("EXT is silent inside", trk_voices_sounding(t) == 0);
+    trk_note_off(t, 48);
+    bad += check("EXT note off", out_n() == 1 && out_pop() == (0x08u | 0x82u << 8 | 48u << 16));
+    t->p[P_E4] = track_desc(t, P_E4)->max;  mout_param(t, P_E4);
+    bad += check("CUT -> CC74 127", out_n() == 1 && out_pop() == (0x0Bu | 0xB2u << 8 | 74u << 16 | 127u << 24));
+    midi_event(0x90, 2, 48, 100);              /* MIDI in on track 3's channel */
+    bad += check("no echo of MIDI in", out_n() == 0);
+    midi_event(0x80, 2, 48, 0);
+    bad += check("  .. nor of its note-off", out_n() == 0);
+
+    /* BOTH: out and inside */
+    t->p[P_MOUT] = MOUT_BOTH; trk_note_on(t, 50, 90);
+    ok = out_n() == 1 && out_pop() == (0x09u | 0x92u << 8 | 50u << 16 | 90u << 24) && trk_voices_sounding(t) > 0;
+    trk_note_off(t, 50);
+    ok &= out_n() == 1 && out_pop() == (0x08u | 0x82u << 8 | 50u << 16);
+    bad += check("BOTH: the note goes out and sounds inside", ok);
+
+    /* a held note always gets its note-off, even if MOUT changed meanwhile, and a panic ends what was sent */
+    t->p[P_MOUT] = MOUT_EXT; trk_note_on(t, 52, 100); mo_r = mo_w;
+    t->p[P_MOUT] = MOUT_INT; trk_note_off(t, 52);
+    ok = out_n() == 1 && out_pop() == (0x08u | 0x82u << 8 | 52u << 16);
+    trk_note_off(t, 52);
+    ok &= out_n() == 0;
+    t->p[P_MOUT] = MOUT_EXT; trk_note_on(t, 53, 100); trk_note_on(t, 55, 100); mo_r = mo_w;
+    trk_all_off(t);
+    ok &= out_n() == 2 && out_pop() == (0x08u | 0x82u << 8 | 53u << 16) && out_pop() == (0x08u | 0x82u << 8 | 55u << 16);
+    trk_note_off(t, 53);
+    ok &= out_n() == 0;
+    bad += check("a sent note always gets one note-off (MOUT changed meanwhile, trk_all_off), never two", ok);
+
+    /* the keys: through trk_note_on, so one note-on and one note-off, on the track's channel */
+    midi_test_reset(); song.sel = 2; trk[2].p[P_MOUT] = MOUT_EXT; events_block(CTL); mo_r = mo_w;
+    fm1_in.notes = 1u << 7; events_block(CTL);
+    ok = out_n() == 1 && ((out_pop() >> 8) & 0xFFu) == 0x92u && !trk_voices_sounding(&trk[2]);
+    fm1_in.notes = 0; events_block(CTL);
+    ok &= out_n() == 1 && ((out_pop() >> 8) & 0xFFu) == 0x82u;
+    trk[2].p[P_MOUT] = MOUT_INT; mo_r = mo_w;
+    fm1_in.notes = 1u << 7; events_block(CTL); fm1_in.notes = 0; events_block(CTL);
+    ok &= out_n() == 0;
+    bad += check("keys: EXT sends one note-on / note-off on channel 3 (none sounds); INT sends nothing", ok);
+
+    /* the sequencer's notes */
+    midi_test_reset(); song.g[G_CLKOUT] = 0; trk[2].p[P_MOUT] = MOUT_EXT;
+    trk[2].p[P_SLEN] = 16; trk[2].p[P_SDIV] = 2;
+    for (i = 0; i < 16; i++) trk[2].step[i] = (step_t){{(uint8_t)(60 + i)}, 1, ST_NOTE, 0, 100};
+    events_block(CTL); mo_r = mo_w;
+    transport_req = 1; events_block(CTL);
+    ok = out_n() == 1 && out_pop() == (0x09u | 0x92u << 8 | 60u << 16 | 100u << 24);
+    blocks(div_samples(2) / CTL + 1u);
+    for (n = 0, i = mo_r; i != mo_w; i++) n += ((midi_out_q[i % MQ] >> 8) & 0xF0u) == 0x80u;
+    ok &= n == 1u && ((midi_out_q[(mo_w - 1u) % MQ] >> 16) & 0x7Fu) == 61u;
+    transport_req = 2; events_block(CTL); mo_r = mo_w;
+    bad += check("sequencer: EXT sends its steps on channel 3 (step 1 C4, its note-off, step 2)", ok);
+
+    /* knobs: the fixed map out, once per control block, on a change only */
+    midi_test_reset(); t = &trk[2]; t->p[P_MOUT] = MOUT_EXT; events_block(CTL); mo_r = mo_w;
+    events_block(CTL);
+    ok = out_n() == 0;                                     /* (EXT on: nothing sent until something changes) */
+    { const param_desc_t *d = track_desc(t, P_E4);
+      int16_t v = (int16_t)(t->p[P_E4] == d->min ? d->max : d->min);
+      t->p[P_E4] = v; events_block(CTL);
+      ok &= out_n() == 1 && out_pop() == (0x0Bu | 0xB2u << 8 | 74u << 16 | (v == d->max ? 127u : 0u) << 24); }
+    events_block(CTL);
+    ok &= out_n() == 0;
+    t->p[P_LEVEL] = TP[P_LEVEL].max; t->p[ENGINES[t->eng_req]->knob[3]] = track_desc(t, ENGINES[t->eng_req]->knob[3])->max;
+    events_block(CTL);
+    ok &= out_n() == 2;
+    for (n = 0; out_n(); ) { uint32_t pk = out_pop(); n |= pk == (0x0Bu | 0xB2u << 8 | 7u << 16 | 127u << 24) ? 1u :
+                                                        pk == (0x0Bu | 0xB2u << 8 | 70u << 16 | 127u << 24) ? 2u : 4u; }
+    ok &= n == 3u;
+    trk[1].p[P_E4] = 3; events_block(CTL);
+    ok &= out_n() == 0;                                    /* (track 2 is INT) */
+    bad += check("knobs: CC74 once on a change (not again unchanged); LEVEL -> CC7, K4 -> CC70; INT tracks send none", ok);
+    queued(0xB2, 74, 99, 1); queued(0xB2, 7, 12, 1); events_block(CTL);
+    bad += check("a CC received is not sent back (CC74, CC7 in on channel 3: none out)", out_n() == 0 && t->p[P_LEVEL] == 12);
+
+    /* Program Change: a preset loaded on the FM-1 sends it, no CC burst; one loaded by a PC received sends nothing */
+    apply_preset_to(t, 5); events_block(CTL);
+    ok = out_n() == 1 && out_pop() == (0x0Cu | 0xC2u << 8 | 5u << 16) && t->preset == 5;
+    events_block(CTL);
+    ok &= out_n() == 0;
+    pc(2, 7); frame(); events_block(CTL); events_block(CTL);
+    ok &= t->preset == 7 && out_n() == 0;
+    bad += check("Program Change: a preset load sends PC (its CUT RES .. not as CCs); a PC received loads, sends nothing", ok);
+    trk[1].p[P_MOUT] = MOUT_INT; apply_preset_to(&trk[1], 4); events_block(CTL);
+    bad += check("  an INT track's preset load sends nothing", out_n() == 0);
+
+    /* the clock: FA and F8 at 24 ppqn from the sequencer, FC on stop; none with CLOCK OUT OFF or an external clock */
+    midi_test_reset(); events_block(CTL); mo_r = mo_w;
+    transport_req = 1; events_block(CTL);
+    ok = out_n() == 2 && out_pop() == (0x0Fu | 0xFAu << 8) && out_pop() == (0x0Fu | 0xF8u << 8);
+    for (i = 0, f8 = 0; i * CTL < 4u * div_samples(2) - CTL; i++) {
+        events_block(CTL);
+        while (out_n()) f8 += out_pop() == (0x0Fu | 0xF8u << 8) ? 1u : 100u;
+    }
+    ok &= f8 == 23u;                                       /* (+ the one with FA: 24 a beat) */
+    events_block(CTL);
+    while (out_n()) f8 += out_pop() == (0x0Fu | 0xF8u << 8) ? 1u : 100u;
+    ok &= f8 == 24u;
+    transport_req = 2; events_block(CTL);
+    ok &= out_n() == 1 && out_pop() == (0x0Fu | 0xFCu << 8);
+    events_block(CTL);
+    ok &= out_n() == 0;
+    bad += check("CLOCK OUT: FA + F8 on PLAY, 24 F8 a beat, FC on STOP, nothing stopped", ok);
+    song.g[G_CLKOUT] = 0; transport_req = 1; blocks(beat_samples() / CTL); transport_req = 2; events_block(CTL);
+    bad += check("  CLOCK OUT OFF: none", out_n() == 0);
+    song.g[G_CLKOUT] = 1; clock_setup(1); mo_r = mo_w;
+    clock_packet(1, 0xFA, 2); clock_to(1, 2, 24); clock_packet(1, 0xFC, 600);
+    bad += check("  slaved to the USB clock: no clock out (no loop)", out_n() == 0);
+    song.g[G_CLOCK] = 0; events_block(CTL);
+
+    /* MENU > MIDI OUT: T1..T4 OUT, CLOCK OUT; the project's values */
+    ok = MI_TAB[MI_TOUT1] == MTAB_MOUT && MI_TAB[MI_TOUT4] == MTAB_MOUT && MI_TAB[MI_CLKOUT] == MTAB_MOUT &&
+         str_eq(MI_NAME[MI_TOUT3], "T3 OUT") && str_eq(MI_NAME[MI_CLKOUT], "CLOCK OUT") && MI_PROJECT(MI_TOUT1) &&
+         MI_PROJECT(MI_CLKOUT) && menu_n(MI_TOUT2) == 3u && str_eq(menu_vname(MI_TOUT2, menu_get(MI_TOUT2)), "INT");
+    menu_put(MI_TOUT2, MOUT_BOTH); menu_put(MI_CLKOUT, 0);
+    ok &= trk[1].p[P_MOUT] == MOUT_BOTH && str_eq(menu_vname(MI_TOUT2, menu_get(MI_TOUT2)), "BOTH") && !song.g[G_CLKOUT] &&
+          str_eq(menu_vname(MI_CLKOUT, menu_get(MI_CLKOUT)), "OFF");
+    menu_put(MI_TOUT2, MOUT_INT); menu_put(MI_CLKOUT, 1);
+    bad += check("MENU > MIDI OUT: T1..T4 OUT (INT EXT BOTH) and CLOCK OUT (OFF ON), the project's", ok);
+    usb.config = 0; mo_r = mo_w;
+    midi_test_reset();
+    return bad;
+}
 int main(void)
 {
     int bad = controls_test() + sustain_test() + ownership_test() + clock_test(1) + clock_test(2) + clock_arp_and_boundaries() +
-              arp_ext_stop_test() + usb_burst_test() + route_test() + route_block_test() + route_track_test() + follow_test() + cc_map_test() + test_cc_contract() + learn_test() + pc_test();
+              arp_ext_stop_test() + usb_burst_test() + route_test() + route_block_test() + route_track_test() + follow_test() + cc_map_test() + test_cc_contract() + learn_test() + pc_test() + test_mout();
     printf("%s\n", bad ? "MIDI CONTROL/CLOCK TEST FAILED" : "MIDI control/clock integration tests passed"); return bad != 0;
 }

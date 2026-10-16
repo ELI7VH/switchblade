@@ -355,11 +355,20 @@ static void mono_remove(track_t *t, uint32_t note)
     t->nmono = (uint8_t)k;
 }
 
+static void mout_note(track_t *t, uint32_t note, uint32_t vel);   /* MIDI OUT (midi_control.c) */
+static void mout_off_all(track_t *t);
+/* every note of a track starts here (sequencer, arp, keys, chords, MIDI in): MIDI OUT EXT sends it instead of
+ * sounding it, BOTH sends it too */
 static void trk_note_on(track_t *t, uint32_t note, uint32_t vel)
 {
     uint32_t any = 0, i, mode = trk_vmode(t);
     if (t->p[P_MUTE])
         return;
+    if (t->p[P_MOUT] != MOUT_INT) {
+        mout_note(t, note, vel);
+        if (t->p[P_MOUT] == MOUT_EXT)
+            return;                                     /* (EXT: no voice) */
+    }
     if (t->xf_on || t->eng_req != t->engine) {          /* engine switch under way: after the fade */
         for (i = 0; i < t->xp_n && t->xp_note[i] != note; i++)
             ;
@@ -405,6 +414,7 @@ static void trk_note_on(track_t *t, uint32_t note, uint32_t vel)
 static void trk_note_off(track_t *t, uint32_t note)
 {
     uint32_t i, k = 0, mode = trk_vmode(t);
+    mout_note(t, note, 0);                              /* (a note sent out: its note-off, whatever MOUT is now) */
     for (i = 0; i < t->xp_n; i++)                       /* not sounding yet (engine switch): forget it */
         if (t->xp_note[i] != note) {
             t->xp_note[k] = t->xp_note[i];
@@ -438,6 +448,7 @@ static void trk_note_off(track_t *t, uint32_t note)
 static void trk_all_off(track_t *t)
 {
     uint32_t i;
+    mout_off_all(t);
     for (i = 0; i < NVOICE; i++) {
         t->v[i].gate = 0;
         t->v[i].stage = t->v[i].active ? 3 : 0;

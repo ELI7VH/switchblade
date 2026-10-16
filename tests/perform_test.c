@@ -378,6 +378,7 @@ static int test_keys(void)
     uint32_t mo0, fx = 1u << 3, k = 9;              /* (a button bit for FX; key 9: a white key, D4) */
     song_setup();
     usb.config = 1;
+    trk[song.sel].p[P_MOUT] = MOUT_BOTH;           /* (FM1-Four: the keys' notes go out with MIDI OUT EXT / BOTH) */
     mo_r = mo_w = 0;
     kb_mask = perf_mask = fx;
     fm1_in.buttons = fx;

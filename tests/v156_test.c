@@ -300,8 +300,11 @@ static int select_play(void)
     t->mw = 0;
     b0 = song.g[G_BPM];
     usb.config = 1;
+    t->p[P_MOUT] = MOUT_BOTH;                           /* (FM1-Four: CC1 and the keys go out with MIDI OUT EXT / BOTH) */
+    events_block(CTL);
     mo = mo_w;
     turn(EN_SELECT, 3);
+    events_block(CTL);                                  /* (sent by the audio ISR's block: the out ring's one producer) */
     ok = t->mw == 3u && str_eq(ui.msg, "MODW 3") && song.g[G_BPM] == b0 && ui.home;
     ok &= mo_w == mo + 1u && midi_out_q[mo % MQ] == (0x0Bu | (0xB0u | trk_midi_ch(song.sel)) << 8 | 1u << 16 | 3u << 24);
     turn(EN_SELECT, -5);
@@ -336,6 +339,7 @@ static int select_play(void)
     turn(EN_SELECT, 200);
     ok &= kb_vel == 127u;
     kb_vel = 100;
+    TSEL->p[P_MOUT] = MOUT_INT;
     bad += check("  VEL: the keys' velocity 1..127 (100 at power-on), shown, sounding and sent; GLO + SELECT as ever", ok);
 
     menu_put(MI_SELECT, SEL_MODW);

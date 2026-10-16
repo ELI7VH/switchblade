@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
 /* Host test of the project format (firmware/src/project.c, -DPROJ_HOST part). FM1-Four has one format, FOR4
- * (magic "FOR4", 3840 bytes, 111 parameters per track, engines 0..3 = OB-Z WAVE ACID DRIFT). Every Felucca
+ * (magic "FOR4", 3840 bytes, 112 parameters per track (FM1-Four Task 2.2: P_MOUT), engines 0..3 = OB-Z WAVE ACID DRIFT). Every Felucca
  * format (FUN1..FUN10, any size) is refused, not converted: an engine byte 1..3 of a Felucca project would
  * otherwise load as another machine. Also: the round trip (engines, steps, chain, motion with locks, name), a
  * damaged hash, an engine past the fourth, the retired FM6 area written 0 and not read.
@@ -56,10 +56,11 @@ int main(void)
                  !memcmp("FOR4", &(uint32_t){PROJ_MAGIC}, 4));
     bad += check("FOR4 fits one flash object, the retained cache in NOINIT", sizeof(project_store_t) <= 4096u - 256u &&
                  sizeof(project_store_t) == 3840u && 0xC8u + 4u * sizeof(project_store_t) <= 0x3D50u);
-    bad += check("four machines: NENGINES 4, P_COUNT 111", NENGINES == 4u && P_COUNT == 111u);
-    bad += check("name / FM6 area / MIDI offsets, 16 spare bytes before the retired area",
+    bad += check("four machines: NENGINES 4, P_COUNT 112 (P_MOUT just before P_E0)", NENGINES == 4u && P_COUNT == 112u &&
+                 P_MOUT + 1u == P_E0);
+    bad += check("name / FM6 area / MIDI offsets, 12 spare bytes before the retired area (MIDI IN's 3 among them)",
                  PROJ_NAME_OFF == 3824u && PROJ_FM6_OFF == 3312u && 68u + NTRK * (P_COUNT + 2u + NSTEP * 9u) +
-                 sizeof(chain_config_t) + sizeof(motion_store_t) + 16u == PROJ_FM6_OFF);
+                 sizeof(chain_config_t) + sizeof(motion_store_t) + 12u == PROJ_FM6_OFF);
 
     /* round trip: the four engines, presets, steps, the name, the retired FM6 area all 0 */
     four_project(&a);
@@ -78,6 +79,29 @@ int main(void)
                  !memcmp(st.raw + PROJ_NAME_OFF, "LOFI JAM\0\0\0\0", 12));
     bad += check("  the project_t form (a restored runtime copy) imports too", proj_import(&c, &a, sizeof a) &&
                  !memcmp(&c, &a, sizeof c));
+
+    /* MIDI OUT: each track's MOUT (a parameter byte) and CLOCK OUT (header byte 65) round trip; the globals before keep
+     * their bytes */
+    {
+        static project_t m;
+        static project_store_t sm;
+        m = a;
+        for (k = 0; k < NTRK; k++)
+            m.t[k].p[P_MOUT] = (int16_t)(k % 3u);
+        m.g[G_CLKOUT] = 0;
+        m.sum = proj_sum(&m);
+        ok = proj_pack(&sm, &m) && sm.raw[65] == 0u && sm.raw[62] == m.sel && proj_import(&c, &sm, sizeof sm) &&
+             !memcmp(c.g, m.g, sizeof m.g);
+        for (k = 0; k < NTRK; k++)
+            ok &= c.t[k].p[P_MOUT] == (int16_t)(k % 3u) && sm.raw[68u + k * (P_COUNT + 2u + NSTEP * 9u) + P_MOUT] == 64u + k % 3u;
+        m.g[G_CLKOUT] = 1;
+        m.sum = proj_sum(&m);
+        ok &= proj_pack(&sm, &m) && sm.raw[65] == 1u && proj_import(&c, &sm, sizeof sm) && c.g[G_CLKOUT] == 1;
+        bad += check("MIDI OUT: T1..T4 MOUT (INT EXT BOTH) and CLOCK OUT (byte 65) round trip", ok);
+        sm.raw[66] = 111u;                                 /* a FOR4 of before P_MOUT: refused, no migration */
+        reseal(&sm);
+        bad += check("  a FOR4 of 111 parameters (before MOUT) is refused", !proj_import(&c, &sm, sizeof sm));
+    }
 
     /* every Felucca magic is refused, at its own size and at FOR4's size, with a valid hash */
     {

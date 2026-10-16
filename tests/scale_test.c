@@ -77,6 +77,7 @@ static void key_events_test(void)
     memset(trk, 0, sizeof trk);
     memset(&song, 0, sizeof song);
     host_tracks_init();
+    t->p[P_MOUT] = MOUT_BOTH;               /* (FM1-Four: the keys / arp notes go out with MIDI OUT EXT / BOTH) */
     kb_prev = 0;
     usb.config = 1;
     mo_w = mo_r = 0;
@@ -118,7 +119,8 @@ static void key_events_test(void)
     t->p[P_QUANT] = 2;
     fm1_in.notes = 0;
     keyboard_block();
-    assert(t->arp_phys == 0 && t->nheld == 0 && mo_w == before + 1);
+    assert(t->arp_phys == 0 && t->nheld == 0 && mo_w == before);   /* (FM1-Four: with ARP on the arp's notes go out, not
+                                                                     * the keys': this one never played, nothing to end) */
     puts("scales: silent keys, arp, live recording, MIDI out and held-note changes ok");
 }
 

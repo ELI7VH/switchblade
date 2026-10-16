@@ -36,6 +36,9 @@ static const uint8_t ED_MENU[][2] = {
                                                        * as MIDI IN: 1..16 OMNI OFF (values 0..17), MIDI */
     {MI_MFOLLOW, 30},                                  /* 1.5.5 (#208): AUTO SELECT OFF / ON, a setting, MIDI */
     {MI_SCRWAKE, 31},                                  /* 1.5.5: SCREEN WAKE +MIDI / PANEL, a setting, MIDI */
+    {MI_TOUT1, 32}, {MI_TOUT2, 33}, {MI_TOUT3, 34}, {MI_TOUT4, 35},   /* FM1-Four: T1..T4 OUT, the tracks' P_MOUT (INT EXT
+                                                       * BOTH), the project's as MIDI IN (rc 0), MIDI OUT */
+    {MI_CLKOUT, 36},                                   /* FM1-Four: CLOCK OUT OFF / ON, the project's G_CLKOUT, MIDI OUT */
 };
 #define ED_MENU_N NELEM(ED_MENU)
 

@@ -650,18 +650,17 @@ static __attribute__((noinline)) void perf_key_remap(void)
 }
 
 /* key k plays kb_note[k] on track t: its chord (chord.c; the note alone with CHRD OFF). A note another key
- * holds already sounds: it is not started again (nor sent to MIDI OUT); the key keeps its notes */
+ * holds already sounds: it is not started again; the key keeps its notes. MIDI OUT goes from trk_note_on / off */
 static void key_on(uint32_t k, track_t *t)
 {
-    uint32_t n = chord_build(t, kb_note[k], kb_chord[k]), i, mc = trk_midi_ch(trk_index(t)), vel = kb_vel;
+    uint32_t n = chord_build(t, kb_note[k], kb_chord[k]), i, vel = kb_vel;
     kb_chn[k] = 0;
     in_key = (uint8_t)(k + 1u);                     /* (the arp keeps the key: arp_add) */
     for (i = 0; i < n; i++) {
         uint32_t x = kb_chord[k][i];
         if (midi_local_held(t, x))
             continue;
-        input_on(t, x, vel);
-        midi_out_event(0x09u | (0x90u | mc) << 8 | x << 16 | vel << 24);
+        input_on(t, x, vel);                        /* (MIDI OUT: trk_note_on sends it, or the arp its notes) */
     }
     in_key = 0;
     kb_chn[k] = (uint8_t)n;
@@ -671,14 +670,13 @@ static void key_on(uint32_t k, track_t *t)
 /* key k is up: the notes it started end, but those another key still holds */
 static void key_off(uint32_t k, track_t *t)
 {
-    uint32_t n = kb_chn[k], i, mc = trk_midi_ch(trk_index(t));
+    uint32_t n = kb_chn[k], i;
     kb_chn[k] = 0;
     for (i = 0; i < n; i++) {
         uint32_t x = kb_chord[k][i];
         if (midi_local_held(t, x))
             continue;
-        input_off(t, x);
-        midi_out_event(0x08u | (0x80u | mc) << 8 | x << 16);
+        input_off(t, x);                            /* (MIDI OUT: trk_note_off) */
     }
 }
 
@@ -1342,6 +1340,7 @@ static void events_block(uint32_t n)
         beat_pos = beat_pos < beat_samples() ? beat_pos : 0u;
         beat_n = (beat_n + 1u) & 3u;
     }
+    mout_block(seq_n, clock_mode);                    /* MIDI OUT: CC map changes, PC, the clock (midi_control.c) */
     if (song.playing)
         song.tick++;
 }

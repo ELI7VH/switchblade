@@ -51,6 +51,7 @@ static const char *const N_CLOCK[] = {"INT", "USB", "TRS"};
 static const char *const N_MIDI_INPUT[] = {"USB", "TRS"};
 /* MIDI IN (seq.c midi_base): 1..4 -> parts, 5..16 ignored / all -> selected / (1.2, append-only) 5..8, 9..12, 13..16 -> parts
  * / (1.5.5, #202) TRACK: each track its own channel (song.mch, MENU > MIDI > T1..T4 CHANNEL) */
+static const char *const N_MOUT[] = {"INT", "EXT", "BOTH"};   /* P_MOUT (MOUT_*) */
 static const char *const N_ROUTE[] = {"CH1-4", "SEL", "CH5-8", "CH9-12", "CH13-16", "TRACK"};
 static const char *const N_NOTE[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
 static const char *const N_DASH[] = {"--"};
@@ -161,6 +162,7 @@ static const param_desc_t TP[P_COUNT] = {
     [P_IMIX] = PD("MIX", F_PCT, 0, 127, 127),
     [P_FTYPE] = PE("TYPE", N_FTYPE, 0),           /* 1.5 (#104): OB-Z's and WAVE's filter, LP = as before */
     [P_ESYNC] = PE("ESYNC", N_ONOFF, 0),          /* 1.5 (#175): OFF = ATK DEC REL in ms, as before (voice.c esync) */
+    [P_MOUT] = PE("MOUT", N_MOUT, 0),             /* FM1-Four: MIDI OUT; INT = the machine only, as before (MENU > MIDI OUT) */
 };
 
 /* the INSERT's A B C as its TYPE means them (TP's ranges and defaults): the drives DRIVE TONE LEVEL, CRUSH BITS RATE
@@ -216,6 +218,7 @@ static const param_desc_t GP[G_COUNT] = {
      * editor protocol depend on, do not move */
     [G_DRLVL] = PD("-", F_INT, 0, 0, 0),
     [G_DRREV] = PD("-", F_INT, 0, 0, 0),
+    [G_CLKOUT] = PE("CLKO", N_ONOFF, 1),          /* FM1-Four: MIDI clock out (F8 FA FC) while the clock is INT */
 };
 
 static const param_desc_t *track_desc(const track_t *t, uint32_t id)

@@ -108,7 +108,7 @@ static int mom_turn(uint32_t k, int32_t s)
 }
 
 /* 1.5.6 (#84): MENU > SELECT MODW / VEL: SELECT plays. MODW: the selected track's mod wheel 0..127, as MIDI CC1 sets it (the
- * matrix's MODW source; sent as CC1 on the track's channel, where the keys' notes go); VEL: the panel keys'
+ * matrix's MODW source; sent as CC1 on the track's channel with MIDI OUT EXT / BOTH, where the keys' notes go); VEL: the panel keys'
  * velocity 1..127 (100 from power-on, as before; MIDI OUT and live recording take it). Performance state, not saved, as
  * a keyboard's wheel. The value shows in the header. GLO + SELECT is the tempo, as with PAGE */
 static void sel_play(uint32_t m, int32_t s)
@@ -118,9 +118,8 @@ static void sel_play(uint32_t m, int32_t s)
         track_t *t = TSEL;
         t->mw = (uint8_t)clamp((int32_t)t->mw + accel(EN_SELECT, s, 127), 0, 127);   /* (a byte: the ISR sees one or the
                                                                                   * other) */
-        fm1_irq_off();                                 /* (the out ring is the audio ISR's: it must not run now) */
-        midi_out_event(0x0Bu | (0xB0u | trk_midi_ch(song.sel)) << 8 | 1u << 16 | (uint32_t)t->mw << 24);
-        fm1_irq_on();
+        mout_mw[song.sel] = 1;                         /* (CC1 out with MIDI OUT EXT / BOTH: the audio ISR sends it, the out
+                                                        * ring's one producer: midi_control.c mout_block) */
         fmt_int(b, t->mw);
         ui_say("MODW ", b);
     } else {

@@ -1287,9 +1287,10 @@ static int test_menu_tabs(void)
             }
     }
     ui_prefs = 0;
-    bad += check("MENU tabs: DISPLAY CONTROL AUDIO MIDI SYSTEM (8 8 6 8 6 rows; 1.5.5: SELECT, T1..T4 CHANNEL, AUTO SELECT, SCREEN WAKE), 1..8 each in a run, fit the page; tab gaps "
-                 "constant (S, LARGE)",
-                 ok && MTAB_COUNT == 5u && str_eq(MTAB_NAME[0], "DISPLAY") && str_eq(MTAB_NAME[MTAB_MIDI], "MIDI") &&
+    bad += check("MENU tabs: DISPLAY CONTROL AUDIO MIDI MIDI OUT SYSTEM (8 8 6 8 5 6 rows; 1.5.5: SELECT, T1..T4 CHANNEL, AUTO SELECT, SCREEN WAKE; "
+                 "FM1-Four: T1..T4 OUT, CLOCK OUT), 1..8 each in a run, fit the page; tab gaps constant (S, LARGE)",
+                 ok && MTAB_COUNT == 6u && str_eq(MTAB_NAME[MTAB_MOUT], "MIDI OUT") && mtab_rows(MTAB_MOUT) == 5u &&
+                 mtab_first(MTAB_MOUT) == MI_TOUT1 && MI_TAB[MI_CLKOUT] == MTAB_MOUT && MI_LCLEAR + 1u == MI_TOUT1 && str_eq(MTAB_NAME[0], "DISPLAY") && str_eq(MTAB_NAME[MTAB_MIDI], "MIDI") &&
                  mtab_rows(MTAB_DISPLAY) == 8u && MI_TAB[MI_HOME] == MTAB_DISPLAY && mtab_rows(MTAB_CONTROL) == 8u && MI_TAB[MI_SELECT] == MTAB_CONTROL && mtab_rows(MTAB_AUDIO) == 6u &&
                  mtab_rows(MTAB_MIDI) == 8u && MI_TAB[MI_MFOLLOW] == MTAB_MIDI && MI_TAB[MI_SCRWAKE] == MTAB_MIDI && MI_SCRWAKE + 1u == MI_LCLEAR && MI_TAB[MI_LCLEAR] == MTAB_MIDI && MI_TAB[MI_TCH4] == MTAB_MIDI && mtab_rows(MTAB_SYSTEM) == 6u && MI_TAB[MI_TUNE] == MTAB_AUDIO &&   /* (1.5: LEARN CLEAR, HELP) */
                  MI_TAB[MI_MIDIIN] == MTAB_MIDI && MI_TAB[MI_INFO] == MTAB_SYSTEM && MI_INFO >= MI_VALUES);
@@ -1310,7 +1311,10 @@ static int test_menu_tabs(void)
     turn(EN_PRESET, 1); ok &= ui.menu_sel == MI_TCH1;    /* (1.5.5: T1..T4 CHANNEL) */
     turn(EN_PRESET, -1); turn(EN_PRESET, -1); ok &= ui.menu_sel == MI_LCLEAR;   /* (1.5: LEARN CLEAR, the last: round) */
     turn(EN_PRESET, 1); ok &= ui.menu_sel == MI_MIDIIN;
+    turn(EN_ALGO, 1); ok &= ui.menu_sel == MI_TOUT1 && menu_tab() == MTAB_MOUT;   /* (FM1-Four: MIDI OUT) */
+    turn(EN_PRESET, -1); ok &= ui.menu_sel == MI_CLKOUT;   /* (CLOCK OUT, the last: round) */
     turn(EN_ALGO, 1); ok &= ui.menu_sel == MI_SERIAL && menu_tab() == MTAB_SYSTEM;
+    turn(EN_ALGO, -1); ok &= ui.menu_sel == MI_CLKOUT;   /* (back at the row left there) */
     turn(EN_ALGO, -1); turn(EN_ALGO, -1); ok &= ui.menu_sel == MI_LOWCUT;
     turn(EN_ALGO, -1); ok &= ui.menu_sel == MI_LATCH;   /* (back at the row left there) */
     turn(EN_ALGO, -1); ok &= ui.menu_sel == MI_LEDS;
@@ -1400,7 +1404,7 @@ static int test_menu_tabs(void)
     hold(B_HOME);
     bad += check("MENU: HOME pressed closes it, held too (no reopen); held opens it again at the same tab and row",
                  ok && ui.menu == 1 && ui.menu_sel == MI_USB);
-    turn(EN_ALGO, 1); turn(EN_ALGO, 1); turn(EN_PRESET, -1);   /* (MIDI,) SYSTEM: ABOUT */
+    turn(EN_ALGO, 1); turn(EN_ALGO, 1); turn(EN_ALGO, 1); turn(EN_PRESET, -1);   /* (MIDI, MIDI OUT,) SYSTEM: ABOUT */
     ok = ui.menu_sel == MI_ABOUT;
     frame();
     ok &= oct_leds() == OCT_BREATH;                     /* (OCT+ opens, OCT- does nothing: dark) */
@@ -2820,8 +2824,9 @@ static int test_layer(void)
     go_title("CHORUS");
     bad += check("  CHORUS page: CRT CDP", cur_page()->fam == FAM_FX && cur_page()->id[0] == G_CRATE &&
                  cur_page()->id[1] == G_CDEPTH && cur_page()->id[2] == 0xFFu);
-    /* chording: a key held before FX stays a note, its note-off arrives */
+    /* chording: a key held before FX stays a note, its note-off arrives (T1 OUT BOTH: sounding and sent) */
     ui_power_on();
+    TSEL->p[P_MOUT] = MOUT_BOTH;
     mo = mo_w;
     key_down(white(4)); frame(); btn_down(B_FX); frame(); key_up(white(4)); frame(); btn_up(B_FX); frame();
     for (i = 0; i < 4u; i++) events_block(CTL);

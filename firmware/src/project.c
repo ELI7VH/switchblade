@@ -3,14 +3,14 @@
 /* Projects: four slots. The slots live in .noinit RAM: they survive resets and UBOOT entry. With FELUCCA_FLASH
  * (default) every save also goes to flash through storage.c, and an empty RAM slot is filled from flash on load.
  *
- * FM1-Four: FOR4 is the only project format (PROJ_MAGIC "FOR4", PROJ_STORE_SIZE bytes): P_COUNT biased-byte parameters
+ * FM1-Four: FOR4 is the only project format (PROJ_MAGIC "FOR4", PROJ_STORE_SIZE bytes): P_COUNT (112) biased-byte parameters
  * per track, engine byte 0..3 (OB-Z WAVE ACID DRIFT), 9-byte steps, the song chain, 128 motion records, the MIDI IN
  * bytes, the retired FM6 area (written 0, not read), the 12-byte name, an FNV-1a hash. Every Felucca format (FUN1..FUN10)
  * is refused, not converted: an engine byte 1..3 of a Felucca project would otherwise load as another machine.
  *
  * Built on the Mac too (tests/project_test.c, -DPROJ_HOST): the part above the #ifndef
  * PROJ_HOST needs core.h, params.c (TP) and engines.c. */
-#define PROJ_MAGIC 0x34524F46u                 /* "FOR4": 111 parameters, 128 motion records, nudges (FM1-Four, the only format) */
+#define PROJ_MAGIC 0x34524F46u                 /* "FOR4": 112 parameters, 128 motion records, nudges (FM1-Four, the only format) */
 #define PROJ_DEF_SOUND 0xFFu                   /* preset byte: the track's power-on sound, no steps */
 #define PROJ_PHYS 2u                           /* project_t.phys: PHYS without DUST and DRUM (see the top) */
 #define PROJ_NAME_LEN 12u                      /* the name: bytes PROJ_NAME_OFF.. (the reserved tail's end) */
@@ -38,19 +38,24 @@ typedef struct {
 /* Serialized FOR4 keeps the retained cache's exact extent. Params are biased bytes, steps pack n/time/flags. The reserved
  * tail is zero and covered by the hash. The tail's last 12 bytes (PROJ_NAME_OFF, just before the hash) are the project's
  * name: ASCII 32..126 (upper case), 0-padded, all 0 = no name. The four packed FM6 patches' area (PROJ_FM6_OFF, before
- * the name) is retired: written 0, not read; 16 bytes of the reserved tail are left for parameters added later. */
+ * the name) is retired: written 0, not read; 12 bytes of the reserved tail are left for parameters added later (16 before
+ * FM1-Four's P_MOUT, a byte per track). */
 #define PROJ_STORE_SIZE 3840u                  /* FOR4: a whole storage object (storage.c ST_PAYLOAD_MAX) */
 #define PROJ_NAME_OFF (PROJ_STORE_SIZE - 4u - PROJ_NAME_LEN)
 #define PROJ_FM6_OFF (PROJ_NAME_OFF - NTRK * PROJ_FM6_PACKED)
 /* 1.5.5 (#202): MIDI IN TRACK, the last 3 of FOR4's 16 spare bytes (just before the patches: the parameters a later
- * version adds grow from the other end, 13 bytes, 3 more track parameters). 24 bits LE: bits 5k..5k+4 track k's channel
+ * version adds grow from the other end: 9 bytes left after P_MOUT, 2 more track parameters). 24 bits LE: bits 5k..5k+4 track k's channel
  * as song.mch holds it (0..15 its distance up from channel k + 1, 16 OMNI, 17 OFF; 18..31 read as 0), bit 23 set: MIDI IN
  * is TRACK. Then the globals' G_ROUTE holds the block TRACK falls back to (proj_route_fallback: the block its four
  * channels make, else CH1-4), which is all a firmware before 1.5.5 reads (these bytes it never did): a TRACK project plays
  * there as that block. Every project before has them 0: channels 1..4, MIDI IN as its G_ROUTE says */
 #define PROJ_MIDI_OFF (PROJ_FM6_OFF - 3u)
 typedef union { uint32_t align; uint8_t raw[PROJ_STORE_SIZE]; } project_store_t;
-_Static_assert(G_COUNT == 27u, "FOR4 globals retain the original IDs");
+/* the header holds the first PROJ_NG globals (bytes 8..61, the original ids); G_CLKOUT (FM1-Four), the one after them, is
+ * header byte 65 (0 OFF, 1 ON) */
+#define PROJ_NG 27u
+#define PROJ_CLKOUT_AT 65u
+_Static_assert(G_COUNT == PROJ_NG + 1u && G_CLKOUT == PROJ_NG, "FOR4 globals retain the original IDs; G_CLKOUT at byte 65");
 _Static_assert(sizeof(project_store_t) == 3840u, "FOR4 storage size");
 project_store_t proj_slot[4] __attribute__((section(".noinit")));
 
@@ -141,7 +146,8 @@ static int proj_pack(project_store_t *out, const project_t *q)
     uint8_t *b = out->raw; uint32_t pos = 68u, t, i; uint32_t magic = PROJ_MAGIC, size = PROJ_STORE_SIZE, sum;
     if (!chain_valid(&q->chain) || !motion_valid(&q->motion) || P_COUNT > 127u) return 0;
     memset(out, 0, sizeof *out); memcpy(b, &magic, 4); memcpy(b + 4, &size, 4);
-    memcpy(b + 8, q->g, sizeof q->g); b[62] = q->sel; b[63] = q->parts; b[64] = q->phys; b[66] = P_COUNT;
+    memcpy(b + 8, q->g, 2u * PROJ_NG); b[62] = q->sel; b[63] = q->parts; b[64] = q->phys; b[66] = P_COUNT;
+    b[PROJ_CLKOUT_AT] = (uint8_t)(q->g[G_CLKOUT] != 0);
     for (t = 0; t < NTRK; t++) {
         for (i = 0; i < P_COUNT; i++) {
             if (q->t[t].p[i] < -64 || q->t[t].p[i] > 127) return 0;
@@ -184,7 +190,8 @@ static int proj_unpack(project_t *q, const uint8_t *b, uint32_t st)
         np != P_COUNT || 68u + NTRK * (np + 2u + NSTEP * 9u) + sizeof q->chain + sizeof q->motion > end)
         return 0;
     memset(q, 0, sizeof *q); q->magic = PROJ_MAGIC; q->size = sizeof *q;
-    memcpy(q->g, b + 8, sizeof q->g); q->sel = b[62]; q->parts = b[63]; q->phys = b[64];
+    memcpy(q->g, b + 8, 2u * PROJ_NG); q->sel = b[62]; q->parts = b[63]; q->phys = b[64];
+    q->g[G_CLKOUT] = (int16_t)(b[PROJ_CLKOUT_AT] & 1u);
     for (t = 0; t < NTRK; t++) {
         for (i = 0; i < P_COUNT; i++) { if (b[pos] > 191u) return 0; q->t[t].p[i] = (int16_t)b[pos++] - 64; }
         q->t[t].engine = b[pos++]; q->t[t].preset = b[pos++];

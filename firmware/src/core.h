@@ -67,6 +67,7 @@ enum {                          /* per-track parameters */
     P_ITYPE, P_IA, P_IB, P_IC, P_IMIX,         /* 1.5 (#78, #177): the INSERT, its TYPE, three values and MIX (fx.c) */
     P_FTYPE,                                   /* 1.5 (#104): the filter TYPE, LP (as before) / BP / HP (eng_obx.c, eng_wave.c) */
     P_ESYNC,                                   /* 1.5 (#175): ENV SYNC: ATK DEC REL as note values of the tempo (voice.c) */
+    P_MOUT,                                    /* FM1-Four: MIDI OUT, MOUT_INT / EXT / BOTH (midi_control.c mout_*) */
     P_E0, P_E1, P_E2, P_E3, P_E4, P_E5, P_E6, P_E7,
     P_COUNT
 };
@@ -86,6 +87,7 @@ enum {                          /* global parameters */
     G_DRLVL, G_DRREV,           /* inert (label "-", on no page): the GM drum part they set is gone; kept
                                  * because the ids and G_COUNT are fixed by the formats and the protocol (nothing
                                  * reads them) */
+    G_CLKOUT,                   /* FM1-Four: MENU > MIDI OUT > CLOCK OUT, OFF / ON (midi_control.c mout_clock) */
     G_COUNT
 };
 
@@ -104,6 +106,7 @@ static void params_by_count(int16_t *out, const int16_t *in, uint32_t np, const 
 
 /* ------------------------------------------------- voices, engines --- */
 enum { V_POLY, V_MONO, V_LEGATO, V_UNISON };   /* P_VOICE */
+enum { MOUT_INT, MOUT_EXT, MOUT_BOTH };         /* P_MOUT: the machine only, external gear only, both */
 typedef struct {
     uint8_t note, vel, gate, active;
     uint8_t stage;               /* env: 0 off, 1 attack, 2 decay/sustain, 3 release */
