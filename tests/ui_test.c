@@ -136,6 +136,14 @@ static struct { uint32_t stage; } felucca_dbg;
 #ifndef FELUCCA_VERSION
 #define FELUCCA_VERSION "TEST"
 #endif
+/* ui_big.c (the EDIT page's four cards): what each card drew last, its label, value and face (0 XL, 1 L, 2 M) */
+static char big_lbl[4][16], big_val[4][12];
+static int big_face[4];
+static uint32_t big_draws;
+#ifndef BIG_HOOK
+#define BIG_HOOK(k, l, v, f) (snprintf(big_lbl[(k) & 3u], 16, "%s", l), snprintf(big_val[(k) & 3u], 12, "%s", v), \
+                              big_face[(k) & 3u] = (f), big_draws++)
+#endif
 #include "../firmware/src/gfx.c"
 #include "../firmware/src/panel.c"
 #include "../firmware/src/ui.c"
@@ -3163,34 +3171,91 @@ static int engine_cycle(const char *const *want, uint32_t n)   /* EDIT tapped fr
 }
 static int test_edit_cycle(void)
 {
-    static const char *const CYC_A[] = {"EDIT 1", "EDIT 2", "FILTER", "VOICE", "VOICE 2", "VOICE 3", "EDIT 1"};   /* (1.5: FILTER) */
-    static const char *const CYC_W[] = {"EDIT 1", "EDIT 2", "FILTER", "FLT ENV", "VOICE", "VOICE 2", "VOICE 3", "EDIT 1"};
-    static const char *const CYC_P[] = {"EDIT 1", "EDIT 2", "VOICE", "VOICE 2", "VOICE 3", "EDIT 1"};   /* ACID, DRIFT */
+    static const char *const CYC_A[] = {"EDIT", "MACHINE 1", "MACHINE 2", "FILTER", "VOICE", "VOICE 2", "VOICE 3",
+                                        "EDIT"};   /* (1.5: FILTER; VOID FOUR: the big EDIT page first) */
+    static const char *const CYC_W[] = {"EDIT", "MACHINE 1", "MACHINE 2", "FILTER", "FLT ENV", "VOICE", "VOICE 2",
+                                        "VOICE 3", "EDIT"};
+    static const char *const CYC_P[] = {"EDIT", "MACHINE 1", "MACHINE 2", "VOICE", "VOICE 2", "VOICE 3", "EDIT"};   /* ACID, DRIFT */
     int bad = 0, ok;
     uint32_t i;
     ui_power_on();
     btn_down(B_EDIT); frame();
     ok = ui.home;
     btn_up(B_EDIT); frame();
-    bad += check("EDIT opens EDIT 1, when let go (not on press)", ok && str_eq(cur_page()->title, "EDIT 1"));
+    bad += check("EDIT opens EDIT (the big page), when let go (not on press)", ok && str_eq(cur_page()->title, "EDIT"));
     for (i = 0; i < NPAGES; i++)
         ok &= !str_eq(PAGES[i].title, "ENGINE");
     bad += check("no ENGINE page (engines are the EDIT layer's)", ok);
     set_engine_of(TSEL, 0);
-    bad += check("EDIT cycle (OB-Z): EDIT 1 EDIT 2 FILTER VOICE VOICE 2 VOICE 3 EDIT 1", engine_cycle(CYC_A, NELEM(CYC_A)));
+    bad += check("EDIT cycle (OB-Z): EDIT MACHINE 1 MACHINE 2 FILTER VOICE VOICE 2 VOICE 3 EDIT", engine_cycle(CYC_A, NELEM(CYC_A)));
     set_engine_of(TSEL, ENGI_WAVE);
-    bad += check("EDIT cycle (WAVE): EDIT 1 EDIT 2 FILTER FLT ENV VOICE VOICE 2 VOICE 3 EDIT 1", engine_cycle(CYC_W, NELEM(CYC_W)));
+    bad += check("EDIT cycle (WAVE): EDIT MACHINE 1 MACHINE 2 FILTER FLT ENV VOICE VOICE 2 VOICE 3 EDIT", engine_cycle(CYC_W, NELEM(CYC_W)));
     set_engine_of(TSEL, ENGI_ACID);
-    bad += check("EDIT cycle (ACID): EDIT 1 EDIT 2 VOICE VOICE 2 VOICE 3 EDIT 1 (no FILTER page)", engine_cycle(CYC_P, NELEM(CYC_P)));
+    bad += check("EDIT cycle (ACID): EDIT MACHINE 1 MACHINE 2 VOICE VOICE 2 VOICE 3 EDIT (no FILTER)", engine_cycle(CYC_P, NELEM(CYC_P)));
     set_engine_of(TSEL, ENGI_DRIFT);
-    bad += check("EDIT cycle (DRIFT): EDIT 1 EDIT 2 VOICE VOICE 2 VOICE 3 EDIT 1 (no FILTER page)", engine_cycle(CYC_P, NELEM(CYC_P)));
+    bad += check("EDIT cycle (DRIFT): EDIT MACHINE 1 MACHINE 2 VOICE VOICE 2 VOICE 3 EDIT (no FILTER)", engine_cycle(CYC_P, NELEM(CYC_P)));
     set_engine_of(TSEL, ENGI_WAVE);
     go_title("FLT ENV"); ui.fam_last[FAM_EDIT] = ui.page;
     set_engine_of(TSEL, 0); frame();
-    bad += check("FLT ENV of a track no longer WAVE falls back to EDIT 1", str_eq(cur_page()->title, "EDIT 1"));
-    go_title("EDIT 2"); ui.fam_last[FAM_EDIT] = ui.page;
+    bad += check("FLT ENV of a track no longer WAVE falls back to EDIT (the big page)", str_eq(cur_page()->title, "EDIT"));
+    go_title("MACHINE 2"); ui.fam_last[FAM_EDIT] = ui.page;
     go_home(); press(B_EDIT);
-    bad += check("EDIT remembers its last page (as every family)", str_eq(cur_page()->title, "EDIT 2"));
+    bad += check("EDIT remembers its last page (as every family)", str_eq(cur_page()->title, "MACHINE 2"));
+    return bad;
+}
+
+/* VOID FOUR (Task 3.2): EDIT opens the big page, its four cards KNOB 1..4 = the machine's knob[] (CUT RES ENV + its own) */
+static int screen_has_text(const char *s)            /* a big card drew s as its label (BIG_HOOK) */
+{
+    uint32_t k;
+    for (k = 0; k < 4u; k++)
+        if (str_eq(big_lbl[k], s))
+            return 1;
+    return 0;
+}
+static int test_edit_big(void)
+{
+    static const char *const MLBL[NENGINES] = {"DETUNE", "POSITION", "DECAY", "DRIVE"};
+    int bad = 0;
+    uint32_t e;
+    for (e = 0; e < NENGINES; e++) {
+        int16_t cut0, k4, env0;
+        int ok;
+        ui_power_on(); song.sel = (uint8_t)e; set_engine_of(TSEL, e); frame();
+        memset(big_lbl, 0, sizeof big_lbl);
+        press(B_EDIT); frame();
+        bad += check("EDIT opens the big page", str_eq(PAGES[ui.page].title, "EDIT") && !ui.home);
+        TSEL->p[P_E4] = 60; TSEL->p[ENGINES[e]->knob[3]] = 40; TSEL->p[P_ED_FLT] = 0; frames(700);
+        cut0 = TSEL->p[P_E4]; k4 = TSEL->p[ENGINES[e]->knob[3]]; env0 = TSEL->p[P_ED_FLT];
+        turn(EN_K1, 5); frame();
+        bad += check("  K1 turns CUT", TSEL->p[P_E4] > cut0);
+        ok = ui.hot_col == 0u && ui.hot_t != 0u;
+        turn(EN_K4, 5); frame();
+        bad += check("  K4 turns the machine's own control (knob[3])", TSEL->p[ENGINES[e]->knob[3]] != k4);
+        ok &= ui.hot_col == 3u && ui.hot_t != 0u;
+        bad += check("  the knob just turned is hot (its accent)", ok);
+        turn(EN_K3, 6); frame();
+        bad += check("  K3 turns ENV (bipolar): \"+\" before a positive value",
+                     TSEL->p[P_ED_FLT] > env0 && big_val[2][0] == '+');
+        turn(EN_K3, -12); frame();
+        bad += check("  .. \"-\" before a negative one", TSEL->p[P_ED_FLT] < 0 && big_val[2][0] == '-');
+        bad += check("  labels CUTOFF RESONANCE ENV and the machine's, spelled out",
+                     screen_has_text("CUTOFF") && screen_has_text("RESONANCE") && screen_has_text("ENV") &&
+                     screen_has_text(MLBL[e]) && str_eq(big_lbl[3], MLBL[e]));
+        bad += check("  a two-figure value in XL", (TSEL->p[ENGINES[e]->knob[3]] = 40, ui.force = 1, frame(),
+                                                   str_len(big_val[3]) == 2u && big_face[3] == 0));
+        {   /* MIDI LEARN: a turn picks the parameter of the card (ml_knob), as on every page */
+            ml_toggle(); turn(EN_K2, 1); frame();
+            bad += check("  MIDI LEARN: K2 picks RES (P_E5)", ui.ml.on && ui.ml.id == P_E5);
+            ml_off();
+        }
+    }
+    {   /* EDIT taps on: MACHINE 1, MACHINE 2, then the deeper pages */
+        ui_power_on(); frame();
+        press(B_EDIT); frames(320); press(B_EDIT); frames(320);
+        bad += check("EDIT again: MACHINE 1, then MACHINE 2", str_eq(cur_page()->title, "MACHINE 1") &&
+                     (press(B_EDIT), frames(320), str_eq(cur_page()->title, "MACHINE 2")));
+    }
     return bad;
 }
 
@@ -3215,7 +3280,7 @@ static int test_quick_layers(void)
         for (flash = 0, k = 0; k < 20u; k++) { frame(); flash |= ui.layer; }      /* 0.32 s */
         btn_up(LB[i]); frame();
         ok &= !flash && !ui.home && (LB[i] == B_GLO ? str_eq(cur_page()->title, "SONG") :
-                                     LB[i] == B_SCL ? cur_page()->fam == FAM_SCL : str_eq(cur_page()->title, "EDIT 1"));
+                                     LB[i] == B_SCL ? cur_page()->fam == FAM_SCL : str_eq(cur_page()->title, "EDIT"));
         hint &= msg_is(HINT[i]);
         go_home(); frame();
         btn_down(LB[i]); frames(368);
@@ -8275,6 +8340,7 @@ int main(void)
     bad += test_browse_no_pattern();
     bad += test_name();
     bad += test_edit_cycle();
+    bad += test_edit_big();
     bad += test_quick_layers();
     bad += test_chord_page();
     bad += test_bughunt_ui();

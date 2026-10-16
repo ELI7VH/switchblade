@@ -690,7 +690,8 @@ static void page_title(char *ti)
     const track_t *t = TSEL;
     const engine_t *e = ENGINES[t->eng_req % NENGINES];
     uint32_t i, n = 0, k = 0;
-    const char *pt = pg->scope == SC_ENGINE ? e->page_title[pg->id[0] != P_E0] : 0;   /* EDIT: the engine's */
+    const char *pt = pg->scope == SC_ENGINE && pg->graph != GR_BIG ? e->page_title[pg->id[0] != P_E0] : 0;   /* MACHINE
+                                                                          * 1 / 2: the engine's names; EDIT its own */
     for (i = 0; i < NPAGES; i++)
         if (PAGES[i].fam == pg->fam && page_visible(i)) {
             n++;
@@ -1130,8 +1131,14 @@ static int32_t meter_px(int32_t a)                   /* |sample| (Q15) -> px: 60
 static void knob_arc(int32_t x, int32_t y, int32_t r, const uint8_t *cov, const uint8_t *ang, int32_t lo, int32_t hi,
                      uint16_t tr, uint16_t vc, uint16_t bg)
 {
-    const uint16_t *rt = ramp(tr, bg), *rv = ramp(vc, bg);
+    uint16_t rt[16], rv[16];                         /* (copies: the second ramp() may take the first's cache slot) */
     int32_t i, j, m;
+    const uint16_t *rp = ramp(tr, bg);
+    for (i = 0; i < 16; i++)
+        rt[i] = rp[i];
+    rp = ramp(vc, bg);
+    for (i = 0; i < 16; i++)
+        rv[i] = rp[i];
     for (j = 0; j < r; j++)
         for (i = 0; i < r; i++) {
             uint32_t k = (uint32_t)(j * r + i), a = (cov[k >> 1] >> ((k & 1u) ? 0 : 4)) & 15u;
@@ -1758,6 +1765,8 @@ static void draw_graph(void)
         draw_tracks();
         return;
     }
+    if (big_page())                                  /* EDIT: no panel (ui_big.c: its cards cover it) */
+        return;
     if (ui.home && home_tracks()) {                  /* MENU > HOME TRACKS (1.3) */
         draw_home_tracks();
         return;

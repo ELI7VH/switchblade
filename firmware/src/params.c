@@ -394,7 +394,8 @@ enum { FAM_HOME, FAM_ENV, FAM_LFO, FAM_FX, FAM_SCL, FAM_EDIT, FAM_GLO, FAM_SAVE,
        FAM_COUNT };
 enum { SC_TRACK, SC_GLOBAL, SC_ENGINE, SC_STEP, SC_TRK };   /* SC_TRK: the TRACKS page (ui_input.c tracks_edit) */
 enum { GR_NONE, GR_ADSR, GR_LFO, GR_STEPS, GR_ARP, GR_SCALE, GR_FX, GR_ROLL, GR_BROWSE, GR_SLOTS, GR_USER, GR_TRK,
-       GR_SLCR, GR_MOD, GR_PATS, GR_SONG, GR_TOOLS, GR_CHORD, GR_EVENTS, GR_INS };   /* (GR_STEPS: SEQ TOOLS' knobs) */
+       GR_SLCR, GR_MOD, GR_PATS, GR_SONG, GR_TOOLS, GR_CHORD, GR_EVENTS, GR_INS,
+       GR_BIG };   /* (GR_STEPS: SEQ TOOLS' knobs; GR_BIG: VOID FOUR's EDIT, four big cards, ui_big.c) */
 
 typedef struct {
     const char *title;
@@ -419,8 +420,10 @@ static const page_t PAGES[] = {
     {"CHORUS", FAM_FX, SC_GLOBAL, GR_NONE, {G_CRATE, G_CDEPTH, 0xFF, 0xFF}},
     {"SCL", FAM_SCL, SC_TRACK, GR_SCALE, {P_ROOT, P_SCALE, P_QUANT, P_TRANS}},
     {"CHORD", FAM_SCL, SC_TRACK, GR_CHORD, {P_CHRD, P_VOIC, 0xFF, 0xFF}},   /* SCL again: the chord keys (chord.c) */
-    {"EDIT 1", FAM_EDIT, SC_ENGINE, GR_NONE, {P_E0, P_E1, P_E2, P_E3}},
-    {"EDIT 2", FAM_EDIT, SC_ENGINE, GR_NONE, {P_E4, P_E5, P_E6, P_E7}},
+    {"EDIT", FAM_EDIT, SC_ENGINE, GR_BIG, {0xFF, 0xFF, 0xFF, 0xFF}},   /* VOID FOUR: the machine's four controls,
+                                                                       * engine_t.knob[] (page_id), as big cards */
+    {"MACHINE 1", FAM_EDIT, SC_ENGINE, GR_NONE, {P_E0, P_E1, P_E2, P_E3}},
+    {"MACHINE 2", FAM_EDIT, SC_ENGINE, GR_NONE, {P_E4, P_E5, P_E6, P_E7}},
     {"FILTER", FAM_EDIT, SC_TRACK, GR_NONE, {P_FTYPE, P_E4, P_E5, P_E7}},
     {"FLT ENV", FAM_EDIT, SC_TRACK, GR_ADSR, {P_FM1_ATK, P_FM1_DEC, P_FM1_SUS, P_FM1_REL}},   /* WAVE only: its filter
                                                                    * envelope (eng_wave.c; the retired DIGITAL's operator 1 ids) */
@@ -452,9 +455,16 @@ static const page_t PAGES[] = {
 #define NPAGES (sizeof(PAGES) / sizeof(PAGES[0]))
 static uint8_t mod_ui_slot;      /* the MOD page: the matrix slot (0..3) KNOB 2..4 edit */
 
+/* the parameter KNOB slot edits on pg: its id, the EDIT page's (GR_BIG) the selected track's machine's knob[slot]
+ * (CUT RES ENV + the machine's own: the knobs, the cards, MIDI LEARN and the locks all go through here) */
+static uint32_t page_id(const page_t *pg, uint32_t slot)
+{
+    return pg->graph == GR_BIG ? ENGINES[TSEL->eng_req % NENGINES]->knob[slot & 3u] : pg->id[slot & 3u];
+}
+
 static const param_desc_t *page_desc(const page_t *pg, uint32_t slot, int16_t **valp)
 {
-    uint32_t id = pg->id[slot];
+    uint32_t id = page_id(pg, slot);
     if (id == 0xFFu) {
         *valp = 0;
         return 0;

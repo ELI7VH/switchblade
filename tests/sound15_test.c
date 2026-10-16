@@ -209,9 +209,9 @@ static void test_filter(void)
         for (i = 0; i < NPAGES; i++)
             if (str_eq(PAGES[i].title, "FILTER"))
                 k = i + 1u;
-        check("EDIT > FILTER: TYPE CUT RES KTR (ANALOG's), after EDIT 2",
+        check("EDIT > FILTER: TYPE CUT RES KTR (ANALOG's), after MACHINE 2",
               k && PAGES[k - 1u].fam == FAM_EDIT && PAGES[k - 1u].id[0] == P_FTYPE && PAGES[k - 1u].id[1] == P_E4 &&
-              PAGES[k - 1u].id[2] == P_E5 && PAGES[k - 1u].id[3] == P_E7 && str_eq(PAGES[k - 2u].title, "EDIT 2"));
+              PAGES[k - 1u].id[2] == P_E5 && PAGES[k - 1u].id[3] == P_E7 && str_eq(PAGES[k - 2u].title, "MACHINE 2"));
     }
     /* (every engine but ANALOG and VOID ignored TYPE: FM1-Four has none such, ACID and DRIFT play OB-Z's render until
      * their phases) */

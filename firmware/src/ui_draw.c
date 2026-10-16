@@ -321,6 +321,8 @@ static void head_group(void)
     GFX_HOOK_ALIGN(0, 0, 0, H_HEAD, AL_V, "header text on its middle");
     cv_text(x + 4, HEAD_MY, &AF_M, b, T_THEME);
 }
+static void head_big(int32_t x, int32_t r);         /* (ui_big.c: the EDIT page's header) */
+static void sound_name(const track_t *t, char *b);
 static void draw_head(void)
 {
     static int16_t metro_x = -1;                       /* the metronome's ink as drawn (-1: hidden), its beat */
@@ -336,8 +338,16 @@ static void draw_head(void)
                    (uint32_t)seq_counting() * 7u + (ui_prefs & PREF_BPM_LOCK) * 4099u +
                    (uint32_t)batt_shown() * 7777u + (chain.running ? (chain.row + 1u) * 104729u : 0u) +
                    (slot ? str_hash(11u, sl) : 0u) + (uint32_t)midi_lit(song.sel) * 15485863u;   /* (1.5.5) */
+    if (!ui.msg_t && !ui.layer && !ui.bpm_t && big_page()) {   /* EDIT: the machine and the sound */
+        char pn[16];
+        sound_name(TSEL, pn);
+        sig = str_hash(sig + 0xB16u + TSEL->eng_req * 7u, pn);
+    }
     int msg = ui.msg_t || ui.layer;
-    int centre = !msg || ui.bpm_t || ui.layer == LAYER_GLO;   /* the BPM being changed: it stays, the message right */
+    int big = !msg && !ui.bpm_t && big_page();         /* EDIT (ui_big.c): the machine and the sound (the BPM turned:
+                                                        * the BPM header) */
+    int centre = !big && (!msg || ui.bpm_t || ui.layer == LAYER_GLO);   /* the BPM being changed: it stays, the message
+                                                        * right */
     int32_t rx = HEAD_REC_X;
     if (song.g[G_BPM] != ui.roll_bpm) {
         char a[8];
@@ -381,7 +391,10 @@ static void draw_head(void)
         rx += 1;                                       /* (the REC mark's cell after it, its ink 3 px on) */
     }
     draw_rec_mark(rx, T_BG);
-    if (centre) {
+    if (big) {                                         /* EDIT: after the REC mark (its ink rx + 3 .. 13), or in its
+                                                        * place when no track is armed */
+        head_big(song.rec ? rx + 18 : rx + 4, HEAD_GRP_R);
+    } else if (centre) {
         int32_t ib[4], lx = g.bx + g.b[2];             /* lx: the right end of the BPM (and its lock) */
         uint32_t id = song.playing ? (chain.running ? ICON_X_SONG : ICON_X_PLAY) : seq_counting() ? ICON_X_PLAY : ICON_X_STOP;
         icon_ink(16, id, ib);                          /* the play state: the song's disc, play (counting in: the
@@ -406,7 +419,7 @@ static void draw_head(void)
     } else {
         head_msg(-1, HEAD_MSG_W);
     }
-    if (!msg && (chain.running || song.octave))
+    if (!msg && !big && (chain.running || song.octave))
         head_group();
     if (!(msg && centre))
         draw_battery(HEAD_BAT_X);
@@ -455,6 +468,8 @@ static void draw_gaps(uint32_t y, uint32_t h)
 static void draw_frame(void)
 {
     uint32_t ch = card_h(), gy = graph_y(), gh = graph_h();   /* (MENU > LARGE: tall cards, a strip) */
+    if (big_page())                                     /* EDIT: its strips cover every row (ui_big.c) */
+        return;
     gap_rows(H_HEAD, Y_LABEL);
     gap_rows(Y_LABEL + ch, gy);
     gap_rows(gy + gh, Y_FOOT);
@@ -739,6 +754,8 @@ static void sound_name(const track_t *t, char *b)
         str_cpy(b, e->presets[t->preset % e->npresets].name, 16);
 }
 
+#include "ui_big.c"                                 /* VOID FOUR's EDIT page: four big cards */
+
 static void draw_foot(void)
 {
     char s[48], pn[16], ti[20], ln[24];
@@ -748,6 +765,9 @@ static void draw_foot(void)
     const engine_t *e = ENGINES[TSEL->eng_req % NENGINES];
     const char *ename = e->name, *help;
     int32_t x;
+    int big = big_page();                              /* EDIT (ui_big.c): row 1 only, 28 px (its header names the
+                                                        * machine and the sound), on its middle */
+    int32_t oy = big ? 6 : 0;
     sound_name(t, pn);
     if (ui.home)
         str_cpy(ti, "HOME", sizeof ti);
@@ -762,7 +782,7 @@ static void draw_foot(void)
         uint32_t ph = song.playing && t->seq_idx / 16u == ui.bank ? t->seq_idx : 0xFFu;
         sig = str_hash(0x9E3779B9u, s) + ph * 97u + (song.seq_mode ? ui.cursor : 0xFFu) * 3001u + steps_hash(t) +
               (ui.home ? 0u : page_icon(pg)) * 7121u +
-              ui.bank * 7u + (uint32_t)t->p[P_SLEN] * 13u;
+              ui.bank * 7u + (uint32_t)t->p[P_SLEN] * 13u + (uint32_t)big * 0x5BD1E995u;
     }
     if (act_cols()) {                                  /* the hint, and whether OCT+ would act */
         char ha[16], hb[16];
@@ -780,7 +800,8 @@ static void draw_foot(void)
     if (!ui.force && sig == ui.foot_sig)
         return;
     ui.foot_sig = sig;
-    cv_begin(240, H_FOOT, T_BG);
+    cv_begin(240, big ? BIG_FOOT_H : H_FOOT, T_BG);
+    cv_oy = oy;                                       /* (EDIT: row 1 lower) */
     if (help) {                                       /* row 1: the hint in place of the steps or the OCT+ / OCT- hint */
         help_row(help, 2);
     } else if (act_cols()) {                          /* row 1: the OCT+ / OCT- hint in place of the steps */
@@ -821,6 +842,11 @@ static void draw_foot(void)
             else if (song.playing && si == t->seq_idx)
                 cv_rect(sx, 14, 9, 2, T_TEXT);          /* the step sounding */
         }
+    }
+    cv_oy = 0;
+    if (big) {
+        cv_blit(0, BIG_FOOT_Y);
+        return;
     }
     {   /* row 2: engine icon + name, sound, page title at the right with its icon before it (MIXER, PHRASES, SONG,
          * AUTOMATION); icons: their ink on the names' capitals */
@@ -881,6 +907,10 @@ static void draw_columns(void)
             else
                 draw_column(c, d->label, val, unit, VAL(c), RATIO(d, enum_rank(d, *vp)), param_icon(d, *vp));
         }
+        return;
+    }
+    if (big_page()) {                                /* EDIT: four big cards (ui_big.c) */
+        draw_edit_big();
         return;
     }
     if (cur_page()->graph == GR_SONG) {             /* SECTION, TRACK, its PAT (A..D, -), REPS (the section's) */

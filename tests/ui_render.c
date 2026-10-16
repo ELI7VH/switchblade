@@ -160,7 +160,9 @@ static int32_t icon_cell(uint32_t *size, uint32_t id);
 static void hk_icon(int32_t x, int32_t y, uint32_t size, uint32_t id);   /* (after the icons: their cells' nibbles) */
 #define GFX_HOOK_ALIGN(x0, y0, x1, y1, mode, tag) hk_align(x0, (y0) + cv_oy, x1, (y1) + cv_oy, mode, tag)
 static uint8_t pen_h;                           /* GFX_HOOK_PEN: the line height of the text being hooked (its face) */
-#define GFX_HOOK_PEN(y, f) (pen_h = (f)->h, al_n ? (al_cy0 = (y) + cv_oy + (f)->g[glyph((f), 'H')].by, al_cy1 = al_cy0 + (f)->g[glyph((f), 'H')].bh) : 0)
+/* (the capitals' band: H's ink; a figures-only face, XL: 1's, as gen_aa_font.py's AF_XL_CAP_Y) */
+#define PEN_CAP(f) (glyph_at((f), 'H') >= 0 ? 'H' : '1')
+#define GFX_HOOK_PEN(y, f) (pen_h = (f)->h, al_n ? (al_cy0 = (y) + cv_oy + (f)->g[glyph((f), PEN_CAP(f))].by, al_cy1 = al_cy0 + (f)->g[glyph((f), PEN_CAP(f))].bh) : 0)
 #define GFX_HOOK_ITEM(x0, y0, x1, y1) al_item(x0, (y0) + cv_oy, x1, (y1) + cv_oy, 1, "cushion")
 #define GFX_HOOK_ICON(x, y, size, id) hk_icon(x, (y) + cv_oy, size, id)
 static char splash_seen[96];                    /* the splash scene: its texts as drawn, '|' between (draw) */
@@ -174,7 +176,7 @@ static void hk_text(int32_t x0, int32_t y0, int32_t x1, int32_t y1, const char *
     if (npend >= 256u) return;
     pend[npend] = (rbox_t){(int16_t)x0, (int16_t)y0, (int16_t)x1, (int16_t)y1, (uint8_t)flags, {0}};
     strncpy(pend[npend].s, s, 27);
-    pend[npend].fnt = (flags & 4u) ? 'K' : pen_h >= 30u ? 'L' : pen_h >= 18u ? 'M' : 'S';
+    pend[npend].fnt = (flags & 4u) ? 'K' : pen_h >= 45u ? 'X' : pen_h >= 30u ? 'L' : pen_h >= 18u ? 'M' : 'S';
     pen_h = 0;
     npend++;
 }
@@ -627,7 +629,8 @@ enum { S_HOME, S_HOME_IDLE, S_MESSAGE, S_MESSAGE_KEY, S_PRESETS, S_PRESETS_NOFAV
        S_DETAIL_PLAYING, S_DETAIL_REST, S_ROLL_MARKS, S_HELP_DETAIL, S_DETAIL_COND, S_DETAIL_FILL, S_AUTO_COND,
        S_GLO_FILL, S_SEQ_EUCLID, S_SEQ_EUCLID_64, S_MENU_SELECT, S_PROJECT_ERASE, S_CONFIRM_ERASE_PROJ,
        S_TOOLS_CLEAN, S_CONFIRM_CLEAN, S_MENU_MIDI_TRACK, S_MENU_MIDI_TCH_UNUSED, S_MENU_MIDI_AUTO,
-       S_HOME_TRACKS_MIDI, S_MIXER_MIDI, S_COUNT };
+       S_HOME_TRACKS_MIDI, S_MIXER_MIDI, S_EDIT_BIG_OBX, S_EDIT_BIG_WAVE, S_EDIT_BIG_ACID, S_EDIT_BIG_DRIFT,
+       S_COUNT };
 static const char *const S_NAME[S_COUNT] = {"home", "home_idle", "message", "message_key", "presets",
     "presets_nofav", "user", "phrases", "project", "tools", "song_empty", "song", "step", "auto_steps",
     "auto_add_chance", "automation", "mixer", "mixer_from_home", "mixer_pan", "env", "env_dest", "lfo", "mod", "fx",
@@ -656,7 +659,8 @@ static const char *const S_NAME[S_COUNT] = {"home", "home_idle", "message", "mes
     "detail", "detail_playing", "detail_rest", "roll_marks", "help_detail", "detail_cond", "detail_fill",
     "auto_cond", "layer_glo_fill", "layer_seq_euclid", "layer_seq_euclid_64", "menu_select", "project_erase",
     "confirm_erase_project", "tools_clean", "confirm_clean", "menu_midi_track", "menu_midi_channels_unused",
-    "menu_midi_auto_select", "home_tracks_midi", "mixer_midi"};
+    "menu_midi_auto_select", "home_tracks_midi", "mixer_midi", "edit_big_obx", "edit_big_wave", "edit_big_acid",
+    "edit_big_drift"};
 
 /* the STEP page's piano roll (ui_graph.c graph_roll) on track 1, stopped unless said: an empty pattern; ACID in
  * A minor; POLY chords (Am7 F C G, tied); a line with ties, slides and accents in C major; LEN 32 on its second
@@ -1010,8 +1014,8 @@ static void setup(int s)
     /* 1.5 MIDI LEARN (midi_learn.c): on, nothing picked (MIXER); T1 CUT picked, no CC yet (EDIT 2); T1 CUT on CC74 (its
      * message in the header); the widest line, a 5-letter label waiting; GLO's map with LEARN on (D4) */
     case S_LEARN_WAIT: go_page(GR_TRK); ml_toggle(); ui.msg_t = 0; break;
-    case S_LEARN_PICK: go_title("EDIT 2"); ml_toggle(); ml_knob(TSEL, P_E4); ui.msg_t = 0; ui.hot_col = 0; ui.hot_t = 30; break;
-    case S_LEARN_SET: go_title("EDIT 2"); ml_toggle(); ml_learn(74, 0, P_E4); ml_knob(TSEL, P_E4); break;
+    case S_LEARN_PICK: go_title("MACHINE 2"); ml_toggle(); ml_knob(TSEL, P_E4); ui.msg_t = 0; ui.hot_col = 0; ui.hot_t = 30; break;
+    case S_LEARN_SET: go_title("MACHINE 2"); ml_toggle(); ml_learn(74, 0, P_E4); ml_knob(TSEL, P_E4); break;
     case S_LEARN_LONG: {                             /* "T4 <label>: SEND A CC": the widest EDIT label of any engine */
         uint32_t e, k, be = 0, bk = 0, bw = 0;
         for (e = 0; e < NENGINES; e++)
@@ -1020,11 +1024,11 @@ static void setup(int s)
                 uint32_t w = l ? str_len(l) : 0u;
                 if (w > bw) bw = w, be = e, bk = k;
             }
-        song.sel = 3; eng(be); go_title("EDIT 2"); ml_toggle();
+        song.sel = 3; eng(be); go_title("MACHINE 2"); ml_toggle();
         ml_knob(TSEL, P_E0 + bk); ui.msg_t = 0;
         break;
     }
-    case S_GLO_LEARN: go_title("EDIT 2"); ml_toggle(); ui.layer = LAYER_GLO; ui.msg_t = 0; break;
+    case S_GLO_LEARN: go_title("MACHINE 2"); ml_toggle(); ui.layer = LAYER_GLO; ui.msg_t = 0; break;
     /* MENU > MIDI with LEARN CLEAR picked: 16 CCs learned (the widest count), and none */
     case S_MENU_LCLEAR: {
         uint32_t k;
@@ -1065,8 +1069,22 @@ static void setup(int s)
         ui.menu = 3; ui.menu_sel = MI_INFO; song.cpu_q8 = 87u;   /* (34 %; USB: the host has none, OFF) */
         info.t = fm1_ms - INFO_CPU_MS;
         break;
-    case S_EDIT_ANALOG: go_title("EDIT 1"); break;
-    case S_EDIT_WAVE: eng(ENGI_WAVE); go_title("EDIT 1"); break;
+    /* VOID FOUR (ui_big.c): EDIT, the four big cards of each machine: OB-Z ROYAL HORNS, K1 just turned (hot); WAVE
+     * with ENV negative, playing; ACID (its pattern) at the ends (CUT top, ENV +100: the widest value, RES 100 %);
+     * DRIFT's DRIVE at 0, RES 0, a track armed */
+    case S_EDIT_BIG_OBX:
+        song.sel = 0; eng(ENGI_OBX); apply_preset_to(TSEL, 9); go_title("EDIT"); ui.hot_col = 0; ui.hot_t = 30; break;
+    case S_EDIT_BIG_WAVE:
+        song.sel = 1; eng(ENGI_WAVE); TSEL->p[P_ED_FLT] = -40; TSEL->p[P_E1] = 88; go_title("EDIT");
+        song.playing = 1; TSEL->seq_idx = 5; break;
+    case S_EDIT_BIG_ACID:
+        song.sel = 2; eng(ENGI_ACID); TSEL->p[P_E4] = 127; TSEL->p[P_E5] = 127; TSEL->p[P_ED_FLT] = 63; go_title("EDIT");
+        break;
+    case S_EDIT_BIG_DRIFT:
+        song.sel = 3; eng(ENGI_DRIFT); TSEL->p[P_E6] = 0; TSEL->p[P_E5] = 0; TSEL->p[P_ED_FLT] = -64; song.rec = 8u;
+        go_title("EDIT"); break;
+    case S_EDIT_ANALOG: go_title("MACHINE 1"); break;
+    case S_EDIT_WAVE: eng(ENGI_WAVE); go_title("MACHINE 1"); break;
     case S_CONFIRM_SEQ: ui.confirm = CF_CLEAR_SEQ; ui.confirm_trk = 2; break;
     case S_CONFIRM_PROJ: ui.confirm = CF_OVR_PROJ; ui.confirm_trk = 0; break;
     case S_CONFIRM_USER: song.playing = 0; up_store(6, "A VERY LONG SOUND NAME"); ui.confirm = CF_OVR_USER; ui.confirm_trk = 6; break;
@@ -1173,7 +1191,7 @@ static void setup(int s)
     case S_GLO_EXT: go_home(); ui.layer = LAYER_GLO; song.g[G_CLOCK] = 1; trk[0].p[P_MUTE] = trk[3].p[P_MUTE] = 1; break;
     case S_SCL_PEEK: go_title("ENV"); ui.layer = LAYER_SCL; break;
     case S_SCL_ACTIVE: go_home(); ui.layer = LAYER_SCL; TSEL->p[P_ROOT] = 3; TSEL->p[P_SCALE] = 2; ui.hot_col = 1; ui.hot_t = 30; break;
-    case S_EDIT_PEEK: go_title("EDIT 1"); ui.layer = LAYER_EDIT; break;
+    case S_EDIT_PEEK: go_title("MACHINE 1"); ui.layer = LAYER_EDIT; break;
     case S_EDIT_ACTIVE: eng(ENGI_WAVE); apply_preset_to(TSEL, 2); favorite_set(ENGI_WAVE, 2, 1); go_home(); ui.layer = LAYER_EDIT;
         ui.hot_col = 0; ui.hot_t = 30; break;
     case S_EDIT_USER: song.playing = 0; eng(ENGI_WAVE); up_store(6, "MY LONG WAVE NAME"); up_load(6); favorite_set(NENGINES, 6, 1);

@@ -384,6 +384,9 @@ static uint32_t large_kind(void)
     return g == GR_BROWSE || g == GR_SLOTS || g == GR_USER || g == GR_PATS || g == GR_SONG || g == GR_ROLL ||
            g == GR_EVENTS ? LK_LABEL : LK_TALL;
 }
+/* VOID FOUR's EDIT page (params.c GR_BIG, ui_big.c) shown: its own layout (header, two strips of two big cards, a
+ * footer of the steps), in every MENU > LARGE setting; a quick layer over it draws as over any page */
+static int big_page(void) { return !ui.home && !ui.layer && cur_page()->graph == GR_BIG; }
 /* the geometry of the page shown: the cards' height, the panel's top and height */
 static uint32_t card_h(void) { return large_kind() == LK_TALL ? LG_CARD_H : CARD_H; }
 static uint32_t graph_y(void) { return large_kind() == LK_TALL ? LG_Y_GRAPH : Y_GRAPH; }
@@ -487,13 +490,13 @@ static int lock_page_ok(uint32_t i)
     if (i >= NPAGES || (PAGES[i].scope != SC_TRACK && PAGES[i].scope != SC_ENGINE) || PAGES[i].graph == GR_MOD)
         return 0;
     for (k = 0; k < 4u; k++)
-        if (PAGES[i].id[k] != 0xFFu && motion_param(PAGES[i].id[k]))
+        if (page_id(&PAGES[i], k) != 0xFFu && motion_param(page_id(&PAGES[i], k)))
             return 1;
     return 0;
 }
 static uint32_t lock_id(uint32_t k)
 {
-    uint32_t id = ui.plk_src && lock_page_ok(ui.plk_src - 1u) ? PAGES[ui.plk_src - 1u].id[k & 3u]
+    uint32_t id = ui.plk_src && lock_page_ok(ui.plk_src - 1u) ? page_id(&PAGES[ui.plk_src - 1u], k)
                                                                : ENGINES[TSEL->eng_req % NENGINES]->knob[k & 3u];
     return id < P_COUNT && motion_param(id) ? id : 0xFFu;
 }

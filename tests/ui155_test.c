@@ -183,7 +183,7 @@ static int select_page(void)
     ok &= song.g[G_BPM] == b0 + 1;                      /* CLOCK's KNOB 1: the tempo */
     bad += check("  PAGE: HOME -> MIXER -> CLOCK -> HOME (as HOME's taps), back too; CLOCK's KNOB 1 still the tempo", ok);
 
-    go_title("EDIT 1"); frame();
+    go_title("MACHINE 1"); frame();
     for (i = 0; i < 12u && ok; i++) {                   /* EDIT's pages: only the ones the engine shows */
         turn(EN_SELECT, 1);
         ok &= !ui.home && cur_page()->fam == FAM_EDIT && page_visible(ui.page);
@@ -251,7 +251,7 @@ static int oct_press(void)
     btn_up(B_OCTDN); frame();
     ok &= song.octave == -1;
     song.octave = 0;
-    go_title("EDIT 2");
+    go_title("MACHINE 2");
     ok &= str_eq(help_page(), "[K1-4]SOUND[EDIT]HOLD: ENGINES");
     bad += check("  OCT- held + KNOB: an ordinary turn (no default), the octave as pressed; EDIT 2's hint as EDIT 1's", ok);
 

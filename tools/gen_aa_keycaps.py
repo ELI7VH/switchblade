@@ -17,7 +17,7 @@ with theme tokens (src/gfx.c cv_keycap; GREY stays gray, the dim state is just a
 Rows back to back, 2 px per byte (high nibble first), each pill byte-aligned (aa_raster.py's format).
 
 Knob arcs: one quadrant (the top right one: dx, dy = 0 .. R-1 from the centre, which sits on a pixel
-corner) of a 2 px ring of outer radius R, per knob size: the ring's coverage (4-bit, 4 x 4 samples) and
+corner) of a 2 px (XL: 3 px) ring of outer radius R, per knob size: the ring's coverage (4-bit, 4 x 4 samples) and
 the angle of each pixel's centre (0 = 12 o'clock .. 255 = 3 o'clock, clockwise). The other quadrants
 are its mirrors (src/ui_graph.c knob_arc), so no trigonometry runs in the firmware.
 
@@ -45,7 +45,7 @@ LABELS = [("PRESETS", "PRESETS"), ("SELECT", "SELECT"), ("ALGO", "ALGO"), ("OCTD
           ("FX", "FX"), ("K14", "K1-4"), ("SCL", "SCL"), ("OCTPM", "OCT-/+"),
           ("LFO", "LFO"), ("ENV", "ENV")]   # (1.5: HELP's hints, src/ui_help.c)
 
-KNOBS = [("BIG", 17), ("SMALL", 10)]   # outer radius; the ring is 2 px
+KNOBS = [("BIG", 17, 2), ("SMALL", 10, 2), ("XL", 34, 3)]   # outer radius, ring width (XL: the EDIT cards, ui_big.c)
 
 
 def pill_cov(w, h, r):
@@ -94,10 +94,10 @@ def keycap(font, label):
     return w, ar.pack(nib)
 
 
-def knob_quadrant(r):
+def knob_quadrant(r, width=2):
     """(coverage nibbles, angle bytes) of the top-right quadrant, row j = dy (0 nearest the centre)"""
     cov, ang = [], []
-    r0 = r - 2.0
+    r0 = r - float(width)
     for j in range(r):
         for i in range(r):
             n = 0
@@ -130,11 +130,11 @@ def main():
     lines += [f'    {{{off}, {w}, "{l}"}},' for _, l, off, w in rows]
     lines += ["};", ar.c_array("KC_DATA", "uint8_t", list(data), fmt="0x{:02x}"), ""]
     knob_bytes = 0
-    for name, r in KNOBS:
-        cov, ang = knob_quadrant(r)
+    for name, r, width in KNOBS:
+        cov, ang = knob_quadrant(r, width)
         pc = ar.pack(cov)
         knob_bytes += len(pc) + len(ang)
-        lines += [f"#define KNOB_{name}_R {r}",
+        lines += [f"#define KNOB_{name}_R {r}", f"#define KNOB_{name}_W {width}",
                   ar.c_array(f"KNOB_{name}_COV", "uint8_t", list(pc), fmt="0x{:02x}"),
                   ar.c_array(f"KNOB_{name}_ANG", "uint8_t", ang), ""]
     out.write_text("\n".join(lines))

@@ -703,7 +703,7 @@ static int learn_test(void)
 
     /* a knob picks (as it edits), a CC is learned */
     frames(300);                                                     /* (#39: the knobs quiet after a layer) */
-    go_title("EDIT 2");
+    go_title("MACHINE 2");
     cut = trk[0].p[P_E4];
     turn(EN_K1, -3);
     ok = ui.ml.pick && ui.ml.trk == 0u && ui.ml.id == P_E4 && trk[0].p[P_E4] == cut - 3 && ml_arm;
@@ -739,7 +739,7 @@ static int learn_test(void)
     bad += check("  GLO + KNOB 2 picks T2 LEVEL; CC74 learned: T2 LEVEL, no more T1 CUT (the standard map)", ok);
 
     /* one CC one parameter, a parameter one CC */
-    go_title("EDIT 2");
+    go_title("MACHINE 2");
     turn(EN_K1, 1);
     queued(0xB0, 21, 0, 1); frame();
     ok = ml_count() == 2u && ml_entry(21, 0, P_E4) && !ml_entry(20, 0, P_E4);
