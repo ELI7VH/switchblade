@@ -7,6 +7,21 @@ Fork point: Felucca 1.6 + VOID engine 14, copied from `../Felucca-main` (commit 
   Python deps in /tmp/x0xvenv: `source /tmp/x0xvenv/bin/activate`).
 - app image 566,888 B of APP_SLOT 581,564 B (14,676 B free); package identity FM-1_900.
 
+## R0 re-measurement (2026-10-16, this Mac, at adffc6e)
+
+Confirms the handover's figures before the Phase 4-6 DSP work starts.
+
+- app image **344,712 B** of APP_SLOT 581,564 B (236,852 B free); package identity **FM-1_940**.
+- **RAM `.data+.bss` 43,380 B of 73,728 (30,348 B free; `build.py check()` floor is 4,096).**
+- **Pool 275,496 B of 368,640 (93,144 B free; floor 8,192).**
+  The handover and the original baseline recorded flash only. These are the numbers Task 6.1
+  needs to size `DRIFT_POLY`: DRIFT is what grows `ENG_MEM_PART` (768 B today), and at
+  `poly = 2` the four-part pool goes 3,072 -> ~7,104 B, which this headroom absorbs.
+- `regress`: 141 golden renders, 0 changed, 0 gone, 0 CPU entries over budget.
+- `ui_render`: 204 screens x 10 palettes, **0 lint findings**.
+- Suite failures: only the two known environment ones below (perform FLANGER/PHASER, and the
+  ASan probe aborting so the sanitizer stage is skipped).
+
 ## Host tests (`sh tests/run_tests.sh`, ~6 min) failures that exist before any FM1-Four change
 These are environment failures on this Mac, not regressions. Later tasks may not add to this list.
 1. `perform: FLANGER over REPEAT 1/16 ... PHASER ... FAIL` (perform_test cost check, host timing).

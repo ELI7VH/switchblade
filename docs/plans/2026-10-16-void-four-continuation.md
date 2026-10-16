@@ -16,6 +16,13 @@
 - `engine_t.knob[4] = {P_E4 CUT, P_E5 RES, P_ED_FLT ENV, machine control}`. **CUT stays E4 and RES stays E5 in every new engine.**
 - New common params go immediately before `P_E0`. `P_COUNT` is currently 112.
 - Identity `FM-1_940`, storage format `FOR4`, version v0.1.
+- **OVERRIDE of the master plan's "DSP is fixed point only: no float" constraint.** D10
+  (2026-10-16) turns the single-precision FPU on and D13 ports DRIFT from a float donor, so
+  **ACID and DRIFT are float**; "no allocation, no libc in engines" still binds in full, which
+  is why `fastmath.h` (no libm) comes across with `bass303`. OB-Z, WAVE, `voice.c`, `dsp.c` and
+  `fx.c` **stay integer** and their golden hashes must not move. A `double` anywhere is still a
+  build failure — Task 5.1 ports x0x's soft-double link guard to enforce it. Update the master
+  plan's Global Constraints line when Task 5.1 lands.
 - MIDI out is USB only. The TRS jack stays input-only.
 - `ui_render` must report **0 findings**; its findings fail the suite.
 - Never run `GOLDEN_UPDATE=1` or `BUDGET_UPDATE=1` to hide a regression. Regenerate only after a deliberate sound change and state the reason in the commit message.
