@@ -3353,6 +3353,124 @@ static int test_home_big(void)
     return bad;
 }
 
+static int str_has(const char *s, const char *w)   /* w somewhere in s */
+{
+    uint32_t i, j;
+    for (i = 0; s[i]; i++) {
+        for (j = 0; w[j] && s[i + j] == w[j]; j++)
+            ;
+        if (!w[j])
+            return 1;
+    }
+    return 0;
+}
+/* VOID FOUR (Task 3.4): the pages and menus of four machines: every page shows at most 4 controls, each a real one */
+static int test_pages_four(void)
+{
+    static const char *const GONE[] = {"LANES", "SLICES", "OPERATOR", "OP ENV", "OP LEVEL", "DRUM", "KIT", "FM6",
+                                       "UPLOAD", "SAMPLE"};
+    int bad = 0, ok = 1;
+    uint32_t e, i, j, g;
+    typedef char four_ids[sizeof PAGES[0].id == 4u ? 1 : -1];   /* (at most four controls a page) */
+    for (e = 0; e < NENGINES; e++) {
+        ui_power_on(); set_engine_of(TSEL, e);
+        for (i = 0; i < NPAGES; i++) {
+            const page_t *pg = &PAGES[i];
+            if (!page_visible(i))
+                continue;
+            for (j = 0; j < 4u; j++) {
+                uint32_t id = page_id(pg, j);
+                if (id == 0xFFu)
+                    continue;
+                if (id >= (pg->scope == SC_GLOBAL ? (uint32_t)G_COUNT : (uint32_t)P_COUNT)) {
+                    ok = 0;
+                    printf("ui:   %s %s KNOB %u: id %u\n", ENGINES[e]->name, pg->title, j + 1u, id);
+                }
+            }
+        }
+    }
+    bad += check("every visible page: at most 4 ids, none past P_COUNT (G_COUNT) but 0xFF, every machine", ok);
+    ok = 1;
+    for (i = 0; i < NPAGES; i++)
+        for (g = 0; g < NELEM(GONE); g++)
+            if (str_has(PAGES[i].title, GONE[g])) {
+                ok = 0;
+                printf("ui:   page %s\n", PAGES[i].title);
+            }
+    for (i = 0; i < MI_COUNT; i++)
+        for (g = 0; g <= NELEM(GONE); g++)
+            if (g < NELEM(GONE) ? str_has(MI_NAME[i], GONE[g]) : str_eq(MI_NAME[i], "HOME")) {
+                ok = 0;
+                printf("ui:   menu row %s\n", MI_NAME[i]);
+            }
+    bad += check("no page or MENU row of a retired engine, no HOME view row", ok);
+    ok = 1;
+    for (e = 0; e < NENGINES; e++) {
+        ui_power_on(); set_engine_of(TSEL, e);
+        for (i = 0; i < NPAGES; i++)
+            if (str_eq(PAGES[i].title, "FLT ENV"))
+                ok &= page_visible(i) == (e == ENGI_WAVE);
+    }
+    bad += check("FLT ENV for WAVE only", ok);
+    {   /* the icons by label: each label once, none of a retired engine's controls (ALG, KIT, MODEL, LANE, ..) */
+        static const char *const OLD[] = {"ALG", "R2", "IDX", "FB", "CHIP", "DUTY", "KIT", "KICK", "MODEL", "STRC",
+                                          "VOWL", "TALK", "MLVL", "MRAT", "LANE", "HIT", "SRC", "START", "DENS", "REG"};
+        ok = 1;
+        for (i = 0; i < NELEM(ICON_MAP); i++) {
+            for (j = 0; j < i; j++)
+                if (str_eq(ICON_MAP[i].label, ICON_MAP[j].label)) {
+                    ok = 0;
+                    printf("ui:   icon label %s twice\n", ICON_MAP[i].label);
+                }
+            for (g = 0; g < NELEM(OLD); g++)
+                if (str_eq(ICON_MAP[i].label, OLD[g])) {
+                    ok = 0;
+                    printf("ui:   icon label %s (a retired engine's)\n", ICON_MAP[i].label);
+                }
+        }
+        bad += check("icons by label: each once, none of a retired engine's controls", ok);
+    }
+    {   /* HELP: every page has its hint (FLT ENV too) */
+        ok = 1;
+        for (i = 0; i < NPAGES; i++) {
+            ui.home = 0; ui.page = (uint8_t)i;
+            if (!help_page()) {
+                ok = 0;
+                printf("ui:   no HELP hint for %s\n", PAGES[i].title);
+            }
+        }
+        ui.home = 1;
+        bad += check("HELP: a hint for every page (FLT ENV too)", ok);
+    }
+    return bad;
+}
+
+/* VOID FOUR: the EDIT layer (EDIT held) offers the four machines, one white key each, then INIT and CLEAN INIT */
+static int test_edit_layer_four(void)
+{
+    int bad = 0, ok;
+    uint32_t i, seen = 0, e;
+    ui_power_on(); go_home(); frame();
+    ok = NENG_SHOWN == 4u && NENGINES == 4u && LY_INIT == 4u;
+    btn_down(B_EDIT); frames(480);
+    for (i = 0; i < 4u; i++) {
+        key_down(white(i)); key_up(white(i)); frame();
+        seen |= 1u << TSEL->eng_req;
+    }
+    e = TSEL->eng_req;
+    for (i = 0; i < 5u; i++) {                         /* the black keys: nothing */
+        key_down(key_at(1, i)); key_up(key_at(1, i)); frame();
+    }
+    ok &= seen == 15u && TSEL->eng_req == e;
+    btn_up(B_EDIT); frame();
+    e = TSEL->eng_req;
+    for (i = 0; i < 4u; i++)
+        e = eng_step(e, 1);
+    ok &= e == TSEL->eng_req;
+    bad += check("EDIT layer: white keys 1..4 the four machines (all four, nothing else), KNOB 1 round four", ok);
+    return bad;
+}
+
 /* ------------------------------------------------ the GLO SCL EDIT layers --- */
 static uint32_t black(uint32_t b) { return key_at(1, b); }
 static void lay_combo(uint32_t btn, uint32_t k) { btn_down(btn); key_down(k); frame(); }
@@ -8078,11 +8196,8 @@ static int test_help(void)
     bad += check("1.5 MENU > SYSTEM > HELP: OFF by default, ON a bit of its own (ui_prefs2 bit 3)", ok);
 
     ok = 1;
-    for (i = 0; i < NPAGES; i++) {                     /* every page but WAVE's FLT ENV (P_FM1_ATK..: skipped as before,
-                                                        * with the retired OP pages; ui_help.c has no hint for it) */
+    for (i = 0; i < NPAGES; i++) {                     /* every page (VOID FOUR: WAVE's FLT ENV too) */
         uint8_t h = ui.home, pg = ui.page;
-        if (PAGES[i].fam == FAM_EDIT && PAGES[i].id[0] >= P_FM1_ATK && PAGES[i].id[0] <= P_FM4_LEVEL)
-            continue;
         ui.home = 0; ui.page = (uint8_t)i;
         if (!help_page()) { printf("  help: no hint for %s\n", PAGES[i].title); ok = 0; }
         else ok &= help_fits(help_page());
@@ -8219,6 +8334,8 @@ int main(void)
     bad += test_edit_cycle();
     bad += test_edit_big();
     bad += test_home_big();
+    bad += test_pages_four();
+    bad += test_edit_layer_four();
     bad += test_quick_layers();
     bad += test_chord_page();
     bad += test_bughunt_ui();

@@ -419,7 +419,7 @@ static uint32_t layer_btn(void);
 /* FLT ENV: a WAVE track's (its filter envelope, eng_wave.c); FILTER: an OB-Z or WAVE track's */
 static int page_visible(uint32_t i)
 {
-    if (PAGES[i].id[0] == P_FM1_ATK && PAGES[i].title[0] == 'F')   /* FLT ENV: WAVE's filter envelope */
+    if (PAGES[i].id[0] == P_FM1_ATK)                  /* FLT ENV: WAVE's filter envelope (its only page of those ids) */
         return TSEL->eng_req % NENGINES == ENGI_WAVE;
     if (PAGES[i].id[0] == P_FTYPE)                    /* FILTER (1.5, #104): OB-Z's, WAVE's */
         return TSEL->eng_req % NENGINES == ENGI_OBX || TSEL->eng_req % NENGINES == ENGI_WAVE;

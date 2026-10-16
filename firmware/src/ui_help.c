@@ -30,6 +30,7 @@ static const struct { const char *title, *hint; } HELP_PAGE[] = {
     {"MACHINE 1", H_EDIT},
     {"MACHINE 2", H_EDIT},
     {"FILTER", "[K1]LP BP HP[K2]CUTOFF[EDIT]VOICE"},
+    {"FLT ENV", "[K1-4]A D S R[EDIT]VOICE"},           /* (WAVE's filter envelope) */
     {"VOICE", "[K1]POLY, MONO[K2]GLIDE"},
     {"VOICE 2", "[K2]DETUNE[K3]PAN[K4]MUTE"},
     {"VOICE 3", "[K1]STEREO SPREAD[EDIT]EDIT"},

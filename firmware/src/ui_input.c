@@ -1087,7 +1087,7 @@ static void seq_entry(uint32_t pressed)
  *   the SEQ pages (STEP: the step cursor; AUTOMATION: the row) and the list / action pages USER,
  *     PHRASES, PROJECT, SONG: as their KNOB 1 (the SEQ pages: a sound load there would drop the track's motion: never).
  *     1.2: with PATTERN, CHANCE and the old AUTOMATION gone, KNOB 1 is the cursor or the row on every SEQ page, so
- *     the PRESETS knob is no longer a second cursor where KNOB 1 was something else; TOOLS and SLICES: nothing
+ *     the PRESETS knob is no longer a second cursor where KNOB 1 was something else; TOOLS: nothing
  *   HOME (VOID FOUR): as its KNOB 2, the machine's own sounds and its user presets, round (eng_list_step)
  *   PRESETS and every other page (EDIT, ENV, LFO, FX, SCL, ARP, MIXER, CLOCK, ...): the selected track's
  *     sound, one list over every engine, then the used user presets (preset_step). A sound load keeps the steps
