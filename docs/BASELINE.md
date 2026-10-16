@@ -25,6 +25,10 @@ Confirms the handover's figures before the Phase 4-6 DSP work starts.
 ## Host tests (`sh tests/run_tests.sh`, ~6 min) failures that exist before any FM1-Four change
 These are environment failures on this Mac, not regressions. Later tasks may not add to this list.
 1. `perform: FLANGER over REPEAT 1/16 ... PHASER ... FAIL` (perform_test cost check, host timing).
+   Task 4.1 note: this check divides by the REPEAT 1/16 run, whose cost fell from +164 to +152 over
+   idle when OB-Z lost its noise and drive, so both printed figures gained ~0.2 pp. The failure is
+   still the pre-existing host-timing one -- no new failure was added -- but the Task 4.1 component
+   is now inseparable from the host noise. Phase 5/6 should not read drift here as a regression.
 2. AddressSanitizer `CHECK failed: sanitizer_malloc_mac.inc:189` aborts (macOS ASan runtime) in:
    the DRUM grid stress (#211) x2 and the SAMPLE/GRAIN/SLICE fuzz (fuzz_smp). Those tests are deleted
    with their engines in Task 1.1.
