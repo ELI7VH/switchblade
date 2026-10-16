@@ -277,6 +277,7 @@ static int32_t param_cc(const track_t *t, uint32_t id)
 #define MOUT_CC_BLOCK 8u                            /* at most this many CCs a block (all tracks) ... */
 #define MOUT_ROOM 16u                               /* .. while the ring keeps this much free for notes and the clock */
 static uint8_t mout_held[NTRK][16];                 /* notes sent and not ended yet, a bit per note */
+static uint8_t mout_owe[NTRK][16];                  /* .. ended, but the ring was full: their note-offs still to send */
 static uint8_t mout_hch[NTRK];                      /* .. the channel they went out on */
 static uint8_t mout_last[NTRK][MOUT_NCC];           /* the CC values last sent (or received) */
 static uint8_t mout_mode[NTRK], mout_eng[NTRK];     /* MOUT and the machine as the block last saw them */
@@ -284,11 +285,20 @@ static volatile uint8_t mout_load[NTRK];            /* a sound load: 1 under way
 static uint8_t mout_pcw[NTRK];                      /* the load is a factory preset chosen on the FM-1 (ui.c) */
 static volatile uint8_t mout_mw[NTRK];              /* MENU > SELECT MODW turned: CC1 to send (ui_input.c sel_play) */
 static uint8_t mout_run;                            /* the transport as the clock last saw it */
+static uint8_t mout_crun;                           /* clock out running: FA sent, FC not yet */
 static uint32_t mout_cpos;                          /* clock: samples x 6 into the current 1/16 */
 
 static void mout_send(uint32_t st, uint32_t d1, uint32_t d2)
 {
     midi_out_event(st >> 4 | st << 8 | d1 << 16 | d2 << 24);
+}
+/* as mout_send; 0: the ring is full, nothing queued (no host: taken as sent) */
+static int mout_try(uint32_t st, uint32_t d1, uint32_t d2)
+{
+    if (usb.config && mo_w - mo_r >= MQ)
+        return 0;
+    mout_send(st, d1, d2);
+    return 1;
 }
 static uint32_t mout_slot_param(const track_t *t, uint32_t s)
 {
@@ -336,8 +346,22 @@ static void mout_off_all(track_t *t)
         for (n = 0; mout_held[k][b] && n < 8u; n++)
             if ((mout_held[k][b] >> n) & 1u) {
                 mout_held[k][b] &= (uint8_t)~(1u << n);
-                mout_send(0x80u | mout_hch[k], b * 8u + n, 0);
+                if (!mout_try(0x80u | mout_hch[k], b * 8u + n, 0))
+                    mout_owe[k][b] |= (uint8_t)(1u << n);   /* (the ring full: mout_block sends it when there is room) */
             }
+}
+/* the note-offs owed (the ring was full), as far as there is room now; 0: some still owed */
+static int mout_pay(uint32_t k)
+{
+    uint32_t b, n;
+    for (b = 0; b < 16u; b++)
+        for (n = 0; mout_owe[k][b] && n < 8u; n++)
+            if ((mout_owe[k][b] >> n) & 1u) {
+                if (!mout_try(0x80u | mout_hch[k], b * 8u + n, 0))
+                    return 0;
+                mout_owe[k][b] &= (uint8_t)~(1u << n);
+            }
+    return 1;
 }
 /* note on (vel 1..127) / off (vel 0) of track t: sent if MOUT is EXT or BOTH (a note-off: if its note-on was sent) */
 static void mout_note(track_t *t, uint32_t note, uint32_t vel)
@@ -349,7 +373,8 @@ static void mout_note(track_t *t, uint32_t note, uint32_t vel)
     if (!vel) {
         if (*h & bit) {
             *h &= (uint8_t)~bit;
-            mout_send(0x80u | mout_hch[k], note, 0);
+            if (!mout_try(0x80u | mout_hch[k], note, 0))
+                mout_owe[k][(note >> 3) & 15u] |= (uint8_t)bit;   /* (owed: mout_block) */
         }
         return;
     }
@@ -360,12 +385,17 @@ static void mout_note(track_t *t, uint32_t note, uint32_t vel)
         mout_off_all(t);
         mout_hch[k] = (uint8_t)ch;
     }
+    if (mout_owe[k][(note >> 3) & 15u] & bit) {      /* its owed note-off first */
+        mout_owe[k][(note >> 3) & 15u] &= (uint8_t)~bit;
+        mout_send(0x80u | mout_hch[k], note, 0);
+    }
     if (*h & bit)                                   /* again while held: one note-on per note-off out there */
         mout_send(0x80u | ch, note, 0);
     *h |= (uint8_t)bit;
     mout_send(0x90u | ch, note, vel > 127u ? 127u : vel);
 }
-/* parameter id of t out on its CC (param_cc), scaled 0..127, if MOUT sends and it is mapped */
+/* parameter id of t out on its CC (param_cc), scaled 0..127, if MOUT sends and it is mapped. The immediate-send helper
+ * the tests and briefs use; the firmware's path is mout_block (once per control block, on a change, ring room kept) */
 static void mout_param(track_t *t, uint32_t id)
 {
     int32_t s = mout_slot(t, id), v = s >= 0 ? mout_value(t, id) : -1;
@@ -387,10 +417,11 @@ static int mout_room(void) { return MQ - (mo_w - mo_r) > MOUT_ROOM; }
 /* the control block's MIDI OUT (events_block, after the sequencer): the CC map's changes, a load's PC, CC1, the clock */
 static __attribute__((noinline)) void mout_block(uint32_t seq_n, uint32_t clock_mode)
 {
-    uint32_t k, s, sent = 0, p;
+    uint32_t k, s, sent = 0, p, on, start;
     for (k = 0; k < NTRK; k++) {
         track_t *t = &trk[k];
         uint32_t m = (uint32_t)t->p[P_MOUT], ld = mout_load[k];
+        (void)mout_pay(k);                           /* note-offs a full ring owed (whatever MOUT is now) */
         if (m == MOUT_INT) {                         /* (the default: next to nothing each block) */
             mout_mode[k] = MOUT_INT;
             mout_mw[k] = 0;
@@ -400,13 +431,16 @@ static __attribute__((noinline)) void mout_block(uint32_t seq_n, uint32_t clock_
         }
         if (ld == 1u)                                /* a sound load under way: its values are not changes */
             continue;
-        if (mout_mw[k]) {
+        if (mout_mw[k] && (!usb.config || mout_room())) {   /* (no room: the next block) */
             mout_mw[k] = 0;
             mout_send(0xB0u | trk_midi_ch(k), 1, t->mw & 127u);
         }
         if (ld || mout_mode[k] != m || mout_eng[k] != t->eng_req) {
-            if (ld == 2u && mout_mode[k] == m)       /* (a load before EXT / BOTH came on: its PC is not news) */
+            if (ld == 2u && mout_mode[k] == m) {     /* (a load before EXT / BOTH came on: its PC is not news) */
+                if (usb.config && !mout_room())
+                    continue;                        /* (no room: the PC stays pending, the next block) */
                 mout_program(t);
+            }
             mout_resync(t);                          /* (EXT / BOTH just on, another machine, a load: nothing sent) */
             mout_mode[k] = (uint8_t)m;
             mout_eng[k] = t->eng_req;
@@ -426,12 +460,19 @@ static __attribute__((noinline)) void mout_block(uint32_t seq_n, uint32_t clock_
             }                                        /* (else: the next block) */
         }
     }
-    if (song.g[G_CLKOUT] && !clock_mode) {
-        if (song.playing && (!mout_run || !song.tick)) {   /* PLAY (or RESTART): Start, then the first pulse with step 1 */
+    on = song.g[G_CLKOUT] && !clock_mode;
+    start = song.playing && (!mout_run || !song.tick);   /* PLAY, or RESTART (song.tick back to 0) */
+    if (mout_crun && (!on || !song.playing || start)) {
+        mout_clock(0xFCu);                           /* STOP; CLOCK OUT off or CLK external while playing; RESTART */
+        mout_crun = 0;
+    }
+    if (on && song.playing) {
+        if (start) {                                 /* Start, then the first pulse with step 1 */
             mout_clock(0xFAu);
             mout_clock(0xF8u);
             mout_cpos = 0;
-        } else if (song.playing) {
+            mout_crun = 1;
+        } else if (mout_crun) {
             p = div_samples(2);                      /* a 1/16 is 6 pulses: exactly the sequencer's samples */
             mout_cpos += seq_n * 6u;
             for (s = 0; mout_cpos >= p && s < 4u; s++) {
@@ -440,8 +481,7 @@ static __attribute__((noinline)) void mout_block(uint32_t seq_n, uint32_t clock_
             }
             if (mout_cpos >= p)                      /* (a tempo jump: no burst) */
                 mout_cpos = 0;
-        } else if (mout_run)
-            mout_clock(0xFCu);
+        }                                            /* (CLOCK OUT on mid-song: from the next PLAY, with its Start) */
     }
     mout_run = song.playing;
 }

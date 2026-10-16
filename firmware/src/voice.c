@@ -357,18 +357,12 @@ static void mono_remove(track_t *t, uint32_t note)
 
 static void mout_note(track_t *t, uint32_t note, uint32_t vel);   /* MIDI OUT (midi_control.c) */
 static void mout_off_all(track_t *t);
-/* every note of a track starts here (sequencer, arp, keys, chords, MIDI in): MIDI OUT EXT sends it instead of
- * sounding it, BOTH sends it too */
-static void trk_note_on(track_t *t, uint32_t note, uint32_t vel)
+/* the voice part of a note-on (trk_note_on; an engine switch's waiting notes start here, already sent) */
+static void trk_voice_on(track_t *t, uint32_t note, uint32_t vel)
 {
     uint32_t any = 0, i, mode = trk_vmode(t);
     if (t->p[P_MUTE])
         return;
-    if (t->p[P_MOUT] != MOUT_INT) {
-        mout_note(t, note, vel);
-        if (t->p[P_MOUT] == MOUT_EXT)
-            return;                                     /* (EXT: no voice) */
-    }
     if (t->xf_on || t->eng_req != t->engine) {          /* engine switch under way: after the fade */
         for (i = 0; i < t->xp_n && t->xp_note[i] != note; i++)
             ;
@@ -409,6 +403,20 @@ static void trk_note_on(track_t *t, uint32_t note, uint32_t vel)
         else                                            /* LEGATO / UNISON: glide only between held notes */
             mono_play(t, want, vel, !sounding, sounding && (t->p[P_GLIDE] != 0 || t->slide_glide));
     }
+}
+
+/* every note of a track starts here (sequencer, arp, keys, chords, MIDI in): MIDI OUT EXT sends it instead of
+ * sounding it, BOTH sends it too */
+static void trk_note_on(track_t *t, uint32_t note, uint32_t vel)
+{
+    if (t->p[P_MUTE])
+        return;
+    if (t->p[P_MOUT] != MOUT_INT) {
+        mout_note(t, note, vel);
+        if (t->p[P_MOUT] == MOUT_EXT)
+            return;                                     /* (EXT: no voice) */
+    }
+    trk_voice_on(t, note, vel);
 }
 
 static void trk_note_off(track_t *t, uint32_t note)
@@ -494,8 +502,8 @@ static void engine_block(track_t *t)
         {
             uint32_t n = t->xp_n;
             t->xp_n = 0;
-            for (i = 0; i < n; i++)
-                trk_note_on(t, t->xp_note[i], t->xp_vel[i]);
+            for (i = 0; i < n; i++)                     /* (the voice only: MIDI OUT sent them as they came) */
+                trk_voice_on(t, t->xp_note[i], t->xp_vel[i]);
         }
     }
     eng_mem_claim(t);                                   /* (an engine set directly: power-on, a test) */

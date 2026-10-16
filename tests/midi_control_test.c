@@ -1091,9 +1091,76 @@ static int test_mout(void)
     midi_test_reset();
     return bad;
 }
+/* Task 2 review: an engine switch's waiting notes start the voice only (one note-on out, a received note not echoed);
+ * CLOCK OUT OFF while playing sends FC; a full ring keeps its note-offs owed until there is room */
+static uint32_t count_pk(uint32_t from, uint32_t st, uint32_t note)   /* packets st (status & 0xF0) of note since from */
+{
+    uint32_t i, n = 0;
+    for (i = from; i != mo_w; i++)
+        n += ((midi_out_q[i % MQ] >> 8) & 0xF0u) == st && ((midi_out_q[i % MQ] >> 16) & 0x7Fu) == note;
+    return n;
+}
+static int test_mout_review(void)
+{
+    int bad = 0, ok; uint32_t i, from, offs;
+    track_t *t = &trk[2];
+    int32_t buf[2 * CTL];
+    /* 1: BOTH, a note sounding, the machine switched: a note played and one received wait for the fade */
+    midi_test_reset(); usb.config = 1; song.g[G_CLKOUT] = 0;
+    t->p[P_MOUT] = MOUT_BOTH; t->p[P_VOICE] = V_POLY; events_block(CTL);
+    trk_note_on(t, 58, 100); track_render(t, buf, CTL);
+    mo_r = mo_w; from = mo_w;
+    t->eng_req = ENGI_OBX;
+    for (i = 0; i < 8u; i++) t->p[P_E0 + i] = ENGINES[ENGI_OBX]->edit[i].def;
+    events_block(CTL);                                     /* (the fade begins) */
+    trk_note_on(t, 60, 100);
+    midi_event(0x90, 2, 62, 100);
+    ok = t->xf_on && t->xp_n == 2u;
+    for (i = 0; i < 64u && t->engine != t->eng_req; i++) { events_block(CTL); track_render(t, buf, CTL); }
+    ok &= t->engine == ENGI_OBX && gate_note(t, 60) && gate_note(t, 62);
+    ok &= count_pk(from, 0x90u, 60) == 1u && count_pk(from, 0x80u, 60) == 0u && count_pk(from, 0x90u, 62) == 0u;
+    bad += check("BOTH, an engine switch: the waiting notes start on the new machine; one note-on out, none for a MIDI one", ok);
+    trk_all_off(t);                                        /* (58 and 60 were sent: ended out there too) */
+    midi_test_reset(); mo_r = mo_w;
+
+    /* 2: CLOCK OUT turned OFF while playing: FC (the slave stops), nothing more */
+    midi_test_reset(); events_block(CTL);
+    transport_req = 1; events_block(CTL); events_block(CTL); mo_r = mo_w;
+    transport_req = 3; events_block(CTL);                  /* RESTART (GLO + PLAY): Stop, Start, the first pulse */
+    ok = out_n() == 3 && out_pop() == (0x0Fu | 0xFCu << 8) && out_pop() == (0x0Fu | 0xFAu << 8) &&
+         out_pop() == (0x0Fu | 0xF8u << 8);
+    bad += check("RESTART while the clock runs: FC, then FA and F8", ok);
+    events_block(CTL); mo_r = mo_w;
+    song.g[G_CLKOUT] = 0; events_block(CTL);
+    ok = out_n() == 1 && out_pop() == (0x0Fu | 0xFCu << 8);
+    for (i = 0; i < 400u; i++) events_block(CTL);
+    ok &= out_n() == 0;
+    bad += check("CLOCK OUT turned OFF while playing: FC, then nothing", ok);
+    song.g[G_CLKOUT] = 1; transport_req = 2; events_block(CTL); mo_r = mo_w;
+
+    /* 5: a panic with the ring full: every held note gets its note-off as room comes */
+    midi_test_reset(); events_block(CTL); t->p[P_MOUT] = MOUT_EXT; events_block(CTL);
+    for (i = 0; i < 10u; i++) trk_note_on(t, 40u + i, 100);
+    mo_r = mo_w - (MQ - 3u);                               /* (the host slow: 3 slots free) */
+    trk_all_off(t);
+    ok = mo_w - mo_r == MQ;
+    from = mo_w - 3u;
+    for (i = 0, offs = 0; i < 10u; i++) offs += count_pk(from, 0x80u, 40u + i);
+    ok &= offs == 3u;
+    mo_r = mo_w; from = mo_w;                               /* (drained) */
+    events_block(CTL); events_block(CTL);
+    for (i = 0, offs = 0; i < 10u; i++) offs += count_pk(from, 0x80u, 40u + i) == 1u;
+    ok &= offs == 7u && mo_w - from == 7u;
+    events_block(CTL);
+    ok &= mo_w - from == 7u;
+    bad += check("a panic with the ring full: 3 note-offs now, the other 7 owed and sent as room comes, none twice", ok);
+    usb.config = 0; mo_r = mo_w;
+    midi_test_reset();
+    return bad;
+}
 int main(void)
 {
     int bad = controls_test() + sustain_test() + ownership_test() + clock_test(1) + clock_test(2) + clock_arp_and_boundaries() +
-              arp_ext_stop_test() + usb_burst_test() + route_test() + route_block_test() + route_track_test() + follow_test() + cc_map_test() + test_cc_contract() + learn_test() + pc_test() + test_mout();
+              arp_ext_stop_test() + usb_burst_test() + route_test() + route_block_test() + route_track_test() + follow_test() + cc_map_test() + test_cc_contract() + learn_test() + pc_test() + test_mout() + test_mout_review();
     printf("%s\n", bad ? "MIDI CONTROL/CLOCK TEST FAILED" : "MIDI control/clock integration tests passed"); return bad != 0;
 }
