@@ -2,7 +2,7 @@
 # the Mac (kernel-counted, ~1 % run to run). The check allows +25 %. Rewritten by BUDGET_UPDATE=1.
 cpu/OB-Z/00_SAW_LEAD 1524
 cpu/OB-Z/01_SQR_LEAD 1772
-cpu/OB-Z/02_ACID 1561
+cpu/OB-Z/02_ACID_LEAD 1561
 cpu/OB-Z/03_RAVE 1786
 cpu/OB-Z/04_SUB_LEAD 1541
 cpu/OB-Z/05_SYNC_LEAD 1509

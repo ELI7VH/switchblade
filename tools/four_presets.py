@@ -131,15 +131,15 @@ def main():
          " * <M>_PRESETS: name, {E0..E7}, {ATK DEC SUS REL}, ENV -> FLT, mono, the sends, the pattern;",
          " * <M>_CAT: the category of each (category.c CAT_*); WAVE_PX: what a preset_t cannot hold (core.h void_px_t) */"]
     for m in MACHINES:
-        H.append(f"static const preset_t {m}_PRESETS[{N}] = {{")
+        H.append(f"static const preset_t {m}_PRESETS[] = {{")
         for p in sets[m]:
             pat = f", PAT({p['pat']})" if p.get("pat") else ""
             H.append(f'    {{"{p["name"]}", {{{", ".join(map(str, p["e"]))}}}, {{{", ".join(map(str, p["env"]))}}}, '
                      f'{p["fenv"]}, {p["mono"]}, FX({", ".join(map(str, p["fx"]))}){pat}}},')
-        H += ["};", f"static const uint8_t {m}_CAT[{N}] = {{"]
+        H += ["};", f"static const uint8_t {m}_CAT[] = {{"]
         H += [f"    CAT_{p['cat']}," for p in sets[m]]
         H.append("};")
-    H += [f"static const void_px_t WAVE_PX[{N}] = {{",
+    H += [f"static const void_px_t WAVE_PX[] = {{",
           "    /* ftype, voice (3: UNISON), detune + 1, spread, glide, lfo {set, RATE, WAVE, TRIG, FADE}, fe {LVL, A, D, S, R}, "
           "mx {SRC, DST, AMT} x 4 */"]
     for p in sets["WAVE"]:

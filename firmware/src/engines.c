@@ -4,6 +4,11 @@
  * of the editor protocol), the factory patterns (SAVE > PHRASES) and the parts' sounds at power-on. */
 #include "dsp.c"
 #include "category.c"           /* the CAT_* numbers, and (with four_presets.h) every machine's 32 presets and their categories */
+_Static_assert(NELEM(OBX_PRESETS) == 32u && NELEM(OBX_CAT) == 32u, "OBX: 32 presets");
+_Static_assert(NELEM(WAVE_PRESETS) == 32u && NELEM(WAVE_CAT) == 32u, "WAVE: 32 presets");
+_Static_assert(NELEM(ACID_PRESETS) == 32u && NELEM(ACID_CAT) == 32u, "ACID: 32 presets");
+_Static_assert(NELEM(DRIFT_PRESETS) == 32u && NELEM(DRIFT_CAT) == 32u, "DRIFT: 32 presets");
+_Static_assert(NELEM(WAVE_PX) == 32u, "WAVE: 32 presets (WAVE_PX)");
 
 /* The parts' engine memory (1.5): a part plays one engine at a time, so the engines with per-part state
  * (engine_t.mem: WAVE's voices) keep it in one region per part instead of an array each. The region holds the

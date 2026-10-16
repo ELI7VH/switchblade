@@ -53,6 +53,7 @@ PRESETS = [
          fx=(0, 10, 35, 25), pat=4,
          ftype=0, voice=0, detune=0, spread=0, glide=0, lfo=[0, 0, 0, 0, 0], fe=[127, 0, 64, 0, 60],
          mx=[[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]]),
+    # REV 0: WAVE output carries DC into the reverb send; restore 25 once eng_wave.c has a DC blocker (FM1-Four plan Phase 4-6 DSP).
     dict(name="BRASS LEAD", cat="LEAD", e=[4, 0, 4, 26, 79, 25, 56, 19], env=[47, 64, 127, 83], fenv=32, mono=0,
          fx=(0, 10, 35, 0), pat=4,
          ftype=2, voice=0, detune=0, spread=0, glide=0, lfo=[0, 0, 0, 0, 0], fe=[64, 54, 79, 76, 79],

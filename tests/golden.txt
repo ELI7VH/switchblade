@@ -2,7 +2,7 @@
 # Rewritten by GOLDEN_UPDATE=1 tests/run_tests.sh -- only for an intended change of the sound.
 preset/OB-Z/00_SAW_LEAD f39bc76f863e3204
 preset/OB-Z/01_SQR_LEAD 963c40253f87e120
-preset/OB-Z/02_ACID 986dcfd301a0c1d8
+preset/OB-Z/02_ACID_LEAD 986dcfd301a0c1d8
 preset/OB-Z/03_RAVE b8342efda12f2968
 preset/OB-Z/04_SUB_LEAD d6cd1ef0e083c544
 preset/OB-Z/05_SYNC_LEAD 2df5ad86cf8d4908

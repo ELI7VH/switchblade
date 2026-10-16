@@ -5,7 +5,7 @@ PRESETS = [
     # --- LEAD ---
     dict(name="SAW LEAD", cat="LEAD", e=[0, 12, 64, 0, 90, 30, 10, 64], env=[4, 70, 100, 50], fenv=20, mono=1, fx=(0, 10, 45, 30), pat=4),
     dict(name="SQR LEAD", cat="LEAD", e=[1, 0, 0, 0, 80, 50, 40, 64], env=[0, 60, 90, 30], fenv=30, mono=1, fx=(5, 0, 35, 20), pat=4),
-    dict(name="ACID", cat="LEAD", e=[0, 0, 0, 0, 50, 100, 25, 64], env=[0, 55, 20, 30], fenv=48, mono=1, fx=(20, 0, 45, 15), pat=1),
+    dict(name="ACID LEAD", cat="LEAD", e=[0, 0, 0, 0, 50, 100, 25, 64], env=[0, 55, 20, 30], fenv=48, mono=1, fx=(20, 0, 45, 15), pat=1),
     dict(name="RAVE", cat="LEAD", e=[4, 30, 64, 0, 85, 20, 30, 64], env=[20, 80, 110, 60], fenv=10, mono=1, fx=(30, 40, 30, 30), pat=9),
     dict(name="SUB LEAD", cat="LEAD", e=[3, 0, 0, 0, 90, 0, 20, 0], env=[0, 60, 100, 25], fenv=0, mono=1, fx=(0, 0, 25, 20), pat=4),
     dict(name="SYNC LEAD", cat="LEAD", e=[5, 40, 100, 0, 95, 25, 15, 64], env=[2, 70, 100, 40], fenv=36, mono=1, fx=(8, 0, 40, 25), pat=4),
