@@ -3332,6 +3332,15 @@ static int test_home_big(void)
         bad += check("  .. the name in L", home_face == 1);
         bad += check("  the cards: track 1, preset 10, the LEVEL in dB, the BPM", str_eq(big_val[0], "1") &&
                      str_eq(big_val[1], "10") && str_eq(big_val[3], "120"));
+        /* the LEVEL card's own text: dB = (LEVEL - 112) / 2, shown whole and rounded away from zero; 0 is OFF */
+        TSEL->p[P_LEVEL] = 100; ui.force = 1; frame();
+        bad += check("  .. the LEVEL card: 100 is -6.0 dB, \"-6\"", str_eq(big_val[2], "-6"));
+        TSEL->p[P_LEVEL] = 99; ui.force = 1; frame();
+        bad += check("  .. LEVEL 99 is -6.5 dB, \"-7\" (away from zero)", str_eq(big_val[2], "-7"));
+        TSEL->p[P_LEVEL] = 113; ui.force = 1; frame();
+        bad += check("  .. LEVEL 113 is +0.5 dB, \"1\"", str_eq(big_val[2], "1"));
+        TSEL->p[P_LEVEL] = 0; ui.force = 1; frame();
+        bad += check("  .. LEVEL 0: the card reads \"OFF\"", str_eq(big_val[2], "OFF"));
     }
     {   /* external clock: TEMPO shows, turns do nothing */
         ui_power_on(); go_home(); frame();
@@ -7290,6 +7299,26 @@ static int test_bpm_lock(void)
     ok &= msg_is("BPM LOCKED");                                       /* (a new burst: said again) */
     ok &= text_w(&AF_S, "BPM LOCKED") <= 236 - 106;                   /* (fits the header's message zone) */
     bad += check("#58 BPM LOCK ON: SELECT leaves the tempo on HOME and the pages, \"BPM LOCKED\" once per turn burst", ok);
+
+    /* HOME's own TEMPO knob (K4) obeys the lock as SELECT does: the badge is drawn on HOME */
+    go_home(); frame();
+    ui.msg_t = 0; ui.bpm_t = 0; fm1_ms += 1200u;
+    b0 = song.g[G_BPM];
+    turn(EN_K4, 3);
+    ok = song.g[G_BPM] == b0 && msg_is("BPM LOCKED") && !ui.bpm_t;
+    ui.msg_t = 0;
+    turn(EN_K4, -2);                                              /* (the same burst: said once) */
+    ok &= song.g[G_BPM] == b0 && !ui.msg_t;
+    fm1_ms += 1200u;
+    turn(EN_K4, 1);
+    ok &= song.g[G_BPM] == b0 && msg_is("BPM LOCKED");            /* (a new burst: said again) */
+    ui_prefs &= ~PREF_BPM_LOCK;                                   /* OFF: it sets the tempo, and lights the header's BPM */
+    ui.msg_t = 0; ui.bpm_t = 0; fm1_ms += 1200u;
+    turn(EN_K4, 2);
+    ok &= song.g[G_BPM] == b0 + 2 && !msg_is("BPM LOCKED") && ui.bpm_t;
+    ui_prefs |= PREF_BPM_LOCK;                                    /* (back ON for the checks below) */
+    song.g[G_BPM] = b0;
+    bad += check("#58 BPM LOCK: HOME's TEMPO knob (K4) leaves the tempo and says \"BPM LOCKED\" once per burst; OFF it sets it", ok);
 
     /* ON: HOME > CLOCK's BPM knob (up to 1.1.5 GLO > GLOBAL's) */
     go_home(); press(B_HOME); press(B_HOME); frame();   /* (HOME > MIXER > CLOCK) */

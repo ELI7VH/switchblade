@@ -248,6 +248,8 @@ typedef char home_fits[HOME_CY + HOME_CH == BIG_FOOT_Y ? 1 : -1];   /* (EDIT's f
 #define HT_MX 50                                        /* the meter: 3 x 34 at x 50 (the text centred on the tab: */
 #define HT_MW 3                                         /* its widest, DRIFT, ends at x 44), rows 5 .. 38 */
 #define HT_MH 34
+#define HP_VAL (8 + 1 + 6)                              /* the panel's "value unit": param_format's value (<= 5 chars, 8 with
+                                                         * margin) + " " + its unit (<= 5 chars) + 0; the append is bounded too */
 #define HP_X0 11                                        /* the sound's text: x 11 .. 229 */
 #define HP_X1 229
 #define HP_AY 6                                         /* its first line's band: rows 6 .. 21 (category S, number M) */
@@ -323,7 +325,7 @@ static void home_sound(char *cat, char *num, char *name)
 /* the sound panel (240 x 80) */
 static void home_panel(void)
 {
-    char cat[16], num[16], name[16], val[12];
+    char cat[16], num[16], name[16], val[HP_VAL];
     const char *unit = "";
     int16_t *vp;
     const param_desc_t *d = home_param(HK_VOLUME, &vp);
@@ -333,9 +335,12 @@ static void home_panel(void)
     home_sound(cat, num, name);
     param_format(d, v, val, &unit);
     fmt_named = 0;
-    if (unit[0]) {
-        str_cpy(val + str_len(val), " ", 2);
-        str_cpy(val + str_len(val), unit, 6);
+    if (unit[0]) {                                      /* "value unit", bounded: val is HP_VAL, whatever the pair */
+        unsigned n = str_len(val);
+        if (n + 2u < HP_VAL) {
+            val[n++] = ' ';
+            str_cpy(val + n, unit, HP_VAL - n);
+        }
     }
     face = large_face_has(name) && ink_w(&AF_L, name) <= HP_X1 - HP_X0 ? 1 : 2;
     HOME_HOOK(cat, num, name, face);

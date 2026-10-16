@@ -422,6 +422,16 @@ static int32_t accel(uint32_t role, int32_t s, int32_t range)
     return s * (int32_t)m;
 }
 
+static uint32_t lock_ms;                                /* BPM LOCK: the last locked tempo turn (fm1_ms | 1; 0 none) */
+
+/* MENU > BPM LOCK ON (#58): a tempo turn that is refused says so once per turn burst (SELECT's and HOME's TEMPO knob) */
+static void bpm_locked(void)
+{
+    if (!lock_ms || fm1_ms - lock_ms > 1000u)
+        ui_message("BPM LOCKED");
+    lock_ms = fm1_ms | 1u;
+}
+
 /* HOME (VOID FOUR, ui.c HK_*): KNOB 1 the track (a detent each, T1..T4, no wrap: as ALGORITHM), 2 the machine's next /
  * previous sound (its 32 and its user presets, round: eng_list_step; a load sends its Program Change, midi_control.c),
  * 3 the track's LEVEL (recorded as automation, MIDI LEARN; MIDI OUT sends it as any change of the CC map), 4 the BPM at
@@ -446,7 +456,13 @@ static void home_turn(uint32_t k, int32_t s)
     default:
         if (song.g[G_CLOCK])
             break;
+        if (ui_prefs & PREF_BPM_LOCK) {                 /* MENU > BPM LOCK ON (#58): as SELECT; GLO is held for neither
+                                                         * (a layer's button down: the knobs are not HOME's) */
+            bpm_locked();
+            break;
+        }
         song.g[G_BPM] = (int16_t)clamp(song.g[G_BPM] + accel(EN_K1 + k, s, 200), GP[G_BPM].min, GP[G_BPM].max);
+        ui.bpm_t = 40;                                  /* the header's BPM lights up with the card */
         break;
     }
 }
@@ -1281,7 +1297,6 @@ static void ui_input(void)
     uint32_t oct;
     uint32_t lay, combo = 0, lytap, lkeys, glo, kq = 0;
     int32_t s, sel = 0, ks[4] = {0, 0, 0, 0};
-    static uint32_t lock_ms;                            /* BPM LOCK: the last locked SELECT turn (fm1_ms | 1; 0 none) */
     midi_take();                                        /* (MIDI IN notes: lights, SCREEN WAKE, AUTO SELECT's) */
     midi_pc_poll();                                     /* MIDI Program Change */
     perf_latch_on = fx_latch & 1u;                      /* (MENU > FX LATCH; a settings load sets it too) */
@@ -1561,9 +1576,7 @@ static void ui_input(void)
             ui.bpm_t = 40;                              /* the header's BPM lights up; no message over the header */
         } else {                                        /* MENU > BPM LOCK ON (#58): only with GLO held (and on HOME >
                                                          * CLOCK, GLO's F4 TAP); a turn burst says so once */
-            if (!lock_ms || fm1_ms - lock_ms > 1000u)
-                ui_message("BPM LOCKED");
-            lock_ms = fm1_ms | 1u;
+            bpm_locked();
         }
     }
     for (k = 0; k < 4u && !kq; k++) {
