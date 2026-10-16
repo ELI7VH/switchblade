@@ -135,6 +135,7 @@ static const icon_map_t ICON_MAP[] = {
     {"INIT", ICON_CLEAR}, {"ERASE", ICON_CLEAR}, {"CH", ICON_MIDI}, {"LEVEL", ICON_LEVEL},
     /* engines (eng_*.c edit[] labels; VOID FOUR: the four machines', the retired engines' gone) */
     {"DTN", ICON_DETUNE}, {"NOIS", ICON_NOISE}, {"CUT", ICON_CUTOFF}, {"RES", ICON_RESO},
+    {"PW", ICON_PULSE}, {"SLOP", ICON_VIBRATO},        /* OB-Z's E3 and E7 (its E6 MODE: param_icon) */
     {"DRV", ICON_DRIVE}, {"KTR", ICON_KEYTRACK}, {"TONE", ICON_TONE}, {"BITS", ICON_BITS}, {"SUB", ICON_SUB},
     {"POS", ICON_PHASE}, {"SPRD", ICON_NOISE}, {"CHRD", ICON_SCALE}, {"DECY", ICON_DECAY}, {"DRFT", ICON_SWEEP},
     {"ENV", ICON_ENV}, {"ARP", ICON_ARP},
@@ -181,6 +182,8 @@ static uint32_t param_icon(const param_desc_t *d, int32_t v)
         return ICON_CUTOFF;                   /* the filter TYPE (1.5): "TYPE" is also the reverb's */
     if (d == &TP[P_ESYNC])
         return ICON_TEMPO;                    /* ENV SYNC (1.5): as LFO 2's SYNC */
+    if (d == &ENG_OBX.edit[6])
+        return ICON_SWEEP;                    /* OB-Z's filter MODE: "MODE" is also the arp's */
     return icon_for_label(d->label);
 }
 

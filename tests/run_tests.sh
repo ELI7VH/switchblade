@@ -88,6 +88,10 @@
 #                   on the knob, attack / decay / release times at 60 / 120 / 173 BPM and on the external clock), the cost;
 #                   demos in build/sound15_demo/ (analog_bp, analog_hp, env_sync).
 # FOUR (tests/four_test.c): the four-machine contract: ENGINES[] is OB-Z WAVE ACID DRIFT, their HOME knobs, ACID mono.
+# OB-Z (tests/obx_test.c, tests/dspfft.h): the SEM-style filter morph on one voice (spectra through a plain FFT):
+#                   MODE 0 is the low-pass of before the morph bit for bit, MODE 32 notches at the cutoff, 64 passes
+#                   the highs, 127 is the 4-pole; SLOP 0 renders twice alike and SLOP 127 spreads the voices within
+#                   +-6 cents; DTN moves the second oscillator by its cents.
 # WAVE (tests/void_tables_test.py, tests/void_test.c): the VOID WAVE plugin's voice (the WAVE engine, was VOID). Its wavetables against the plugin's
 #                   frames recomputed with numpy (every keyframe and level band-limited, the crossfade within its limit;
 #                   skipped without numpy); the engine: pitch, OSC2's steps, band-limited at C8, bounded and without DC at
@@ -291,6 +295,8 @@ if [ -f build/gen/felucca_tables.h ]; then
     run "VOID: pitch, OSC2, band-limited, bounded at the corners, preset levels, cost at its cap, the filter against the plugin's" \
         "$OUT/void_test" build/void_demo build/void_ref
     $CC -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/four_test" tests/four_test.c -lm && "$OUT/four_test" || fail=1
+    $CC -O1 -w -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/obx_test" tests/obx_test.c -lm
+    run "OB-Z: MODE 0 the legacy low-pass bit for bit, the LP / NOTCH / HP morph, the 4-pole, SLOP, DTN" "$OUT/obx_test"
     $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/slicer_test" tests/slicer_test.c -lm
     mkdir -p build/slicer_demo
     run "SLICER: no clicks, timing, sync with the sequencer, STUT, cost, demos" "$OUT/slicer_test" build/slicer_demo

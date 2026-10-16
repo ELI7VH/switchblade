@@ -533,7 +533,11 @@ static void test_cost(void)
     printf("sound15: cost: ANALOG 8 voices SAW LP %.0f, BP %.0f (%+.1f %%), HP %.0f (%+.1f %%); SYNC LP %.0f, HP %.0f "
            "(%+.1f %%) instructions / sample\n", lp, bp, (bp - lp) * 100 / lp, hp, (hp - lp) * 100 / lp, slp, shp,
            (shp - slp) * 100 / slp);
-    check("cost: BP / HP within 10 % of LP", bp < lp * 1.10 && hp < lp * 1.10 && shp < slp * 1.10);
+    /* 1.5 held BP / HP within 10 % of LP: the taps were already computed and both loops carried the
+     * same noise and drive work. FM1-Four Task 4.1 made OB-Z's non-LP loop the MODE morph and took
+     * noise and drive out, so MODE 0's loop is much leaner while BP / HP pay for the extra tap. */
+    check("cost: BP / HP within 20 % of LP (the MODE morph's loop against MODE 0's)",
+          bp < lp * 1.20 && hp < lp * 1.20 && shp < slp * 1.20);
     e0 = cost(0, 0, 0);
     e1 = cost(0, 0, 1);
     printf("sound15: cost: ENV SYNC on an 8-voice part %.0f -> %.0f (%+.2f %%)\n", e0, e1, (e1 - e0) * 100 / e0);

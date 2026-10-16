@@ -14,8 +14,9 @@ import os
 import re
 import sys
 
-FUNCS = ["analog_render", "analog_render_f",           # OB-Z (eng_obx.c); _f: its BP / HP loop, ACID's and DRIFT's
-                                                    # placeholder render until their phases
+FUNCS = ["obx_render", "obx_render_f", "obx_render_p4", "obx_render_x",   # OB-Z (eng_obx.c): MODE 0's low-pass
+                                                    # loop, the MODE morph's, the 4-pole's, WAVE SYNC / SUB's
+         "analog_render_f",                         # the ANALOG render ACID and DRIFT borrow until their phases
          "slicer_track",
          "fm1_alnk0_irq", "fm1_timer5_irq",               # the audio ISR; TIMER5: the key / LED scan (hal/fm1_input.h)
          "uac_tap48",                                       # the USB audio input at 48 kHz: the 44.1 -> 48 resampler (usb.c)

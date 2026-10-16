@@ -21,7 +21,10 @@
 #include <sys/resource.h>
 #endif
 
-#define MOD_COST_MAX 5.0          /* % more instructions per sample with every slot active, at most */
+#define MOD_COST_MAX 6.0          /* % more instructions per sample with every slot active, at most.
+                                   * (FM1-Four Task 4.1: the matrix still adds the same 83 instructions to
+                                   * the 4-part mix, but OB-Z lost its noise and drive, so the mix it is
+                                   * measured against fell from 1766 to 1561 and the share rose to 5.3 %.) */
 
 static int bad;
 static void check(const char *what, int ok)
@@ -595,12 +598,13 @@ static int demos(const char *dir)
         fclose(f);
         n++;
     }
-    /* AT -> OB-Z DRV: a SOFT PAD chord, channel aftertouch pushes the drive up and down */
+    /* AT -> OB-Z MODE: a SOFT PAD chord, channel aftertouch sweeps the filter morph (Task 4.1: the
+     * slot used to hold DRV, which the morph replaced) */
     e = ENGI_OBX;
     fresh(e, preset_by_name(e, "SOFT PAD"));
-    slot(t, 0, MS_AT, MD_E1 + (int32_t)edit_by_label(e, "DRV", 6), 63);
+    slot(t, 0, MS_AT, MD_E1 + (int32_t)edit_by_label(e, "MODE", 6), 63);
     slot(t, 1, MS_AT, MD_CUT, 20);
-    if ((f = demo_open(dir, "at_obx_drv", 6u * FS / CTL * CTL))) {
+    if ((f = demo_open(dir, "at_obx_mode", 6u * FS / CTL * CTL))) {
         trk_note_on(t, 48, 100);
         trk_note_on(t, 55, 100);
         trk_note_on(t, 64, 100);
@@ -617,7 +621,7 @@ static int demos(const char *dir)
         fclose(f);
         n++;
     }
-    printf("mod: %u demos in %s (lfo_cut, vel_amp, modw_vib, lfo_obx_mix, at_obx_drv)\n", n, dir);
+    printf("mod: %u demos in %s (lfo_cut, vel_amp, modw_vib, lfo_obx_mix, at_obx_mode)\n", n, dir);
     return n == 5u;
 }
 

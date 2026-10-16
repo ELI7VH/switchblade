@@ -1433,7 +1433,10 @@ static int test_cost(void)
            rep - idle, plain - idle, harm - idle);
     snprintf(what, sizeof what, "  OCT UP over REPEAT 1/16 (the harmonizer itself): +%.0f, with the shimmer +%.0f (device ~%.1f / %.1f %%, about 2 %%)",
              plain - rep, harm - rep, (plain - rep) * 0.017, (harm - rep) * 0.017);
-    bad += check(what, (harm - rep) * 0.017 <= 2.2);
+    /* 2.5, not 2.2 since FM1-Four Task 4.1: the harmonizer costs exactly what it did (+256 over the
+     * idle song plain, +291 with the shimmer, both unchanged), but OB-Z lost its noise and drive, so
+     * the REPEAT 1/16 run it is measured against fell from +164 to +152 over idle. */
+    bad += check(what, (harm - rep) * 0.017 <= 2.5);
     snprintf(what, sizeof what, "  FLANGER over REPEAT 1/16: +%.0f, PHASER +%.0f (device ~%.1f / %.1f %%, at most 2.5 %% each)",
              flg - rep, phs - rep, (flg - rep) * 0.017, (phs - rep) * 0.017);
     bad += check(what, (flg - rep) * 0.017 <= 2.5 && (phs - rep) * 0.017 <= 2.5);

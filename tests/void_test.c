@@ -354,8 +354,11 @@ static void test_cost(void)
                ENGINES[ENGI_WAVE]->presets[k].name, VOID_POLY, c, a, c / a);
         worst = c / a > worst ? c / a : worst;
     }
-    snprintf(msg, sizeof msg, "cost: any preset at its cap (%u voices) within 1.25 x 8 of OB-Z RAVE (%.2f x)", VOID_POLY, worst);
-    check(msg, worst < 1.25);
+    /* 1.75, not the 1.25 of before Task 4.1: WAVE costs what it did, but the yardstick moved. OB-Z
+     * RAVE lost its drive and noise there, from 1765 instructions a sample at 8 voices to about
+     * 1130, so the same WAVE presets now read 1.56 x of it instead of 1.18 x. */
+    snprintf(msg, sizeof msg, "cost: any preset at its cap (%u voices) within 1.75 x 8 of OB-Z RAVE (%.2f x)", VOID_POLY, worst);
+    check(msg, worst < 1.75);
 }
 
 /* ------------------------------------------------------------------ 7 --- */
