@@ -684,6 +684,9 @@ static void open_family(uint32_t fam)
         for (i = 0; i < NPAGES; i++)
             if (PAGES[i].graph == GR_USER) break;
         ui.page = (uint8_t)i;                         /* SAVE enters the sound save screen directly */
+    } else if (fam == FAM_EDIT) {
+        ui.page = (uint8_t)page_first(FAM_EDIT);      /* VOID FOUR: EDIT always opens on its big page (taps inside the
+                                                       * family go on to MACHINE 1, 2, ..) */
     } else {
         uint32_t i = ui.fam_last[fam];
         ui.page = (uint8_t)(i && i < NPAGES && PAGES[i].fam == fam && page_visible(i) ? i : page_first(fam));

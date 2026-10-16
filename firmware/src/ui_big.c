@@ -73,6 +73,15 @@ static int big_fits(const aafont_t *f, const char *s, int32_t cap_y, int32_t cap
     }
     return 1;
 }
+/* a value as the big cards show it (param_format's, for these cards only): a cutoff of 10 kHz or more in whole kHz
+ * ("16", unit kHz: "16.0" fits no ring in L) */
+static void big_format(const param_desc_t *d, int32_t v, char *val, const char **unit)
+{
+    param_format(d, v, val, unit);
+    fmt_named = 0;
+    if (d->fmt == F_CUTOFF && CUTOFF_HZ[v & 127] >= 10000u)
+        fmt_int(val, (int32_t)((CUTOFF_HZ[v & 127] + 500u) / 1000u));
+}
 /* the face of a value: 0 XL, 1 L, 2 M */
 static int big_face_of(const char *v)
 {
@@ -98,8 +107,7 @@ static void draw_big_card(uint32_t k, uint32_t x, uint32_t y)
     cv_rrect((int32_t)x, (int32_t)y, BIG_CW, BIG_CH, 6, T_SURF, T_BG);
     if (!d || !vp)
         return;
-    param_format(d, *vp, val, &unit);
-    fmt_named = 0;
+    big_format(d, *vp, val, &unit);
     card_mot_of(vp);
     mot = card_mot_next;
     card_mot_next = 0;
@@ -126,6 +134,11 @@ static void draw_big_card(uint32_t k, uint32_t x, uint32_t y)
     v = d->fmt == F_ENUM ? enum_rank(d, *vp) : *vp;
     knob((int32_t)x + BIG_RX, (int32_t)y + BIG_RY, KNOB_XL_R, KNOB_XL_COV, KNOB_XL_ANG, v, d->min, d->max, vc);
     face = big_face_of(val);
+    if (face == 2 && val[0] == '+' && big_face_of(val + 1) < 2) {   /* the '+' all that kept it from L / XL ("+100"):
+                                                                     * dropped ('-' always stays) */
+        str_cpy(val, val + 1, sizeof val);
+        face = big_face_of(val);
+    }
     vf = face == 0 ? &AF_XL : face == 1 ? &AF_L : &AF_M;
     BIG_HOOK(k, label, val, face);
     GFX_HOOK_ALIGN((int32_t)x + BIG_RX, (int32_t)y + BIG_RY, (int32_t)x + BIG_RX + BIG_RD,
@@ -150,8 +163,7 @@ static uint32_t big_card_sig(uint32_t k)
     if (d && vp) {
         char val[12];
         const char *unit;
-        param_format(d, *vp, val, &unit);
-        fmt_named = 0;
+        big_format(d, *vp, val, &unit);
         h = str_hash(str_hash(h + (uint32_t)(*vp + 1000) * 131u + (uint32_t)d->min * 31u + (uint32_t)d->max, val), unit);
     }
     return h;

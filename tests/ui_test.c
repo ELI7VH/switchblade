@@ -3200,7 +3200,7 @@ static int test_edit_cycle(void)
     bad += check("FLT ENV of a track no longer WAVE falls back to EDIT (the big page)", str_eq(cur_page()->title, "EDIT"));
     go_title("MACHINE 2"); ui.fam_last[FAM_EDIT] = ui.page;
     go_home(); press(B_EDIT);
-    bad += check("EDIT remembers its last page (as every family)", str_eq(cur_page()->title, "MACHINE 2"));
+    bad += check("EDIT from elsewhere: the big EDIT page, not the last one (VOID FOUR)", str_eq(cur_page()->title, "EDIT"));
     return bad;
 }
 
@@ -3249,6 +3249,26 @@ static int test_edit_big(void)
             bad += check("  MIDI LEARN: K2 picks RES (P_E5)", ui.ml.on && ui.ml.id == P_E5);
             ml_off();
         }
+    }
+    {   /* review: no value drops to M for an ordinary setting: CUT 16 kHz as "16" kHz, ENV +100 as "100" (the sign
+         * dropped only where it is what kept it out of XL / L); "-100" keeps its sign */
+        int ok;
+        ui_power_on(); song.sel = 0; set_engine_of(TSEL, ENGI_OBX); frame();
+        press(B_EDIT); frame();
+        TSEL->p[P_E4] = 127; TSEL->p[P_ED_FLT] = 63; ui.force = 1; frame();
+        bad += check("  CUT at the top (16 kHz): \"16\" in L or XL", CUTOFF_HZ[127] >= 16000u && str_eq(big_val[0], "16") &&
+                     big_face[0] <= 1);
+        bad += check("  ENV +100: \"100\" in L or XL", str_eq(big_val[2], "100") && big_face[2] <= 1);
+        TSEL->p[P_ED_FLT] = -64; ui.force = 1; frame();
+        ok = str_eq(big_val[2], "-100");
+        TSEL->p[P_ED_FLT] = 20; ui.force = 1; frame();
+        bad += check("  ENV -100 keeps its sign; +31 keeps its", ok && big_val[2][0] == '+');
+    }
+    {   /* review: EDIT from outside the family always opens the big page (taps inside still cycle) */
+        ui_power_on(); frame();
+        press(B_EDIT); frames(320); press(B_EDIT); frames(320);
+        go_home(); frame(); press(B_EDIT); frames(320);
+        bad += check("EDIT, EDIT (MACHINE 1), HOME, EDIT: the big EDIT page", str_eq(cur_page()->title, "EDIT"));
     }
     {   /* EDIT taps on: MACHINE 1, MACHINE 2, then the deeper pages */
         ui_power_on(); frame();
