@@ -468,7 +468,7 @@ static void draw_gaps(uint32_t y, uint32_t h)
 static void draw_frame(void)
 {
     uint32_t ch = card_h(), gy = graph_y(), gh = graph_h();   /* (MENU > LARGE: tall cards, a strip) */
-    if (big_page())                                     /* EDIT: its strips cover every row (ui_big.c) */
+    if (big_screen())                                   /* HOME, EDIT: their strips cover every row (ui_big.c) */
         return;
     gap_rows(H_HEAD, Y_LABEL);
     gap_rows(Y_LABEL + ch, gy);
@@ -754,7 +754,7 @@ static void sound_name(const track_t *t, char *b)
         str_cpy(b, e->presets[t->preset % e->npresets].name, 16);
 }
 
-#include "ui_big.c"                                 /* VOID FOUR's EDIT page: four big cards */
+#include "ui_big.c"                                 /* VOID FOUR's EDIT page and HOME: big cards */
 
 static void draw_foot(void)
 {
@@ -765,8 +765,8 @@ static void draw_foot(void)
     const engine_t *e = ENGINES[TSEL->eng_req % NENGINES];
     const char *ename = e->name, *help;
     int32_t x;
-    int big = big_page();                              /* EDIT (ui_big.c): row 1 only, 28 px (its header names the
-                                                        * machine and the sound), on its middle */
+    int big = big_screen();                            /* HOME, EDIT (ui_big.c): row 1 only, 28 px (the screen names
+                                                        * the machine and the sound), on its middle */
     int32_t oy = big ? 6 : 0;
     sound_name(t, pn);
     if (ui.home)
@@ -896,17 +896,8 @@ static void draw_columns(void)
     char val[12];
     const char *unit;
     (void)motion_mask(song.sel, card_mot_mask);       /* (PLAY OFF: no scan) */
-    if (ui.home) {
-        for (c = 0; c < 4u; c++) {
-            int16_t *vp;
-            const param_desc_t *d = home_param(c, &vp);
-            param_format(d, *vp, val, &unit);
-            card_mot_of(vp);
-            if (home_levels())                         /* 1.5: T1..T4 LEVEL, the track's cushion, muted: DIM */
-                draw_column(c, "LEVEL", val, unit, trk[c].p[P_MUTE] ? T_DIM : VAL(c), RATIO(d, *vp), trk_icon(c, 1));
-            else
-                draw_column(c, d->label, val, unit, VAL(c), RATIO(d, enum_rank(d, *vp)), param_icon(d, *vp));
-        }
+    if (ui.home) {                                   /* HOME: tabs, the sound, four cards (ui_big.c) */
+        draw_home_big();
         return;
     }
     if (big_page()) {                                /* EDIT: four big cards (ui_big.c) */

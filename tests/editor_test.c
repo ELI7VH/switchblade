@@ -166,7 +166,7 @@ static int preferences(void)
         host_wire[e - 33] == 0x4d && host_wire[e - 32] == 1 && host_wire[e - 31] == 64u && host_wire[e - 30] == 1 &&   /* (64 kept: 41 01 says 128) */
         host_wire[e - 29] == 0x42 && host_wire[e - 28] == 1 && host_wire[e - 27] == 3 &&
         host_wire[e - 26] == 0x53 && host_wire[e - 25] == 1 && host_wire[e - 24] == 3 &&
-        host_wire[e - 23] == 0x4E && host_wire[e - 22] == 1 && host_wire[e - 21] == 37 &&   /* MENU settings: 37 items (FM1-Four) */
+        host_wire[e - 23] == 0x4E && host_wire[e - 22] == 1 && host_wire[e - 21] == 36 &&   /* MENU settings: 36 items (FM1-Four; VOID FOUR: no HOME) */
         host_wire[e - 20] == 0x52 && host_wire[e - 19] == 1 && host_wire[e - 18] == 4 &&   /* RATCH */
         host_wire[e - 17] == 0x4C && host_wire[e - 16] == 1 && host_wire[e - 15] == 1 &&   /* 1.1 parameter locks */
         host_wire[e - 14] == 0x41 && host_wire[e - 13] == 1 && host_wire[e - 12] == 0 && host_wire[e - 11] == 1 &&   /* 1.2: 128 */
@@ -737,7 +737,7 @@ static int menu_protocol(void)
         {"SCREEN OFF", "NEVER,5 MIN,15 MIN,30 MIN,60 MIN"},
         {"SCOPE", "OUT,MIX"}, {"STEP PREVIEW", "OFF,ON"}, {"CHORD ENTRY", "HOLD,ADD"},                  /* (1.2) */
         {"MIDI IN", "CH1-4,SEL,CH5-8,CH9-12,CH13-16,TRACK"}, {"TUNE", 0},   /* (1.2: the project's ROUT and TUNE; TUNE a number) */
-        {"HOME", "SCOPE,TRACKS,LEVELS"},                                                       /* (1.3; 1.5: LEVELS) */
+        {"HOME", "SCOPE,TRACKS,LEVELS"},   /* (1.3's id 23; 1.5: LEVELS. VOID FOUR: gone, one HOME; no item has the id) */
         {"HELP", "OFF,ON"},                                                                          /* (1.5) */
         {"SELECT", "BPM,PAGE,MODW,VEL"},                                                             /* (1.5.5; 1.5.6 MODW VEL) */
         {"T1 CHANNEL", TCH_NAMES}, {"T2 CHANNEL", TCH_NAMES}, {"T3 CHANNEL", TCH_NAMES}, {"T4 CHANNEL", TCH_NAMES},   /* (1.5.5) */
@@ -757,13 +757,15 @@ static int menu_protocol(void)
     FILE *jf = json ? fopen(json, "w") : 0;
     reset();
     if (jf) fprintf(jf, "[");
-    for (i = 0; i < 37u; i++) {
-        n = menu_desc(i, &it);
+    for (i = 0; i < 36u; i++) {                         /* (index i: id i, past VOID FOUR's retired 23 the next) */
+        uint32_t idx = i;
+        i = idx < 23u ? idx : idx + 1u;
+        n = menu_desc(idx, &it);
         joined[0] = 0;
         for (k = 0; k < it.nnames; k++) { if (k) strcat(joined, ","); strcat(joined, it.names[k]); }
-        ok &= i == 22u ? n > 10u && it.index == i && it.id == i && it.kind == 1 && it.min == -50 && it.max == 50 &&
+        ok &= i == 22u ? n > 10u && it.index == idx && it.id == i && it.kind == 1 && it.min == -50 && it.max == 50 &&
                          !it.nnames && !strcmp(it.unit, "ct") && !strcmp(it.name, "TUNE")     /* (a number: cents) */
-                       : n > 10u && it.index == i && it.id == i && it.kind == 0 && it.min == 0 && !it.unit[0] &&
+                       : n > 10u && it.index == idx && it.id == i && it.kind == 0 && it.min == 0 && !it.unit[0] &&
                          it.max + 1 == (int32_t)it.nnames && !strcmp(it.name, WANT[i][0]) &&
                          (WANT[i][1] ? !strcmp(joined, WANT[i][1]) : it.nnames == NPALETTES);
         ok &= it.value == (DEF[i] < 0 ? (int32_t)settings.palette : DEF[i]) &&
@@ -777,9 +779,10 @@ static int menu_protocol(void)
             for (k = 0; k < it.nnames; k++) fprintf(jf, "%s\"%s\"", k ? "," : "", it.names[k]);
             fprintf(jf, "],\"unit\":\"%s\",\"tab\":%u,\"tabName\":\"%s\"}", it.unit, it.tab, it.tabname);
         }
+        i = idx;
     }
     if (jf) { fprintf(jf, "]\n"); fclose(jf); }
-    bad += check("MENU_DESC: 37 items (1.0.4's 12 in the menu's order, then 1.1's CLICK, CLICK LEVEL, COUNT-IN, 1.2's RESTORE LAST, SCALE LEDS, SCREEN OFF, 1.2's SCOPE, STEP PREVIEW, CHORD ENTRY, MIDI IN, TUNE, 1.3's HOME, 1.5's HELP, 1.5.5's SELECT, T1..T4 CHANNEL, AUTO SELECT, SCREEN WAKE, FM1-Four's T1..T4 OUT, CLOCK OUT), ids 0..36, names, defaults; TUNE a number -50..50 ct", ok);
+    bad += check("MENU_DESC: 36 items (1.0.4's 12 in the menu's order, then 1.1's CLICK, CLICK LEVEL, COUNT-IN, 1.2's RESTORE LAST, SCALE LEDS, SCREEN OFF, 1.2's SCOPE, STEP PREVIEW, CHORD ENTRY, MIDI IN, TUNE, 1.5's HELP, 1.5.5's SELECT, T1..T4 CHANNEL, AUTO SELECT, SCREEN WAKE, FM1-Four's T1..T4 OUT, CLOCK OUT), ids 0..36 but 23 (1.3's HOME, gone), names, defaults; TUNE a number -50..50 ct", ok);
     bad += check("MENU_DESC (1.0.5): after the names (TUNE: the unit) each item's tab, index and name (DISPLAY CONTROL AUDIO MIDI MIDI OUT SYSTEM)", ok);
     {   /* an older editor reads the names and stops: the tab is past them, nothing it reads moved */
         uint32_t m = menu_desc(4, &it), p = 14, q;
@@ -789,12 +792,12 @@ static int menu_protocol(void)
         bad += check("MENU_DESC: the tab comes after every byte of the 1.0.4 reply (older editors ignore it)", ok);
     }
     ok = 1;
-    for (i = 0; i < 37u; i++) {
+    for (i = 0; i < 36u; i++) {
         menu_desc(i, &it);
-        ok &= strcmp(it.name, "CALIBRATION") && strcmp(it.name, "ABOUT") && strcmp(it.name, "INFO");
+        ok &= strcmp(it.name, "CALIBRATION") && strcmp(it.name, "ABOUT") && strcmp(it.name, "INFO") && it.id != 23u;
     }
-    n = menu_desc(37, &it);
-    ok &= n == 2u && it.index == 37 && it.id == 127;
+    n = menu_desc(36, &it);
+    ok &= n == 2u && it.index == 36 && it.id == 127;
     n = menu_desc(127, &it);
     bad += check("MENU_DESC: no CALIBRATION / INFO / ABOUT; an index past the list answers index, 127 (no item)",
                  ok && n == 2u && it.index == 127 && it.id == 127);
@@ -831,7 +834,7 @@ static int menu_protocol(void)
     ok &= menu_set(19, 1) == 3 && ui_prefs2 == 3u && menu_set(20, 1) == 3 && ui_prefs2 == 7u;
     ok &= menu_set(21, 2) == 0 && song.g[G_ROUTE] == 2 && menu_set(22, -13) == 0 && song.g[G_TUNE] == -13;   /* (1.2: the
                                                          * project's, rc 0: in the music, no settings record) */
-    ok &= menu_set(23, 1) == 3 && ui_home_view == HV_TRACKS && ui_prefs2 == 7u && ui_scr == 1u;   /* (1.3: its own byte) */
+    ok &= menu_set(23, 1) == 1 && ui_prefs2 == 7u && ui_scr == 1u;   /* (1.3's HOME: gone in VOID FOUR, an unknown id) */
     ok &= menu_set(24, 1) == 3 && ui_prefs2 == 15u && help_on();                                  /* (1.5: HELP, bit 3) */
     ok &= menu_set(25, 1) == 3 && ui_prefs2 == 31u;                                               /* (1.5.5: SELECT, bit 4) */
     ok &= menu_set(26, 9) == 0 && mch_get(0) == 9u && song.mch[0] == 9u && menu_set(27, MCH_OMNI) == 0 &&   /* (1.5.5: */
@@ -842,12 +845,12 @@ static int menu_protocol(void)
           ui_prefs2 == 31u;                             /* (its own byte: SELECT's bit 4 untouched) */
     ok &= menu_set(31, 1) == 3 && ui_prefs2 == 63u && (ui_rec_prefs & 0x80u) && ui_scr == 1u;   /* (1.5.5: SCREEN WAKE
                                                          * PANEL, bit 5 of ui_prefs2; SCREEN OFF's byte untouched) */
-    for (i = 0; i < 32u; i++) {                         /* MENU_DESC reads them back */
-        static const int32_t SET[32] = {2, 1, 1, 1, 1, 3, 1, 1, 1, 2, 1, 0, 2, 0, 2, 1, 1, 2, 1, 1, 1, 2, -13, 1, 1, 1, 9, 16, 17, 0, 1, 1};
+    for (i = 0; i < 31u; i++) {                         /* MENU_DESC reads them back (by id; 23 is no item) */
+        static const int32_t SET[32] = {2, 1, 1, 1, 1, 3, 1, 1, 1, 2, 1, 0, 2, 0, 2, 1, 1, 2, 1, 1, 1, 2, -13, 0, 1, 1, 9, 16, 17, 0, 1, 1};
         menu_desc(i, &it);
-        ok &= it.value == SET[i];
+        ok &= it.value == SET[it.id] && it.id == (i < 23u ? i : i + 1u);
     }
-    bad += check("MENU_SET: every setting applied as the menu does (palette, EQ, USB LEVEL, CLICK, COUNT-IN at once, RESTORE LAST, SCALE LEDS, SCREEN OFF, SCOPE, STEP PREVIEW, CHORD ENTRY, HOME, HELP, SELECT, T1..T4 CHANNEL, AUTO SELECT, SCREEN WAKE), read back", ok);
+    bad += check("MENU_SET: every setting applied as the menu does (palette, EQ, USB LEVEL, CLICK, COUNT-IN at once, RESTORE LAST, SCALE LEDS, SCREEN OFF, SCOPE, STEP PREVIEW, CHORD ENTRY, HELP, SELECT, T1..T4 CHANNEL, AUTO SELECT, SCREEN WAKE), read back", ok);
     ok = menu_set(3, 0) == 3 && !(ui_prefs & PREF_ANIM_OFF) && (ui_prefs & PREF_LARGE) && menu_set(10, 0) == 3 &&
          !fx_usb_fixed && menu_set(1, 0) == 3 && ui_style == ST_FLAT;
     bad += check("MENU_SET: a flag back to its default leaves the other flags", ok);

@@ -7,7 +7,8 @@
  * zoom: no longer used (the large readout); kept as it was saved, unless it holds the LEDS setting (panel.c).
  * favorites.factory[15][28..31]: CLICK / CLICK LEVEL / COUNT-IN (1.1), STYLE, MENU's flags, the layers seen (bytes no
  * engine uses; 0 in older settings = every one's default); [15][27]: SCREEN OFF (1.1.5; 0 = 30 MIN, the default);
- * [15][26]: MENU > DISPLAY > HOME (1.3; 0 = SCOPE, 1 TRACKS, 2 LEVELS (1.5), ui.c ui_home_view);
+ * [15][26]: Felucca's MENU > DISPLAY > HOME (1.3; 0 = SCOPE, 1 TRACKS, 2 LEVELS): no row in VOID FOUR (one HOME),
+ *   nothing reads it; kept as saved;
  * [15][24]: MENU's 1.2 flags SCOPE MIX, STEP PREVIEW ON, CHORD ENTRY ADD (bits 0-2, ui.c ui_prefs2; 0 = the defaults),
  *   1.5 HELP ON (bit 3), 1.5.5 SELECT PAGE (bit 4; 0 = BPM, as before), 1.5.5 SCREEN WAKE PANEL (bit 5; 0 = +MIDI);
  * [15][10]: MENU > ANIM IDLE (1.2, Discussion #135, ui.c ui_idle: bit 0; 0 = off, ANIM as its bit in MENU's flags says);
@@ -43,7 +44,7 @@ static int settings_import(persist_t *p, int n)
         p->favorites.factory[15][27] = 0;
     if (p->favorites.factory[15][11] >= 8u)         /* PRESETS LIST's category (1.2, ui.c ui_lcat, CAT_*, below category.c NCAT = 8): unknown = none */
         p->favorites.factory[15][11] = 0;
-    /* [15][26] HOME (1.3, ui.c ui_home_view): kept as saved; a value this firmware does not know draws SCOPE */
+    /* [15][26] Felucca's HOME view (1.3): nothing reads it in VOID FOUR; kept as saved */
     {   /* CUSTOM (1.6, #244, favorites.c ui_cpal): [15][0..9] five RGB565 colours, [12] bit 0 stored, bit 1 in use. Anything else
          * in [12], or colours without the stored flag: none (zero). The colours themselves are whatever the user chose */
         uint8_t *f = p->favorites.factory[15];

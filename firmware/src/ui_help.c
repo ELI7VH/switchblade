@@ -6,8 +6,7 @@
  *            steps or the OCT+ / OCT- hint, which come back after), ui_draw.c draw_foot
  *   a layer  while its map shows: a second footer row under the layer's own (ui_layer.c draw_layer)
  * A hint is "[KEYCAP]WORDS" up to three times (gfx.c kc_tag names the keycaps); help_parse splits it for cv_key_row.
- * Pages by their title (a page added later has none until it is written here); HOME and HOME LEVELS by
- * what they are. Every hint fits its row with every word (tests/ui_test.c test_help: no word dropped). The setting and
+ * Pages by their title (a page added later has none until it is written here); HOME by what it is. Every hint fits its row with every word (tests/ui_test.c test_help: no word dropped). The setting and
  * the timer: ui.c help_on, help_start (PREF_HELP, ui.help_t) */
 
 static const char H_EDIT[] = "[K1-4]SOUND[EDIT]HOLD: ENGINES";
@@ -49,7 +48,6 @@ static const struct { const char *title, *hint; } HELP_PAGE[] = {
     {"CLOCK", "[SELECT]TEMPO[GLO]HOLD: TAP"},
 };
 #define H_HOME "[PRESETS]SOUND[HOME]HOLD: MENU"
-#define H_LEVELS "[K1-4]T1-T4 LEVEL[HOME]MIXER"
 /* a layer's (LAYER_*): what its footer row (LAYERS[].foot) does not say */
 static const char *const HELP_LAYER[LAYER_N] = {
     "", "[KEYS]BLACK: MUTES[FX]2 TAPS: LOCK", "[KEYS]SOLO MUTE FILL TAP[K1-4]LEVELS", "[KEYS]ROOT[K1-4]ROOT SCL CHORD",
@@ -63,7 +61,7 @@ static const char *help_page(void)
     uint32_t i;
     const char *t;
     if (ui.home)
-        return home_levels() ? H_LEVELS : H_HOME;
+        return H_HOME;
     t = cur_page()->title;
     if (sel_mode() != SEL_BPM && str_eq(t, "CLOCK"))   /* (1.5.5: SELECT steps the pages; 1.5.6: or plays) */
         return "[K1]TEMPO[GLO]HOLD: TAP";

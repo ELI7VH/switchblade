@@ -669,16 +669,14 @@ static int32_t song_follow(const song_lay_t *L)
     return sgv.off;
 }
 
-/* MENU > LARGE's strip under the tall cards (ui.c LK_TALL): HOME's scope, ENV's ADSR, LFO's wave,
- * MIXER's tracks drawn small; on the other pages the page's title and number (their charts need the whole panel) */
-enum { SK_NONE, SK_SCOPE, SK_ADSR, SK_LFO, SK_TRK, SK_TITLE };
+/* MENU > LARGE's strip under the tall cards (ui.c LK_TALL): ENV's ADSR, LFO's wave, MIXER's tracks drawn small; on
+ * the other pages the page's title and number (their charts need the whole panel). (HOME and EDIT: their own layout) */
+enum { SK_NONE, SK_ADSR, SK_LFO, SK_TRK, SK_TITLE };
 static uint32_t strip_kind(void)
 {
     uint32_t g;
-    if (large_kind() != LK_TALL)
+    if (large_kind() != LK_TALL || ui.home)
         return SK_NONE;
-    if (ui.home)
-        return SK_SCOPE;
     g = cur_page()->graph;
     return g == GR_ADSR ? SK_ADSR : g == GR_LFO ? SK_LFO : g == GR_TRK ? SK_TRK : SK_TITLE;
 }
@@ -730,8 +728,6 @@ static uint32_t graph_signature(void)
     const page_t *pg = cur_page();
     const track_t *t = TSEL;
     uint32_t h = 2166136261u, i;
-    if (ui.home)
-        return h ^ (ui.frame / 2u);                  /* scope: redraw every other frame */
     h ^= (uint32_t)pg->graph * 131u + TSEL->eng_req + song.sel * 7777u + ui.page * 1291u;
     if (strip_kind() == SK_TITLE)                    /* MENU > LARGE: the page's title (its engine, its number) */
         return h ^ 0x5A17u;
@@ -1305,139 +1301,6 @@ static void draw_tracks(void)
         cv_blit((uint32_t)CARD_X(c), Y_GRAPH);
     }
 }
-/* HOME > TRACKS (1.3, Discussions #112 / #134: MENU > DISPLAY > HOME TRACKS): the four tracks as rows in the panel, one
- * under the other (29 px, 2 apart), in place of the scope; the cards above stay HOME's four (the selected track's). A row:
- * the track's cushion at the left; on its first line the engine's icon and the sound's name (MENU > LARGE: the name in M,
- * no icon), a MUTE badge at its right when muted; under it the 16 steps of the page of the track's pattern that plays
- * (stopped: the selected track's cursor page, the others' first): a note a bar (accented: taller, the accent), a TIE after
- * a note the bar carried on from the one before, an empty step or a REST a
- * stub (a TIE with nothing to carry: brighter); the step playing on a raised cell. LEN > 16: a pip per page right of the
- * steps (the page shown THEME). At the right the track's output meter. The selected track's row is the selection (THEME,
- * its ink INK, as a list's selected row); a muted track's steps DIM. Each row is its own canvas with its own signature
- * (ts.col, the MIXER's: the two never show together); a meter that moved alone redraws its slot only. LINE: the rows on
- * BG, 1 px rules between them */
-#define TR_H 29                                      /* a row; rows TR_PITCH apart from Y_GRAPH, 3 .. 237 across */
-#define TR_PITCH 31
-#define TR_W 234
-#define TR_NY(lg) ((lg) ? 2 : 4)                     /* the name line's capitals from row 4 (LARGE, M: 2) */
-#define TR_SB 26                                     /* the steps: bars standing on row 25 */
-#define TR_BW 9                                      /* a step's bar, 11 px apart, 4 more between groups of 4 */
-#define TR_PX 216                                    /* the page pips */
-#define TR_MX 226                                    /* the meter: 4 x 22 from row 4 */
-#define TR_MY 4
-#define TR_MH 22
-static int32_t tr_bx(uint32_t i) { return 24 + (int32_t)i * 11 + (int32_t)(i / 4u) * 4; }
-static void tr_meter(int32_t x, int32_t y, uint32_t c, uint16_t slot, uint16_t fill, uint16_t under)
-{
-    int32_t m = ts.meter[c] * TR_MH / (TS_MH - 2);
-    cv_rrect(x, y, 4, TR_MH, 2, slot, under);
-    if (m)
-        cv_rrect(x, y + TR_MH - m, 4, m, m >= 4 ? 2 : 0, fill, slot);
-}
-static void home_track_row(uint32_t c)
-{
-    track_t *t = &trk[c];
-    const step_t *s = seq_steps(t);
-    uint32_t sel = c == song.sel, mute = t->p[P_MUTE] != 0, large = (ui_prefs & PREF_LARGE) != 0u, lit = (uint32_t)midi_lit(c);
-    uint32_t len = (uint32_t)clamp(t->p[P_SLEN], 1, NSTEP), np = (len + 15u) / 16u, pg, p0, ph, i, sig, carry = 0;
-    int32_t y = Y_GRAPH + (int32_t)c * TR_PITCH, m, x, xr = 222, ch = large ? AF_M_CAP_H : AF_S_CAP_H;
-    uint16_t bg = sel ? T_THEME : T_SURF, half = ux_mix(T_THEME, T_INK, 35);
-    uint16_t cn = sel ? (mute ? ux_mix(T_THEME, T_INK, 55) : T_INK) : mute ? T_DIM : T_THEME;   /* a note */
-    uint16_t ca = sel || mute ? cn : T_ACCENT, cs = sel ? half : T_RAISE;   /* accented; a stub */
-    uint16_t cp = sel ? ux_mix(T_THEME, T_INK, 20) : T_RAISE, cpl = sel ? T_INK : mute ? T_MID : T_TEXT;   /* playing */
-    char b[16];
-    pg = song.playing ? t->seq_idx / 16u : sel ? ui.cursor / 16u : 0u;
-    if (pg >= np)
-        pg = np - 1u;
-    p0 = pg * 16u;
-    ph = song.playing && t->seq_idx / 16u == pg ? t->seq_idx % 16u : 0xFFu;
-    trk_short_name(c, b);
-    m = mute ? 0 : meter_px(t->peak);
-    t->peak = 0;
-    if (m < ts.meter[c] - 1)
-        m = ts.meter[c] - 1;                         /* (falls as the MIXER's) */
-    sig = str_hash(1u + sel + mute * 2u + large * 4u + t->eng_req * 8u, b) + steps_hash(t) * 31u + pg * 7919u +
-          ph * 104729u + len * 1299709u + lit * 15485863u;   /* (1.5.5: MIDI IN lights the cushion) */
-    if (!ui.force && sig == ts.col[c]) {
-        if (m != ts.meter[c]) {                      /* the meter alone: its slot */
-            ts.meter[c] = (uint8_t)m;
-            cv_begin(4, TR_MH, bg);
-            tr_meter(0, 0, c, cs, sel ? T_INK : T_MID, bg);
-            cv_blit(3 + TR_MX, (uint32_t)(y + TR_MY));
-        }
-        return;
-    }
-    ts.col[c] = sig;
-    ts.meter[c] = (uint8_t)m;
-    cv_begin(TR_W, TR_H, T_BG);
-    cv_rrect(0, 0, TR_W, TR_H, 5, bg, T_BG);
-    cv_icon_mid(4, TR_H / 2, 16, trk_icon(c, 1), lit ? (sel ? half : T_ACCENT) : sel ? T_INK : mute ? T_DIM : T_MID, bg);
-    if (mute) {                                      /* MUTE: its badge at the name line's end */
-        xr -= kc_w(KC_MUTE);
-        GFX_HOOK_ALIGN(0, TR_NY(large), 0, TR_NY(large) + ch, AL_V, "tracks row badge on the name's line");
-        cv_keycap(xr, TR_NY(large) + (ch - KC_H) / 2, KC_MUTE, sel ? T_INK : T_KEY, sel ? T_THEME : T_INK, bg);
-        xr -= 6;
-    }
-    x = 24;
-    if (FELUCCA_ICONS && !large) {                   /* the engine's icon on the name's capitals */
-        uint32_t ei = engine_icon(ENGINES[t->eng_req % NENGINES]->name);
-        if (ei != ICON_NONE)
-            GFX_HOOK_ALIGN(0, TR_NY(large), 0, TR_NY(large) + ch, AL_V, "tracks row icon on the name's line");
-        x += cv_icon_in(x, TR_NY(large), 0, ch, 12, ei, sel ? T_INK : T_MID, bg) + 5;
-    }
-    cv_free_text(x, TR_NY(large) - (large ? AF_M_CAP_Y : AF_S_CAP_Y), large ? &AF_M : &AF_S, b, sel ? T_INK : mute ? T_DIM : T_TEXT,
-                 bg, xr - x);
-    for (i = p0; i-- > 0u;)                          /* a TIE at the page's start: carried from a note before it? */
-        if (s[i].time != ST_TIE) {
-            carry = s[i].time == ST_NOTE && s[i].n;
-            break;
-        }
-    for (i = 0; i < 16u && p0 + i < len; i++) {
-        const step_t *st = &s[p0 + i];
-        int32_t bx = tr_bx(i);
-        uint16_t under = i == ph ? cp : bg;
-        if (i == ph)                                 /* the step playing: a raised cell */
-            cv_rrect(bx - 1, 15, TR_BW + 2, 13, 2, cp, bg);
-        if (st->time == ST_TIE && carry) {           /* carried on: joined to the bar before */
-            int32_t x0 = i ? tr_bx(i - 1u) + TR_BW : bx - 2;
-            cv_rect(x0, TR_SB - 7, bx + 2 - x0, 7, i == ph ? cpl : cn);
-            cv_rrect(bx, TR_SB - 7, TR_BW, 7, 2, i == ph ? cpl : cn, under);
-        } else if (st->time == ST_NOTE && st->n) {   /* notes: a bar, accented taller */
-            int acc = (st->flags & SF_ACCENT) != 0u;
-            cv_rrect(bx, TR_SB - (acc ? 10 : 7), TR_BW, acc ? 10 : 7, 2, i == ph ? cpl : acc ? ca : cn, under);
-            carry = 1;
-            continue;
-        } else {                                     /* empty, a REST, a TIE carrying nothing */
-            cv_rect(bx, TR_SB - 2, TR_BW, 2, i == ph ? (sel ? T_INK : T_MID) : st->time == ST_TIE ? (sel ? T_INK : T_MID) : cs);
-        }
-        carry = st->time == ST_TIE && carry;
-    }
-    if (np > 1u)                                     /* LEN > 16: the pages, top to bottom */
-        for (i = 0; i < np; i++)
-            cv_rect(TR_PX, TR_SB - 3 * (int32_t)(np - i) + 1, 3, 2, i == pg ? (sel ? T_INK : T_THEME) : cs);
-    tr_meter(TR_MX, TR_MY, c, cs, sel ? T_INK : T_MID, bg);
-    cv_blit(3, (uint32_t)y);
-}
-static void draw_home_tracks(void)
-{
-    uint32_t c;
-    if (ui.force) {                                  /* the BG round the rows only, they cover the rest (#181) */
-        lcd_fill(0, Y_GRAPH, 3, H_GRAPH, T_BG);
-        lcd_fill(3 + TR_W, Y_GRAPH, 240 - 3 - TR_W, H_GRAPH, T_BG);
-        for (c = 0; c < NTRK; c++)
-            ts.meter[c] = 0;
-        for (c = 1; c < NTRK; c++) {                 /* the 2 rows between two rows; LINE: a rule on the first */
-            uint32_t y = (uint32_t)(Y_GRAPH + (int32_t)c * TR_PITCH - 2);
-            if (ux.style) {
-                lcd_fill(3, y, TR_W, 1, T_RULE);
-                GFX_HOOK_RULE(3, y, TR_W, 1);
-            }
-            lcd_fill(3, ux.style ? y + 1u : y, TR_W, ux.style ? 1u : 2u, T_BG);
-        }
-    }
-    for (c = 0; c < NTRK; c++)
-        home_track_row(c);
-}
 /* oscilloscope of the output, triggered on a rising zero crossing: a RAISE centre line, the trace 2 px (in silence
  * a flat line on it; MENU > SCREEN OFF keeps it from staying on the panel for hours) */
 static void graph_scope(uint16_t c)
@@ -1765,12 +1628,8 @@ static void draw_graph(void)
         draw_tracks();
         return;
     }
-    if (big_page())                                  /* EDIT: no panel (ui_big.c: its cards cover it) */
+    if (big_screen())                                /* HOME, EDIT: no panel (ui_big.c: their strips cover it) */
         return;
-    if (ui.home && home_tracks()) {                  /* MENU > HOME TRACKS (1.3) */
-        draw_home_tracks();
-        return;
-    }
     sig = graph_signature();
     if (!ui.force && sig == ui.graph_sig)
         return;
@@ -1783,14 +1642,10 @@ static void draw_graph(void)
         uint32_t k = strip_kind();
         cv_oy = k == SK_ADSR || k == SK_LFO ? 3 : 0;
         graph_ht = LG_H_GRAPH - 6;
-        if (k == SK_SCOPE) graph_scope(c);
-        else if (k == SK_ADSR) graph_adsr(t, c);
+        if (k == SK_ADSR) graph_adsr(t, c);
         else if (k == SK_LFO) graph_lfo(t, c);
         else graph_title();
         graph_ht = 100;
-    } else if (ui.home) {
-        cv_oy = 0;
-        graph_scope(c);
     } else {
         switch (pg->graph) {
         case GR_ADSR:

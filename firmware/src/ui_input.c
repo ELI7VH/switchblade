@@ -72,8 +72,10 @@ static int mom_turn(uint32_t k, int32_t s)
     const param_desc_t *d;
     int16_t *vp = 0;
     uint32_t i, g;
-    const track_t *t = ui.home ? home_trk(k) : TSEL;     /* (HOME LEVELS: KNOB k is track k's) */
-    if (ui.home) {
+    const track_t *t = TSEL;
+    if (ui.home) {                                     /* HOME: VOLUME only (TRACK, PRESET pick; TEMPO is no sound) */
+        if (k != HK_VOLUME)
+            return 0;
         d = home_param(k, &vp);
     } else if (pg->scope == SC_TRK && !lock_held()) {  /* MIXER (#195): the selected track's LEVEL PAN REV MUTE */
         static const uint8_t MIX_ID[4] = {P_LEVEL, P_PAN, P_REV, P_MUTE};   /* (tracks_edit's knobs) */
@@ -418,6 +420,35 @@ static int32_t accel(uint32_t role, int32_t s, int32_t range)
     }
     ui.enc_t[role] = now | up << 24 | (i ? i : 1u) << 25;
     return s * (int32_t)m;
+}
+
+/* HOME (VOID FOUR, ui.c HK_*): KNOB 1 the track (a detent each, T1..T4, no wrap: as ALGORITHM), 2 the machine's next /
+ * previous sound (its 32 and its user presets, round: eng_list_step; a load sends its Program Change, midi_control.c),
+ * 3 the track's LEVEL (recorded as automation, MIDI LEARN; MIDI OUT sends it as any change of the CC map), 4 the BPM at
+ * SELECT's acceleration (an external clock sets it: the turn does nothing) */
+static void home_turn(uint32_t k, int32_t s)
+{
+    int16_t *vp;
+    const param_desc_t *d;
+    switch (k & 3u) {
+    case HK_TRACK:
+        track_select((uint32_t)clamp((int32_t)song.sel + s, 0, NTRK - 1));
+        break;
+    case HK_PRESET:
+        eng_list_step(s);
+        break;
+    case HK_VOLUME:
+        d = home_param(k, &vp);
+        *vp = (int16_t)param_turn(d, *vp, accel(EN_K1 + k, s, d->max - d->min));
+        motion_capture(TSEL, P_LEVEL, *vp);
+        ml_knob(TSEL, P_LEVEL);
+        break;
+    default:
+        if (song.g[G_CLOCK])
+            break;
+        song.g[G_BPM] = (int16_t)clamp(song.g[G_BPM] + accel(EN_K1 + k, s, 200), GP[G_BPM].min, GP[G_BPM].max);
+        break;
+    }
 }
 
 /* MIXER page: KNOB 1 LEVEL, 2 PAN, 3 REV send, 4 MUTE of the selected track (right = ON, left = OFF: the
@@ -1057,7 +1088,8 @@ static void seq_entry(uint32_t pressed)
  *     PHRASES, PROJECT, SONG: as their KNOB 1 (the SEQ pages: a sound load there would drop the track's motion: never).
  *     1.2: with PATTERN, CHANCE and the old AUTOMATION gone, KNOB 1 is the cursor or the row on every SEQ page, so
  *     the PRESETS knob is no longer a second cursor where KNOB 1 was something else; TOOLS and SLICES: nothing
- *   HOME, PRESETS and every other page (EDIT, ENV, LFO, FX, SCL, ARP, MIXER, CLOCK, ...): the selected track's
+ *   HOME (VOID FOUR): as its KNOB 2, the machine's own sounds and its user presets, round (eng_list_step)
+ *   PRESETS and every other page (EDIT, ENV, LFO, FX, SCL, ARP, MIXER, CLOCK, ...): the selected track's
  *     sound, one list over every engine, then the used user presets (preset_step). A sound load keeps the steps
  *     (SAVE held undoes it). Up to 1.0.3 it did that on HOME and PRESETS only */
 static void presets_turn(int32_t s)
@@ -1076,7 +1108,11 @@ static void presets_turn(int32_t s)
         nudge_turn(held, s);
         return;
     }
-    if (ui.home || g == GR_BROWSE) {
+    if (ui.home) {                                        /* HOME (VOID FOUR): the machine's own sounds, as its KNOB 2 */
+        home_turn(HK_PRESET, s);
+        ui.hot_col = HK_PRESET;
+        ui.hot_t = 40;
+    } else if (g == GR_BROWSE) {
         preset_step(s);
     } else if (g == GR_ROLL || g == GR_USER || g == GR_SLOTS || g == GR_PATS || g == GR_SONG || g == GR_EVENTS) {
         edit_param(0, s);                                 /* KNOB 1's (STEP: STOP TO EDIT while a song plays) */
@@ -1556,11 +1592,7 @@ static void ui_input(void)
             ui.hot_t = 40;
         }
         if (ui.home) {
-            int16_t *vp;
-            const param_desc_t *d = home_param(k, &vp);
-            *vp = (int16_t)param_turn(d, *vp, accel(EN_K1 + k, s, d->fmt == F_ENUM ? 0 : d->max - d->min));
-            motion_capture(home_trk(k), (uint32_t)(vp - home_trk(k)->p), *vp);   /* (LEVELS: that track's, as MIXER) */
-            ml_knob(home_trk(k), (uint32_t)(vp - home_trk(k)->p));
+            home_turn(k, s);
         } else {
             edit_param(k, s);
         }

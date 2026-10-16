@@ -144,6 +144,13 @@ static uint32_t big_draws;
 #define BIG_HOOK(k, l, v, f) (snprintf(big_lbl[(k) & 3u], 16, "%s", l), snprintf(big_val[(k) & 3u], 12, "%s", v), \
                               big_face[(k) & 3u] = (f), big_draws++)
 #endif
+/* ui_big.c's HOME (Task 3.3): what its preset panel drew last: the category, the number, the sound's name and its face */
+static char home_cat[16], home_num[16], home_name[20];
+static int home_face;
+#ifndef HOME_HOOK
+#define HOME_HOOK(c, n, s, f) (snprintf(home_cat, 16, "%s", c), snprintf(home_num, 16, "%s", n), \
+                               snprintf(home_name, 20, "%s", s), home_face = (f))
+#endif
 #include "../firmware/src/gfx.c"
 #include "../firmware/src/panel.c"
 #include "../firmware/src/ui.c"
@@ -401,9 +408,12 @@ static int test_sound_loads(void)
                  preset_pat_hint() == 8 && ui.ppick == 8 && str_eq(PATTERNS[8].name, "ARP"));
     t->p[P_AMODE] = 2;
     before = *t;
+    go_page(GR_BROWSE);                           /* (VOID FOUR: HOME's PRESETS stays in the machine; the PRESETS page
+                                                   * browses every machine) */
     for (i = 0; i < 40u && t->eng_req == before.eng_req; i++)     /* several loads, into the next engine */
         turn(EN_PRESET, 1);
-    bad += check("browsing on, into another engine: the steps still untouched", t->eng_req != before.eng_req &&
+    go_home(); frame();
+    bad += check("browsing on (PRESETS page), into another engine: the steps still untouched", t->eng_req != before.eng_req &&
                  !memcmp(t->step, before.step, sizeof t->step) && t->p[P_AMODE] == 2);
     bad += check("browsing keeps the copy from before the first load", undo.trk == 1u && undo.what == UNDO_SOUND &&
                  undo.p[P_E0 + 1] == before.p[P_E0 + 1] && undo.eng == before.eng_req && undo.preset == before.preset);
@@ -1295,23 +1305,23 @@ static int test_menu_tabs(void)
             }
     }
     ui_prefs = 0;
-    bad += check("MENU tabs: DISPLAY CONTROL AUDIO MIDI MIDI OUT SYSTEM (8 8 6 8 5 6 rows; 1.5.5: SELECT, T1..T4 CHANNEL, AUTO SELECT, SCREEN WAKE; "
+    bad += check("MENU tabs: DISPLAY CONTROL AUDIO MIDI MIDI OUT SYSTEM (7 8 6 8 5 6 rows; VOID FOUR: no HOME row; 1.5.5: SELECT, T1..T4 CHANNEL, AUTO SELECT, SCREEN WAKE; "
                  "FM1-Four: T1..T4 OUT, CLOCK OUT), 1..8 each in a run, fit the page; tab gaps constant (S, LARGE)",
                  ok && MTAB_COUNT == 6u && str_eq(MTAB_NAME[MTAB_MOUT], "MIDI OUT") && mtab_rows(MTAB_MOUT) == 5u &&
                  mtab_first(MTAB_MOUT) == MI_TOUT1 && MI_TAB[MI_CLKOUT] == MTAB_MOUT && MI_LCLEAR + 1u == MI_TOUT1 && str_eq(MTAB_NAME[0], "DISPLAY") && str_eq(MTAB_NAME[MTAB_MIDI], "MIDI") &&
-                 mtab_rows(MTAB_DISPLAY) == 8u && MI_TAB[MI_HOME] == MTAB_DISPLAY && mtab_rows(MTAB_CONTROL) == 8u && MI_TAB[MI_SELECT] == MTAB_CONTROL && mtab_rows(MTAB_AUDIO) == 6u &&
+                 mtab_rows(MTAB_DISPLAY) == 7u && MI_TAB[MI_SCOPE] == MTAB_DISPLAY && mtab_rows(MTAB_CONTROL) == 8u && MI_TAB[MI_SELECT] == MTAB_CONTROL && mtab_rows(MTAB_AUDIO) == 6u &&
                  mtab_rows(MTAB_MIDI) == 8u && MI_TAB[MI_MFOLLOW] == MTAB_MIDI && MI_TAB[MI_SCRWAKE] == MTAB_MIDI && MI_SCRWAKE + 1u == MI_LCLEAR && MI_TAB[MI_LCLEAR] == MTAB_MIDI && MI_TAB[MI_TCH4] == MTAB_MIDI && mtab_rows(MTAB_SYSTEM) == 6u && MI_TAB[MI_TUNE] == MTAB_AUDIO &&   /* (1.5: LEARN CLEAR, HELP) */
                  MI_TAB[MI_MIDIIN] == MTAB_MIDI && MI_TAB[MI_INFO] == MTAB_SYSTEM && MI_INFO >= MI_VALUES);
 
     ui_power_on();
     hold(B_HOME);
     ok = ui.menu == 1 && ui.menu_sel == MI_COLOR && menu_tab() == MTAB_DISPLAY;
-    for (i = 0; i < 7u; i++) turn(EN_PRESET, 1);
-    ok &= ui.menu_sel == MI_HOME;
+    for (i = 0; i < 6u; i++) turn(EN_PRESET, 1);
+    ok &= ui.menu_sel == MI_SCOPE;
     turn(EN_PRESET, 1); ok &= ui.menu_sel == MI_COLOR;  /* (wraps within the tab) */
-    turn(EN_PRESET, -1); ok &= ui.menu_sel == MI_HOME;
-    turn(EN_PRESET, -1); turn(EN_PRESET, -1); turn(EN_PRESET, -1); ok &= ui.menu_sel == MI_LEDS;
-    bad += check("MENU: PRESETS moves within the tab and wraps there (COLOR .. HOME)", ok);
+    turn(EN_PRESET, -1); ok &= ui.menu_sel == MI_SCOPE;
+    turn(EN_PRESET, -1); turn(EN_PRESET, -1); ok &= ui.menu_sel == MI_LEDS;
+    bad += check("MENU: PRESETS moves within the tab and wraps there (COLOR .. SCOPE)", ok);
     turn(EN_ALGO, 1); ok = ui.menu_sel == MI_HOLD && menu_tab() == MTAB_CONTROL;
     turn(EN_PRESET, 1); turn(EN_PRESET, 1); ok &= ui.menu_sel == MI_LATCH;
     turn(EN_ALGO, 1); ok &= ui.menu_sel == MI_LOWCUT && menu_tab() == MTAB_AUDIO;
@@ -2527,10 +2537,10 @@ static int test_product_ux(void)
     turn(EN_K4, 1000); ok &= step_chance(&TSEL->step[0]) == 100;
     bad += check("CHANCE controls clamp to 0..100 without changing adjacent steps", ok);
     ui_power_on(); song.rec = 1; seq_start(); go_home();
-    int16_t baseline = TSEL->p[P_E0]; turn(EN_K1, 1);
+    int16_t baseline = TSEL->p[P_LEVEL]; turn(EN_K3, 1);   /* (VOID FOUR: HOME's KNOB 3, the track's LEVEL) */
     bad += check("REC plus a sound knob records motion through the UI", motion_count(TSEL) == 1 && motion_enabled(TSEL));
     press(B_PLAY); events_block(32);
-    bad += check("stopping returns the original sound after a recorded knob gesture", TSEL->p[P_E0] == baseline);
+    bad += check("stopping returns the original sound after a recorded knob gesture", TSEL->p[P_LEVEL] == baseline);
     go_auto_top(); turn(EN_K4, -1);
     bad += check("#93 the page is AUTOMATION (GR_EVENTS inside)", str_eq(cur_page()->title, "AUTOMATION"));
     bad += check("MOTION playback OFF preserves its stored events", !motion_enabled(TSEL) && motion_count(TSEL) == 1);
@@ -2551,31 +2561,31 @@ static int test_product_ux(void)
     {   /* #63: a card shows MOTION's icon while the track's motion changes its parameter */
         uint32_t id = ENGINES[TSEL->eng_req]->knob[0];
         ui_power_on(); go_home(); frame();
-        ok = !card_motion(0) && !card_motion(1);
-        song.rec = 1; seq_start(); go_home(); turn(EN_K1, 1); frame();
-        ok &= card_motion(0) && !card_motion(1) && !card_motion(2) && !card_motion(3);
+        ok = !card_motion(2) && !card_motion(1);
+        song.rec = 1; seq_start(); go_home(); turn(EN_K3, 1); frame();   /* (VOID FOUR: HOME's VOLUME) */
+        ok &= card_motion(2) && !card_motion(1) && !card_motion(0) && !card_motion(3);
         bad += check("MOTION: a recorded knob marks its HOME card (and no other)", ok && motion_count(TSEL) == 1);
         song.rec = 0; press(B_PLAY); events_block(32); frame();
-        ok = card_motion(0);
+        ok = card_motion(2);
         go_auto_top(); turn(EN_K4, -1); go_home(); frame();
-        ok &= !card_motion(0) && motion_count(TSEL) == 1;
+        ok &= !card_motion(2) && motion_count(TSEL) == 1;
         bad += check("MOTION: PLAY OFF takes the icon off the card, the events stay", ok);
         go_auto_top(); turn(EN_K4, 1); go_home(); frame();
-        ok = card_motion(0);
+        ok = card_motion(2);
         track_select(1); frame();
-        ok &= !card_motion(0);                           /* (another track: its own motion, none) */
+        ok &= !card_motion(2);                           /* (another track: its own motion, none) */
         track_select(0); frame();
-        ok &= card_motion(0);
+        ok &= card_motion(2);
         bad += check("MOTION: PLAY ON again shows it; only on the track that has the motion", ok);
         go_page(GR_TRK); frame();
-        ok = !card_motion(0) && !card_motion(1) && !card_motion(2);
+        ok = card_motion(0) && !card_motion(1) && !card_motion(2);   /* (HOME's VOLUME is MIXER's LEVEL) */
         motion_set_event(TSEL, 3, P_PAN, 20); frame();
-        ok &= card_motion(1) && !card_motion(0) && !card_motion(2) && !card_motion(3);
-        bad += check("MOTION: a mix parameter's event marks its MIXER card (PAN)", ok);
+        ok &= card_motion(1) && card_motion(0) && !card_motion(2) && !card_motion(3);
+        bad += check("MOTION: a mix parameter's event marks its MIXER card (LEVEL, PAN)", ok);
         go_auto_top(); press(B_OCTUP); press(B_OCTUP);
         ok = motion_count(TSEL) == 0;
         go_home(); frame();
-        ok &= !card_motion(0) && !card_motion(1);
+        ok &= !card_motion(2) && !card_motion(1);
         go_page(GR_TRK); frame();
         ok &= !card_motion(1);
         bad += check("MOTION: CLEAR takes the icon off every card", ok && id < P_COUNT);
@@ -3275,6 +3285,70 @@ static int test_edit_big(void)
         press(B_EDIT); frames(320); press(B_EDIT); frames(320);
         bad += check("EDIT again: MACHINE 1, then MACHINE 2", str_eq(cur_page()->title, "MACHINE 1") &&
                      (press(B_EDIT), frames(320), str_eq(cur_page()->title, "MACHINE 2")));
+    }
+    return bad;
+}
+
+/* VOID FOUR (Task 3.3): HOME = the four tracks as tabs, the sound big, KNOB 1..4 TRACK PRESET VOLUME TEMPO */
+static int test_home_big(void)
+{
+    int bad = 0, ok;
+    uint8_t p0;
+    int16_t l0, b0;
+    ui_power_on(); go_home(); frame();
+    memset(big_lbl, 0, sizeof big_lbl);
+    ui.force = 1; frame();
+    bad += check("HOME: four cards TRACK PRESET VOLUME TEMPO", str_eq(big_lbl[0], "TRACK") && str_eq(big_lbl[1], "PRESET") &&
+                 str_eq(big_lbl[2], "VOLUME") && str_eq(big_lbl[3], "TEMPO"));
+    turn(EN_K1, 2); frame();
+    bad += check("  K1 selects track 3", song.sel == 2u);
+    p0 = TSEL->preset;
+    turn(EN_K2, 1); frame();
+    bad += check("  K2 next ACID preset", TSEL->preset == (p0 + 1u) % 32u && TSEL->engine == ENGI_ACID &&
+                 TSEL->eng_req == ENGI_ACID);
+    l0 = TSEL->p[P_LEVEL];
+    turn(EN_K3, -3); frame();
+    bad += check("  K3 volume (the track's LEVEL)", TSEL->p[P_LEVEL] < l0);
+    b0 = song.g[G_BPM];
+    turn(EN_K4, 1); frame();
+    bad += check("  K4 tempo", song.g[G_BPM] == b0 + 1);
+    turn(EN_ALGO, 1); frame();
+    bad += check("  ALGORITHM still selects the track", song.sel == 3u);
+    {   /* K2 / PRESETS: this machine's 32 and its user presets only, round */
+        ui_power_on(); go_home(); frame();
+        song.sel = 1; apply_preset(31); frame();
+        turn(EN_K2, 1); frame();
+        ok = TSEL->eng_req == ENGI_WAVE && TSEL->preset == 0u;
+        turn(EN_K2, -1); frame();
+        ok &= TSEL->eng_req == ENGI_WAVE && TSEL->preset == 31u;
+        turn(EN_PRESET, 1); frame();
+        ok &= TSEL->eng_req == ENGI_WAVE && TSEL->preset == 0u;
+        bad += check("  K2 and PRESETS step the machine's own 32, round (never another machine)", ok);
+    }
+    {   /* the preset panel: the category, "07 / 32", the name (L where it fits) */
+        ui_power_on(); go_home(); song.sel = 0; apply_preset(9); ui.force = 1; frame();
+        bad += check("  the panel: category, number 10 / 32, the name", str_eq(home_cat, CAT_NAME[preset_cat(ENGI_OBX, 9)]) &&
+                     str_eq(home_num, "10 / 32") && str_eq(home_name, ENGINES[ENGI_OBX]->presets[9].name));
+        bad += check("  .. the name in L", home_face == 1);
+        bad += check("  the cards: track 1, preset 10, the LEVEL in dB, the BPM", str_eq(big_val[0], "1") &&
+                     str_eq(big_val[1], "10") && str_eq(big_val[3], "120"));
+    }
+    {   /* external clock: TEMPO shows, turns do nothing */
+        ui_power_on(); go_home(); frame();
+        song.g[G_CLOCK] = 1; b0 = song.g[G_BPM];
+        turn(EN_K4, 3); frame();
+        bad += check("  external clock: K4 does nothing", song.g[G_BPM] == b0);
+        song.g[G_CLOCK] = 0;
+    }
+    {   /* HOME's taps: HOME -> MIXER -> CLOCK -> HOME; held: MENU */
+        ui_power_on(); go_home(); frame();
+        press(B_HOME); frame();
+        ok = !ui.home && str_eq(cur_page()->title, "MIXER");
+        press(B_HOME); frame();
+        ok &= !ui.home && str_eq(cur_page()->title, "CLOCK");
+        press(B_HOME); frame();
+        ok &= ui.home;
+        bad += check("  HOME tapped: MIXER, CLOCK, HOME", ok);
     }
     return bad;
 }
@@ -4784,7 +4858,7 @@ static int test_momentary(void)
     uint32_t id0, id1, k;
     int16_t v0, v1, g0;
     ui_power_on();
-    ui.home = 1;
+    go_title("EDIT");                              /* (VOID FOUR: the big EDIT page's CUT RES; HOME's knobs: below) */
     id0 = ENGINES[TSEL->eng_req]->knob[0];
     id1 = ENGINES[TSEL->eng_req]->knob[1];
     v0 = TSEL->p[id0];
@@ -4795,11 +4869,12 @@ static int test_momentary(void)
     ok = TSEL->p[id0] != v0 && TSEL->p[id1] != v1 && mom.n == 2u && msg_is("MOMENTARY  [OCT+] KEEP");
  ui_leds();
     btn_up(B_LFO); frame();
-    bad += check("MOMENTARY: LFO held, KNOB 1 / 2 on HOME change their values; LFO let go puts them back (no LFO page)",
-                 ok && TSEL->p[id0] == v0 && TSEL->p[id1] == v1 && !mom.n && ui.home && msg_is("BACK"));
+    bad += check("MOMENTARY: LFO held, KNOB 1 / 2 on EDIT change their values; LFO let go puts them back (no LFO page)",
+                 ok && TSEL->p[id0] == v0 && TSEL->p[id1] == v1 && !mom.n && str_eq(cur_page()->title, "EDIT") &&
+                 msg_is("BACK"));
     press(B_LFO);
     bad += check("  LFO alone still opens its page", !ui.home && cur_page()->fam == FAM_LFO);
-    go_home();
+    go_title("EDIT");
     turn(EN_K1, 2);
     bad += check("  without LFO a turn stays", TSEL->p[id0] != v0 && !mom.n);
     v0 = TSEL->p[id0];
@@ -4810,7 +4885,20 @@ static int test_momentary(void)
     ok = !mom.n && msg_is("KEPT") && song.octave == (int8_t)k;
     btn_up(B_LFO); frame();
     bad += check("  OCT+ with LFO held keeps them (no octave shift), LFO let go then changes nothing",
-                 ok && TSEL->p[id0] != v0 && ui.home);
+                 ok && TSEL->p[id0] != v0 && str_eq(cur_page()->title, "EDIT"));
+    {   /* HOME: VOLUME (the track's LEVEL) momentary; TRACK, PRESET, TEMPO act as ever */
+        int16_t lv = TSEL->p[P_LEVEL];
+        go_home(); frames(400);
+        btn_down(B_LFO); frame();
+        turn(EN_K3, -6);
+        ok = TSEL->p[P_LEVEL] != lv && mom.n == 1u;
+        turn(EN_K1, 1);
+        ok &= song.sel == 1u && mom.n == 1u;
+        track_select(0); frame();
+        btn_up(B_LFO); frame();
+        bad += check("  HOME: VOLUME momentary (back on release); TRACK acts as ever", ok && TSEL->p[P_LEVEL] == lv &&
+                     !mom.n && ui.home);
+    }
     /* an FX page (a global) and an engine page */
     open_family(FAM_FX); frame();
     for (k = 0; k < NPAGES && cur_page()->id[0] != G_RSIZE && cur_page()->id[1] != G_RSIZE; k++) { open_family(FAM_FX); frame(); }
@@ -4821,7 +4909,7 @@ static int test_momentary(void)
     btn_up(B_LFO); frame();
     bad += check("  a global FX value (REVERB SIZE) too: back on release", ok && song.g[G_RSIZE] == g0 && cur_page()->scope == SC_GLOBAL);
     /* not recorded as automation; recording a plain turn still works */
-    go_home();
+    go_title("EDIT");
     song.playing = 1; song.rec = 1u << song.sel;
     k = motion.count;
     btn_down(B_LFO); frame();
@@ -4875,7 +4963,7 @@ static int test_momentary(void)
         bad += check("  #195 MIXER: LEVEL PAN REV MUTE momentary (not recorded), back on release; without LFO they stay", ok);
     }
     /* a layer: its knobs */
-    go_home();
+    go_title("EDIT");
     v0 = TSEL->p[id0];
     btn_down(B_LFO); frame();
     btn_down(B_GLO); frame();
@@ -4885,7 +4973,7 @@ static int test_momentary(void)
     btn_up(B_LFO); frame();
     bad += check("  with a layer's button held the knobs are the layer's", ok);
     /* at most MOM_N values */
-    go_home(); frames(400);                        /* (#39: the layer let go, the knobs quiet a moment) */
+    go_title("EDIT"); frames(400);                 /* (#39: the layer let go, the knobs quiet a moment) */
     btn_down(B_LFO); frame();
     for (k = 0; k < MOM_N; k++) {
         mom.vp[k] = &trk[k % NTRK].p[P_LEVEL + k / NTRK]; mom.v[k] = *mom.vp[k];
@@ -5036,14 +5124,14 @@ static int test_screen_off(void)
 
     scr_idle(31u * 60000u);
     n = host_pw_n;
-    home_param(0, &vp);
+    home_param(HK_VOLUME, &vp);                       /* (VOID FOUR: HOME's KNOB 3, the track's LEVEL) */
     v0 = *vp;
-    for (i = 0; i < 20u; i++) turn(EN_K1, 1);        /* a knob turned to wake it, still turning (on past the wake) */
+    for (i = 0; i < 20u; i++) turn(EN_K3, -1);       /* a knob turned to wake it, still turning (on past the wake) */
     ok = scr_woke(n) && *vp == v0;
-    turn(EN_PRESET, 1); turn(EN_ALGO, 1); turn(EN_SELECT, 1); turn(EN_K4, -1);
+    turn(EN_PRESET, 1); turn(EN_ALGO, 1); turn(EN_SELECT, 1); turn(EN_K4, -1); turn(EN_K1, 1);
     ok &= *vp == v0 && song.sel == 0u && song.g[G_BPM] == GP[G_BPM].def && scrn.eat;
     frames(400u);                                     /* at rest SCR_EAT_MS: the knobs are the page's again */
-    turn(EN_K1, 1);
+    turn(EN_K3, -1);
     ok &= *vp != v0;
     bad += check("SCREEN OFF: a knob wakes it; turns until it rests 0.3 s change nothing (K1..4, PRESETS, ALGO, SELECT)", ok);
 
@@ -5673,13 +5761,13 @@ static int test_layer_knob_race(void)
             uint32_t i;
             ui_power_on();
             song.rec = 1; seq_start(); go_home(); frames(64);
-            home_param(k, &vp);
+            home_param(HK_VOLUME, &vp);                 /* (VOID FOUR: T1's LEVEL, HOME's VOLUME) */
             c = *vp;
             btn_down(LB[l]); frames(560);
             for (i = 0; i < 4u; i++) { rc_enc(EN_K1 + k, l ? -1 : 1, 1); frame(); }
             frame();
             btn_up(LB[l]); frames(400);
-            ok &= !motion_count(TSEL) && *vp == c;
+            ok &= !motion_count(TSEL) && *vp == c && song.sel == 0u && TSEL->preset == TRK_DEF[0][1];
             stop_transport();
             song.rec = 0;
         }
@@ -5691,15 +5779,15 @@ static int test_layer_knob_race(void)
     {
         int16_t *vp, c;
         uint32_t i;
-        home_param(0, &vp);
+        home_param(HK_VOLUME, &vp);
         c = *vp;
         btn_down(B_FX); frames(560);
         for (i = 0; i < 5u; i++) { rc_enc(EN_K1, 1, 1); frame(); }
         frame();
         btn_up(B_FX); frames(400);
-        ok = perf_k[0] == 5 && *vp == c;
+        ok = perf_k[0] == 5 && *vp == c && song.sel == 0u;
         btn_down(B_FX); frames(560); press(B_OCTDN); btn_up(B_FX); frames(400);
-        ok &= !perf_k[0] && *vp == c;
+        ok &= !perf_k[0] && *vp == c && song.sel == 0u;
     }
     fx_latch = 0;
     bad += check("  FX LATCH: FILTER stays after FX is let go, HOME's KNOB 1 never moves; FX + OCT- turns it off", ok);
@@ -5708,12 +5796,12 @@ static int test_layer_knob_race(void)
     go_home(); frames(64);
     {
         int16_t *vp, c;
-        home_param(0, &vp);
+        home_param(HK_VOLUME, &vp);
         c = *vp;
-        rc_enc(EN_K1, 1, 1); frame(); frame();
+        rc_enc(EN_K3, 1, 1); frame(); frame();
         ok = *vp == c + 1;
     }
-    bad += check("  no layer: a detent counted mid-pass is HOME's KNOB 1, once", ok);
+    bad += check("  no layer: a detent counted mid-pass is HOME's KNOB 3, once", ok);
     return bad;
 }
 
@@ -7179,16 +7267,10 @@ static int test_large(void)
     press(B_HOME);
     bad += check("#15 MENU > LARGE: OFF by default, under STYLE; KNOB 1 right / OCT+ ON, left / OCT- OFF", ok && !ui.menu);
 
-    /* HOME: tall cards (rows 28..132) and the strip (136..198); the footer as it was */
-    frame();
-    ok = ui.home && large_kind() == LK_TALL && card_h() == LG_CARD_H && graph_y() == LG_Y_GRAPH && strip_kind() == SK_SCOPE;
-    ok &= lg_px(30, Y_SEP_END + 1) == T_SURF && off[(Y_SEP_END + 1) * 240 + 30] == swap16(T_BG);     /* a card where the gap was */
-    ok &= lg_px(30, LG_Y_GRAPH - 2) == T_BG && off[(LG_Y_GRAPH - 2) * 240 + 30] == swap16(T_SURF);   /* a gap in the panel */
-    ok &= lg_px(30, LG_Y_GRAPH + 1) == T_SURF;
-    for (c = 0; c < 4u; c++)                                      /* each column's K pill, over its knob */
-        ok &= lg_px(CARD_X(c) + 8, Y_LABEL + LG_MY + LG_MH / 2) == T_KEY;
-    ok &= !memcmp(off + Y_FOOT * 240, host_screen + Y_FOOT * 240, 240u * H_FOOT * sizeof *off);
-    bad += check("#15 LARGE ON: HOME's cards tall (a K1..K4 pill over each column), the scope a strip, the footer kept", ok);
+    /* HOME (VOID FOUR): its own layout in every setting, the screen as with LARGE OFF */
+    frame(); ui.force = 1; frame();
+    ok = ui.home && large_kind() == LK_TALL && strip_kind() == SK_NONE && !memcmp(off, host_screen, sizeof off);
+    bad += check("#15 LARGE ON: HOME keeps its own layout (tabs, the sound, four cards: as with LARGE OFF)", ok);
 
     /* the value in L: CLOCK's BPM 124 stands about twice as tall as in M */
     go_title("CLOCK"); frame();
@@ -7336,7 +7418,7 @@ static int test_menu_prefs(void)
 static int test_style(void)
 {
     int bad = 0, ok;
-    const uint32_t rule = 26u * 240u + 120u;           /* (the rule under the header: ui_draw.c draw_rules) */
+    const uint32_t rule = 24u * 240u + 120u;           /* (the rule under the header: HOME's, ui_big.c draw_home_big) */
     ui_power_on();
     frame();
     ok = ui_style == ST_FLAT && ux.style == ST_FLAT && ux.surf != ux.bg;
@@ -7930,17 +8012,8 @@ static int test_head_slot(void)
 }
 
 
-/* 1.3 (Discussions #112, #134): MENU > DISPLAY > HOME SCOPE / TRACKS (ui.c ui_home_view, settings byte [15][26]) and
- * HOME > TRACKS (ui_graph.c draw_home_tracks): the setting (its default, names, tab, byte, the other settings' bytes
- * untouched, an unknown value as SCOPE, the menu's knob, the settings record); the rows read from the screen: a note's
- * bar, an empty step's stub, a TIE carried on from its note, an accent taller, the step playing on its raised cell,
- * LEN > 16 on the play head's page (stopped: the selected track's cursor page, the others' first) with its pips,
- * MUTE (its badge, the steps DIM), the selected row THEME, the meter; HOME's knobs
- * still edit the selected track, ALGORITHM moves the selection, HOME's tap still goes HOME > MIXER > CLOCK > HOME;
- * MENU > LARGE: the cards as on a list page, the rows in the panel */
+/* (a pixel of the screen, as the panel shows it) */
 static uint16_t tr_px(int32_t x, int32_t y) { return swap16(host_screen[(uint32_t)y * 240u + (uint32_t)x]); }
-static int32_t tr_y(uint32_t c) { return Y_GRAPH + (int32_t)c * TR_PITCH; }
-static int32_t tr_x(uint32_t i) { return 3 + tr_bx(i) + TR_BW / 2; }   /* a step's bar, its middle column */
 /* 1.5 (#173): the FX map's columns light / dark in turn (ui_layer.c LS_ALT): an idle cell's fill, read inside its top
  * edge, the same in columns 1 and 3 and in 2 and 4 and different between them, every row, FLAT and LINE (LINE: the
  * 1st / 3rd unfilled, the panel's colour); MONO (its one grey) all alike */
@@ -8015,10 +8088,10 @@ static int test_help(void)
         else ok &= help_fits(help_page());
         ui.home = h; ui.page = pg;
     }
-    ok &= help_fits(H_HOME) && help_fits(H_LEVELS);
+    ok &= help_fits(H_HOME);
     for (l = LAYER_FX; l < LAYER_N; l++)
         ok &= help_fits(HELP_LAYER[l]);
-    bad += check("1.5 HELP: a hint for every page, HOME, LEVELS and every layer; each fits its row, no word dropped", ok);
+    bad += check("1.5 HELP: a hint for every page, HOME and every layer; each fits its row, no word dropped", ok);
 
     ui_power_on();
     menu_put(MI_HELP, 1);
@@ -8030,9 +8103,6 @@ static int test_help(void)
     ok &= ui.help_t > 0u && cur_page()->graph == GR_USER && str_eq(help_page(), "[K1]SLOT[OCT+]SAVE[SAVE]PRESETS");
     press(B_HOME);
     ok &= ui.home && ui.help_t > 0u && str_eq(help_page(), H_HOME);
-    menu_put(MI_HOME, HV_LEVELS);
-    ok &= str_eq(help_page(), H_LEVELS);
-    menu_put(MI_HOME, HV_SCOPE);
     menu_put(MI_HELP, 0);
     press(B_ENV);
     ok &= ui.help_t == 0u;
@@ -8040,236 +8110,24 @@ static int test_help(void)
     return bad;
 }
 
-static int test_home_tracks(void)
-{
-    int bad = 0, ok;
-    uint8_t before[32];
-    persist_t p;
-    track_t *t;
-    uint32_t i, id;
-    int16_t v0;
-    ui_power_on();
-    memcpy(before, favorites.factory[15], 32);
-    ok = ui_home_view == 0u && !home_tracks() && menu_get(MI_HOME) == 0u && menu_n(MI_HOME) == 3u &&
-         str_eq(MI_NAME[MI_HOME], "HOME") && str_eq(menu_vname(MI_HOME, 0), "SCOPE") &&
-         str_eq(menu_vname(MI_HOME, 1), "TRACKS") && str_eq(menu_vname(MI_HOME, 2), "LEVELS") &&   /* (1.5: LEVELS) */
-         MI_TAB[MI_HOME] == MTAB_DISPLAY && MI_HOME < MI_VALUES;
-    menu_put(MI_HOME, 1);
-    ok &= ui_home_view == 1u && home_tracks() && menu_get(MI_HOME) == 1u;
-    for (i = 0; i < 32u; i++)                           /* (byte 26 only: SCREEN OFF, the 1.2 flags, the FX keys kept) */
-        ok &= i == 26u || favorites.factory[15][i] == before[i];
-    memset(&p, 0, sizeof p);
-    settings_export(&p);
-    ok &= p.favorites.factory[15][26] == 1u;
-    menu_put(MI_HOME, 0);
-    ok &= settings_import(&p, (int)sizeof p) == 1 && ui_home_view == 1u;   /* (back from the record) */
-    ui_home_view = 9;                                   /* a later firmware's view: SCOPE here, kept as saved */
-    ok &= !home_tracks() && menu_get(MI_HOME) == 0u;
-    settings_export(&p);
-    ok &= settings_import(&p, (int)sizeof p) == 1 && ui_home_view == 9u;
-    bad += check("1.3 MENU > DISPLAY > HOME: SCOPE (0, the default) / TRACKS, its own settings byte, saved; unknown = SCOPE", ok);
-
-    ui_power_on();
-    hold(B_HOME);                                       /* the menu: DISPLAY, down to HOME, K1 right */
-    for (i = 0; i < 7u; i++) turn(EN_PRESET, 1);
-    ok = ui.menu == 1 && ui.menu_sel == MI_HOME;
-    turn(EN_K1, 1); ok &= home_tracks() && !home_levels();
-    turn(EN_K3, 1); ok &= home_levels();               /* (1.5: LEVELS, the last) */
-    turn(EN_K3, 1); ok &= home_levels();               /* (stops there) */
-    press(B_OCTDN); ok &= home_tracks() && !home_levels();
-    press(B_OCTDN); ok &= !home_tracks();
-    press(B_OCTUP); ok &= home_tracks();
-    press(B_HOME); frame();
-    ok &= !ui.menu && ui.home;
-    bad += check("1.3 MENU: HOME's row (any knob, OCT+ / OCT-: SCOPE TRACKS LEVELS), the menu closed: HOME", ok);
-
-    /* 1.5 (#134): HOME LEVELS: the rows of TRACKS, KNOB 1..4 the LEVEL of T1..T4 (the selected track's engine untouched),
-     * MOMENTARY on any of them. And ANIM no longer sets
-     * HOME (up to 1.4.1 its MENU row fell through into HOME's) */
-    ui_power_on();
-    menu_put(MI_HOME, HV_LEVELS);
-    song.sel = 0;
-    go_home(); frame();
-    {
-        int16_t lv[NTRK], e0[NTRK][P_COUNT];
-        uint32_t k;
-        const param_desc_t *d;
-        int16_t *vp;
-        for (k = 0; k < NTRK; k++) { lv[k] = trk[k].p[P_LEVEL]; memcpy(e0[k], trk[k].p, sizeof e0[k]); }
-        turn(EN_K2, -5);
-        turn(EN_K4, 3);
-        ok = home_tracks() && home_levels() && trk[1].p[P_LEVEL] < lv[1] && trk[3].p[P_LEVEL] > lv[3] &&
-             trk[0].p[P_LEVEL] == lv[0] && trk[2].p[P_LEVEL] == lv[2];
-        for (k = 0; k < P_COUNT; k++)                   /* (nothing else of any track) */
-            ok &= (k == P_LEVEL || (trk[0].p[k] == e0[0][k] && trk[1].p[k] == e0[1][k] && trk[2].p[k] == e0[2][k] &&
-                                    trk[3].p[k] == e0[3][k]));
-        d = home_param(2, &vp);
-        ok &= vp == &trk[2].p[P_LEVEL] && d == &TP[P_LEVEL] && home_trk(2) == &trk[2];
-        bad += check("1.5 HOME LEVELS: KNOB 2 / 4 the LEVEL of T2 / T4, nothing else of any track", ok);
-        k = (uint32_t)trk[2].p[P_LEVEL];
-        btn_down(B_LFO); frame();
-        turn(EN_K3, -6);
-        ok = trk[2].p[P_LEVEL] < (int16_t)k && mom.n == 1u;
-        btn_up(B_LFO); frame();
-        bad += check("1.5 HOME LEVELS: MOMENTARY (LFO held) on T3's LEVEL, back when LFO is let go",
-                     ok && trk[2].p[P_LEVEL] == (int16_t)k && !mom.n);
-        menu_put(MI_HOME, HV_TRACKS);
-        lv[1] = trk[1].p[P_LEVEL];
-        turn(EN_K2, 4);
-        bad += check("1.5 HOME TRACKS (not LEVELS): KNOB 2 the selected track's engine again, no level",
-                     trk[1].p[P_LEVEL] == lv[1] && !home_levels());
-        menu_put(MI_HOME, HV_LEVELS);
-        menu_put(MI_ANIM, 1u);
-        ok = home_levels() && menu_get(MI_ANIM) == 1u;
-        menu_put(MI_ANIM, 0u);
-        ok &= home_levels() && menu_get(MI_ANIM) == 0u;
-        menu_put(MI_HOME, HV_SCOPE);
-        menu_put(MI_ANIM, 2u);
-        ok &= !home_tracks() && menu_get(MI_ANIM) == 2u;
-        menu_put(MI_ANIM, 0u);
-        bad += check("1.5 MENU ANIM leaves HOME as it is (it fell through into HOME up to 1.4.1)", ok);
-    }
-
-    /* the rows: T1 (not selected) a line, T2 selected, T3 muted, T4 a note */
-    ui_power_on();
-    ui_home_view = HV_TRACKS;
-    song.sel = 1;
-    t = &trk[0];
-    track_defaults_steps(t);
-    t->p[P_SLEN] = 16;
-    for (i = 0; i < NSTEP; i++) step_clear(&t->step[i]);
-    t->step[0] = (step_t){{60}, 1, ST_NOTE, 0, 100};
-    t->step[4] = (step_t){{62}, 1, ST_NOTE, 0, 100};
-    t->step[5] = (step_t){{62}, 0, ST_TIE, 0, 100};     /* (carried on from step 4's note) */
-    t->step[6] = (step_t){{62}, 0, ST_TIE, 0, 100};
-    t->step[8] = (step_t){{64}, 1, ST_NOTE, SF_ACCENT, 100};
-    t->step[10] = (step_t){{0}, 0, ST_TIE, 0, 100};     /* (a TIE after an empty step: nothing to carry) */
-    go_home(); frame();
-    {
-        int32_t y = tr_y(0);
-        ok = tr_px(tr_x(0), y + TR_SB - 3) == T_THEME && tr_px(tr_x(0), y + TR_SB - 9) == T_SURF &&   /* a note */
-             tr_px(tr_x(1), y + TR_SB - 1) == T_RAISE && tr_px(tr_x(1), y + TR_SB - 4) == T_SURF &&   /* empty */
-             tr_px(tr_x(5), y + TR_SB - 3) == T_THEME && tr_px(tr_x(6), y + TR_SB - 3) == T_THEME &&  /* tied */
-             tr_px(3 + tr_bx(5) - 1, y + TR_SB - 3) == T_THEME &&                                    /* .. joined */
-             tr_px(3 + tr_bx(4) - 1, y + TR_SB - 3) == T_SURF &&                                     /* (not before its note) */
-             tr_px(tr_x(8), y + TR_SB - 9) == T_ACCENT &&                                             /* accented */
-             tr_px(tr_x(10), y + TR_SB - 1) == T_MID && tr_px(tr_x(10), y + TR_SB - 3) == T_SURF &&   /* a lone TIE */
-             tr_px(3 + 22, y + 1) == T_SURF && tr_px(3 + 22, tr_y(1) + 1) == T_THEME &&               /* T2 selected */
-             home_tracks() && large_kind() == LK_OFF;
-        bad += check("1.3 HOME > TRACKS: a row's steps: notes, empty stubs, TIEs carried on (joined), accents, a lone TIE", ok);
-    }
-    song.playing = 1;                                   /* the play head on step 3 (empty), then on the note 4 */
-    t->seq_idx = 3;
-    frame();
-    ok = tr_px(3 + tr_bx(3), tr_y(0) + 20) == T_RAISE && tr_px(tr_x(3), tr_y(0) + TR_SB - 1) == T_MID &&
-         tr_px(3 + tr_bx(2), tr_y(0) + 20) == T_SURF;
-    t->seq_idx = 4;
-    frame();
-    ok &= tr_px(tr_x(4), tr_y(0) + TR_SB - 3) == T_TEXT && tr_px(3 + tr_bx(3), tr_y(0) + 20) == T_SURF &&
-          tr_px(3 + tr_bx(4) - 1, tr_y(0) + 20) == T_RAISE;
-    bad += check("1.3 HOME > TRACKS: the step playing on a raised cell, its bar bright; it moves with the play head", ok);
-
-    t->p[P_SLEN] = 40;                                  /* LEN 40: 3 pages; step 20 a note, step 16 empty */
-    t->step[20] = (step_t){{65}, 1, ST_NOTE, 0, 100};
-    t->seq_idx = 21;
-    frame();
-    ok = tr_px(tr_x(4), tr_y(0) + TR_SB - 3) == T_THEME && tr_px(tr_x(0), tr_y(0) + TR_SB - 3) == T_SURF &&
-         tr_px(3 + tr_bx(5), tr_y(0) + 20) == T_RAISE &&                                    /* playing 21 = its 6th */
-         tr_px(3 + TR_PX + 1, tr_y(0) + TR_SB - 5) == T_THEME &&                            /* the 2nd of 3 pips */
-         tr_px(3 + TR_PX + 1, tr_y(0) + TR_SB - 8) == T_RAISE && tr_px(3 + TR_PX + 1, tr_y(0) + TR_SB - 2) == T_RAISE;
-    t->seq_idx = 36;                                   /* the last page: 8 steps, the rest blank */
-    frame();
-    ok &= tr_px(tr_x(7), tr_y(0) + TR_SB - 1) == T_RAISE && tr_px(tr_x(8), tr_y(0) + TR_SB - 1) == T_SURF &&
-          tr_px(3 + TR_PX + 1, tr_y(0) + TR_SB - 2) == T_THEME;
-    song.playing = 0;                                   /* stopped: T1 not selected, its first page */
-    frame();
-    ok &= tr_px(tr_x(0), tr_y(0) + TR_SB - 3) == T_THEME && tr_px(tr_x(4), tr_y(0) + TR_SB - 3) == T_THEME &&
-          tr_px(3 + TR_PX + 1, tr_y(0) + TR_SB - 8) == T_THEME;
-    song.sel = 0;                                       /* .. selected: its cursor's page (INK on THEME) */
-    ui.cursor = 20; ui.bank = 1;
-    frame();
-    ok &= tr_px(tr_x(0), tr_y(0) + TR_SB - 3) == T_THEME && tr_px(tr_x(4), tr_y(0) + TR_SB - 3) == T_INK &&
-          tr_px(3 + TR_PX + 1, tr_y(0) + TR_SB - 5) == T_INK;
-    bad += check("1.3 HOME > TRACKS: LEN > 16: the play head's page (stopped: the cursor's, selected), pips, past LEN blank", ok);
-
-    song.sel = 1;
-    t = &trk[3];                                        /* T4: a note on step 5 (the LARGE check reads it) */
-    for (i = 0; i < NSTEP; i++) step_clear(&t->step[i]);
-    t->p[P_SLEN] = 16;
-    t->step[4] = (step_t){{60}, 1, ST_NOTE, SF_ACCENT, 100};
-    t->p[P_MUTE] = 0;
-    t = &trk[2];                                        /* T3 muted: the MUTE badge, its steps DIM, no meter */
-    for (i = 0; i < NSTEP; i++) step_clear(&t->step[i]);
-    t->p[P_SLEN] = 16;
-    t->step[0] = (step_t){{60}, 1, ST_NOTE, 0, 100};
-    t->p[P_MUTE] = 1;
-    trk[3].peak = 20000;
-    frame();
-    ok = tr_px(tr_x(0), tr_y(2) + TR_SB - 3) == T_DIM && tr_px(3 + 222 - kc_w(KC_MUTE) + 2, tr_y(2) + TR_NY(0) + 4) == T_KEY &&
-         tr_px(3 + 222 - kc_w(KC_MUTE) + 2, tr_y(3) + TR_NY(0) + 4) != T_KEY &&
-         tr_px(3 + TR_MX + 1, tr_y(3) + TR_MY + TR_MH - 2) == T_MID && tr_px(3 + TR_MX + 1, tr_y(2) + TR_MY + TR_MH - 2) == T_RAISE;
-    t->p[P_MUTE] = 0;
-    frame();
-    ok &= tr_px(tr_x(0), tr_y(2) + TR_SB - 3) == T_THEME && tr_px(3 + 222 - kc_w(KC_MUTE) + 2, tr_y(2) + TR_NY(0) + 4) != T_KEY;
-    bad += check("1.3 HOME > TRACKS: MUTE: its badge, the steps DIM; unmuted again: as before; the output meter", ok);
-
-    /* HOME's knobs: the selected track's; ALGORITHM moves the selection; HOME tapped: MIXER, CLOCK, HOME */
-    song.sel = 2; ui.force = 1; frame();
-    id = ENGINES[trk[2].eng_req % NENGINES]->knob[0];
-    v0 = trk[2].p[id];
-    {
-        int16_t o0 = trk[0].p[id], o1 = trk[1].p[id];
-        turn(EN_K1, 3);
-        if (trk[2].p[id] == v0) turn(EN_K1, -6);        /* (at its top: the other way) */
-        ok = trk[2].p[id] != v0 && trk[0].p[id] == o0 && trk[1].p[id] == o1 && ui.home && home_tracks();
-    }
-    turn(EN_ALGO, 1);
-    frame();
-    ok &= song.sel == 3u && tr_px(3 + 22, tr_y(3) + 1) == T_THEME && tr_px(3 + 22, tr_y(2) + 1) == T_SURF;
-    id = ENGINES[trk[3].eng_req % NENGINES]->knob[1];
-    v0 = trk[3].p[id];
-    turn(EN_K2, -2);
-    if (trk[3].p[id] == v0) turn(EN_K2, 4);
-    ok &= trk[3].p[id] != v0;
-    bad += check("1.3 HOME > TRACKS: K1..K4 edit the selected track (HOME's four), ALGORITHM moves the selected row", ok);
-    press(B_HOME); ok = !ui.home && cur_page()->graph == GR_TRK;
-    press(B_HOME); ok &= !ui.home && str_eq(cur_page()->title, "CLOCK");
-    press(B_HOME); ok &= ui.home;
-    frame();
-    ok &= tr_px(3 + 22, tr_y(3) + 1) == T_THEME;
-    bad += check("1.3 HOME > TRACKS: HOME tapped still goes HOME > MIXER > CLOCK > HOME (the rows back)", ok);
-
-    ui_prefs |= PREF_LARGE;                             /* MENU > LARGE: the cards as on a list page, the rows */
-    ui.force = 1; frame();
-    ok = large_kind() == LK_LABEL && card_h() == CARD_H && graph_y() == Y_GRAPH && tr_px(3 + 22, tr_y(3) + 1) == T_THEME &&
-         tr_px(tr_x(4), tr_y(3) + TR_SB - 2) == T_INK;
-    ui_home_view = HV_SCOPE; ui.force = 1; frame();
-    ok &= large_kind() == LK_TALL;
-    ui_prefs = 0;
-    bad += check("1.3 HOME > TRACKS with LARGE: cards with M labels, the rows kept (SCOPE: the tall cards as before)", ok);
-    ui_power_on();
-    return bad;
-}
-
 /* #181: a sound load (PRESETS) or another track (ALGORITHM) draws the page again (ui.force) with no blank frame on the
- * way: MIXER cleared its panel to the background before its four columns landed (HOME > TRACKS its rows), a flash on
- * every detent. Every pixel goes from what it showed straight to what it shows next (host_fl_*), on MIXER, HOME (the
- * scope), HOME > TRACKS and ENV, FLAT and LINE, MENU > LARGE off and on; a full redraw still covers the screen */
+ * way: MIXER cleared its panel to the background before its four columns landed, a flash on every detent. Every pixel
+ * goes from what it showed straight to what it shows next (host_fl_*), on MIXER, HOME (VOID FOUR's: tabs, the sound,
+ * the cards) and ENV, FLAT and LINE, MENU > LARGE off and on; a full redraw still covers the screen */
 static int test_no_flash(void)
 {
-    static const char *const VIEW[4] = {"MIXER", "HOME", "HOME TRACKS", "ENV"};
+    static const char *const VIEW[3] = {"MIXER", "HOME", "ENV"};
     static const uint8_t KN[2] = {EN_PRESET, EN_ALGO};
     int bad = 0, ok = 1;
     uint32_t v, st, lg, k, n, miss;
-    for (v = 0; v < 4u; v++)
+    for (v = 0; v < 3u; v++)
         for (st = 0; st < 2u; st++)
             for (lg = 0; lg < 2u; lg++)
                 for (k = 0; k < 2u; k++) {
                     ui_power_on();
                     ui_style = st ? ST_LINE : ST_FLAT;
                     ui_prefs = lg ? PREF_LARGE : 0u;
-                    ui_home_view = v == 2u;
-                    if (v == 1u || v == 2u) {
+                    if (v == 1u) {
                         ui.home = 1;
                         ui.force = 1;
                     } else {
@@ -8297,8 +8155,7 @@ static int test_no_flash(void)
                 }
     ui_style = ST_FLAT;
     ui_prefs = 0;
-    ui_home_view = 0;
-    bad += check("#181 PRESETS / ALGORITHM on MIXER, HOME, HOME > TRACKS, ENV (FLAT, LINE, LARGE): redrawn, no blank frame", ok);
+    bad += check("#181 PRESETS / ALGORITHM on MIXER, HOME, ENV (FLAT, LINE, LARGE): redrawn, no blank frame", ok);
     return bad;
 }
 
@@ -8361,6 +8218,7 @@ int main(void)
     bad += test_name();
     bad += test_edit_cycle();
     bad += test_edit_big();
+    bad += test_home_big();
     bad += test_quick_layers();
     bad += test_chord_page();
     bad += test_bughunt_ui();
@@ -8378,7 +8236,6 @@ int main(void)
     bad += test_screen_wake();
     bad += test_idle_leds();
     bad += test_momentary();
-    bad += test_home_tracks();
     bad += test_fx_map_columns();
     bad += test_help();
     bad += test_no_flash();

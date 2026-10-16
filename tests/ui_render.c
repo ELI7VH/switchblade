@@ -622,14 +622,14 @@ enum { S_HOME, S_HOME_IDLE, S_MESSAGE, S_MESSAGE_KEY, S_PRESETS, S_PRESETS_NOFAV
        S_COUNTIN2, S_MENU_AUDIO, S_HEAD_PLAY_REC, S_HEAD_REC_OTHER, S_HEAD_BPM_TURN, S_HEAD_BPM_LOCK,
        S_HEAD_BPM_LOCKED, S_HEAD_GLO_TURN, S_HEAD_DOWNBEAT, S_HEAD_BEAT_2, S_SONG_LANES, S_SONG_LANES_PLAYING,
        S_SONG_LANES_SILENT, S_SONG_PICTURES, S_HEAD_SLOT, S_HEAD_SLOT_EDITED, S_HEAD_SLOT_SONG, S_MENU_TUNE,
-       S_MENU_INFO, S_HOME_TRACKS, S_HOME_TRACKS_STOPPED, S_HOME_TRACKS_HOT, S_MENU_HOME, S_HOME_LEVELS, S_HELP_HOME,
+       S_MENU_INFO, S_HOME_BIG, S_HOME_BIG_T3, S_HOME_BIG_PLAYING, S_HOME_BIG_USER, S_HOME_BIG_EXT, S_HELP_HOME,
        S_HELP_USER, S_HELP_LFO, S_HELP_GLO, S_HELP_SEQ, S_MENU_HELP, S_INSERT_CRUSH, S_INSERT_FOLD, S_INSERT_PHASER,
        S_INSERT_OFF, S_INSERT_MIX, S_ENV_SYNC, S_ENV_DEST_SYNC, S_FILTER, S_LEARN_WAIT, S_LEARN_PICK, S_LEARN_SET,
        S_LEARN_LONG, S_GLO_LEARN, S_MENU_LCLEAR, S_MENU_LCLEAR_NONE, S_DLY_DOT, S_DLY_DOT16, S_FX_THROW, S_DETAIL,
        S_DETAIL_PLAYING, S_DETAIL_REST, S_ROLL_MARKS, S_HELP_DETAIL, S_DETAIL_COND, S_DETAIL_FILL, S_AUTO_COND,
        S_GLO_FILL, S_SEQ_EUCLID, S_SEQ_EUCLID_64, S_MENU_SELECT, S_PROJECT_ERASE, S_CONFIRM_ERASE_PROJ,
        S_TOOLS_CLEAN, S_CONFIRM_CLEAN, S_MENU_MIDI_TRACK, S_MENU_MIDI_TCH_UNUSED, S_MENU_MIDI_AUTO,
-       S_HOME_TRACKS_MIDI, S_MIXER_MIDI, S_EDIT_BIG_OBX, S_EDIT_BIG_WAVE, S_EDIT_BIG_ACID, S_EDIT_BIG_DRIFT,
+       S_HOME_BIG_STOPPED, S_MIXER_MIDI, S_EDIT_BIG_OBX, S_EDIT_BIG_WAVE, S_EDIT_BIG_ACID, S_EDIT_BIG_DRIFT,
        S_COUNT };
 static const char *const S_NAME[S_COUNT] = {"home", "home_idle", "message", "message_key", "presets",
     "presets_nofav", "user", "phrases", "project", "tools", "song_empty", "song", "step", "auto_steps",
@@ -651,15 +651,15 @@ static const char *const S_NAME[S_COUNT] = {"home", "home_idle", "message", "mes
     "auto_add_vel", "lfo2", "layer_rec", "layer_rec_set", "layer_rec_song", "countin", "countin_2bars", "menu_audio",
     "head_play_rec", "head_rec_other", "head_bpm_turn", "head_bpm_lock", "head_bpm_locked", "head_glo_turn",
     "head_downbeat", "head_beat_2", "song_lanes", "song_lanes_playing", "song_lanes_silent", "song_pictures",
-    "head_slot", "head_slot_edited", "head_slot_song", "menu_tune", "menu_info", "home_tracks",
-    "home_tracks_stopped", "home_tracks_hot", "menu_home", "home_levels", "help_home", "help_user", "help_lfo",
+    "head_slot", "head_slot_edited", "head_slot_song", "menu_tune", "menu_info", "home_big",
+    "home_big_t3", "home_big_playing", "home_big_user", "home_big_ext", "help_home", "help_user", "help_lfo",
     "layer_glo_help", "layer_seq_help", "menu_help", "insert_crush", "insert_fold", "insert_phaser", "insert_off",
     "insert_mix", "env_sync", "env_dest_sync", "filter", "learn_wait", "learn_pick", "learn_set", "learn_long",
     "layer_glo_learn", "menu_learn_clear", "menu_learn_clear_none", "dly_dotted", "dly_dotted_16", "perform_throw",
     "detail", "detail_playing", "detail_rest", "roll_marks", "help_detail", "detail_cond", "detail_fill",
     "auto_cond", "layer_glo_fill", "layer_seq_euclid", "layer_seq_euclid_64", "menu_select", "project_erase",
     "confirm_erase_project", "tools_clean", "confirm_clean", "menu_midi_track", "menu_midi_channels_unused",
-    "menu_midi_auto_select", "home_tracks_midi", "mixer_midi", "edit_big_obx", "edit_big_wave", "edit_big_acid",
+    "menu_midi_auto_select", "home_big_stopped", "mixer_midi", "edit_big_obx", "edit_big_wave", "edit_big_acid",
     "edit_big_drift"};
 
 /* the STEP page's piano roll (ui_graph.c graph_roll) on track 1, stopped unless said: an empty pattern; ACID in
@@ -791,9 +791,9 @@ static void go_title_page(const char *title)
     page_entered();
 }
 
-/* 1.3, HOME > TRACKS (ui_graph.c draw_home_tracks): T1 LEN 32, a line on its second page; T2 a melody with accents; T3
- * held notes (TIEs carried on, one TIE after a REST: nothing to carry), muted; T4 a line of low notes (LEN 32). Playing: T2 selected, T1 on its second page, the meters moving; stopped: T1 selected,
- * its cursor on its second page (the others on their first) */
+/* HOME with four patterns (ui_big.c draw_home_big): T1 LEN 32, a line on its second page; T2 a melody with accents; T3
+ * held notes (TIEs carried on, one TIE after a REST: nothing to carry), muted; T4 a line of low notes (LEN 32). Playing:
+ * T2 selected, the tabs' meters moving (T3 muted: none); stopped: T1 selected, its cursor on its second page */
 static void tracks_scene(int playing)
 {
     static const uint8_t T3[16] = {0, 1, 1, 2, 0, 1, 2, 2, 0, 0, 1, 1, 2, 2, 1, 2};   /* 0 note, 1 tie, 2 rest */
@@ -823,7 +823,6 @@ static void tracks_scene(int playing)
     song.sel = 1;
     if (!playing) { song.playing = 0; song.sel = 0; ui.cursor = 20; ui.bank = 1; }
     go_home();
-    ui_home_view = HV_TRACKS;
 }
 
 /* the INSERT of the selected track (1.5): TYPE, A B C, MIX */
@@ -991,10 +990,13 @@ static void setup(int s)
     case S_MENU_TUNE: ui.menu = 1; ui.menu_sel = MI_TUNE; song.g[G_TUNE] = -12; break;
     /* 1.3: HOME > TRACKS playing (T2 selected), stopped (T1 selected, its cursor's page), K2 just turned; the MENU's DISPLAY
      * tab with HOME TRACKS selected (8 rows) */
-    case S_HOME_TRACKS: tracks_scene(1); break;
-    case S_HOME_TRACKS_STOPPED: tracks_scene(0); break;
-    case S_HOME_TRACKS_HOT: tracks_scene(1); ui.hot_col = 1; ui.hot_t = 30; break;
-    case S_MENU_HOME: ui.menu = 1; ui.menu_sel = MI_HOME; ui_home_view = HV_TRACKS; break;
+    /* VOID FOUR's HOME (ui_big.c): T1 OB-Z ROYAL HORNS at -6 dB; T3 ACID (its pattern), PRESET just turned (hot);
+     * playing with four patterns, the meters, T3 muted, VOLUME just turned, a MIDI note into T4; a user preset with a
+     * long name (M, ellipsised) and LEVEL OFF; the external clock (TEMPO DIM, EXT); stopped, T1's second page */
+    case S_HOME_BIG: song.sel = 0; apply_preset_to(TSEL, 9); TSEL->p[P_LEVEL] = 90; go_home(); break;
+    case S_HOME_BIG_T3: song.sel = 2; go_home(); ui.hot_col = 1; ui.hot_t = 30; break;
+    case S_HOME_BIG_PLAYING:
+        tracks_scene(1); ui.hot_col = 2; ui.hot_t = 30; midi_lit_ms[3] = fm1_ms | 1u; break;
     /* 1.5 (#134): HOME LEVELS: the rows of TRACKS, the cards T1..T4 LEVEL (T3 muted: DIM), K2 just turned */
     /* 1.5 (Discussion #156): MENU > HELP ON: a page just entered with its hint in the footer (HOME, USER: in place of the
      * OCT+ / OCT- hint, LFO); a layer's map with its second footer row (GLO, SEQ TOOLS); the MENU row */
@@ -1004,7 +1006,9 @@ static void setup(int s)
     case S_HELP_GLO: ui_prefs2 |= PREF_HELP >> 16; go_home(); ui.help_t = 0; ui.layer = LAYER_GLO; break;
     case S_HELP_SEQ: ui_prefs2 |= PREF_HELP >> 16; go_page(GR_ROLL); ui.help_t = 0; ui.layer = LAYER_SEQ; break;
     case S_MENU_HELP: ui_prefs2 |= PREF_HELP >> 16; ui.menu = 1; ui.menu_sel = MI_HELP; break;
-    case S_HOME_LEVELS: tracks_scene(1); ui_home_view = HV_LEVELS; trk[1].p[P_LEVEL] = 90; ui.hot_col = 1; ui.hot_t = 30; break;
+    case S_HOME_BIG_USER:
+        song.playing = 0; up_store(6, "A VERY LONG SOUND NAME"); up_load(6); TSEL->p[P_LEVEL] = 0; go_home(); break;
+    case S_HOME_BIG_EXT: song.g[G_CLOCK] = 1; song.g[G_BPM] = 174; go_home(); break;
     /* 1.5: the INSERT pages (fx.c track_insert): CRUSH (#177: BITS RATE LPF), FOLD at MIX 60 %, PHASR, OFF; INSERT 2 */
     case S_INSERT_CRUSH: set_ins_ui(IT_CRUSH, 64, 96, 80, 127); go_title("INSERT"); break;
     case S_INSERT_FOLD: set_ins_ui(IT_FOLD, 100, 96, 100, 76); go_title("INSERT"); break;
@@ -1048,10 +1052,7 @@ static void setup(int s)
     /* 1.5.5 (#208): MENU > MIDI > AUTO SELECT ON (selected); MIDI IN notes into T2 (selected) and T4 just now: their
      * cushions lit on HOME TRACKS (and the header's), on the MIXER T1 (selected) and T3 */
     case S_MENU_MIDI_AUTO: ui.menu = 1; ui.menu_sel = MI_MFOLLOW; ui_rec_prefs |= PREF_MIDI_FOLLOW >> 8; break;
-    case S_HOME_TRACKS_MIDI:
-        tracks_scene(1);
-        midi_lit_ms[song.sel] = midi_lit_ms[3] = fm1_ms | 1u;
-        break;
+    case S_HOME_BIG_STOPPED: tracks_scene(0); break;
     case S_MIXER_MIDI:
         go_page(GR_TRK);
         trk[2].p[P_MUTE] = 1;
@@ -1107,11 +1108,12 @@ static void setup(int s)
     case S_MOTION_REC: song.rec = 1u << song.sel; go_auto_top(); break;          /* recording into the motion */
     case S_MOTION_OFF:                                                            /* stopped, PLAY OFF (OCT+ CLEAR) */
         song.playing = 0; motion_set_event(TSEL, 1, P_REV, 40); motion_set_enabled(TSEL, 0); go_auto_top(); break;
-    case S_MOTION_CARD: {                                          /* #63: HOME, MOTION drives KNOB 1 and 3 (3 just turned) */
+    case S_MOTION_CARD: {                                          /* #63: HOME, MOTION drives VOLUME (its label THEME),
+                                                                    * PRESET just turned; a sound control too (no card) */
         const engine_t *en = ENGINES[TSEL->eng_req];
-        motion_set_event(TSEL, 2, en->knob[0], TSEL->p[en->knob[0]]);
+        motion_set_event(TSEL, 2, P_LEVEL, TSEL->p[P_LEVEL]);
         motion_set_event(TSEL, 6, en->knob[2], TSEL->p[en->knob[2]]);
-        go_home(); ui.hot_col = 2; ui.hot_t = 30;
+        go_home(); ui.hot_col = 1; ui.hot_t = 30;
         break;
     }
     case S_SONG_HOME:                            /* the song playing: the disc and its row in the header */
@@ -1159,18 +1161,18 @@ static void setup(int s)
     case S_MENU_HOLD: ui.menu = 1; ui.menu_sel = MI_HOLD; settings_hold = 2; break;
     case S_MENU_LEDS: ui.menu = 1; ui.menu_sel = MI_LEDS; settings_leds = LEDS_INV; break;
     case S_MENU_ANIM_IDLE: ui.menu = 1; ui.menu_sel = MI_ANIM; menu_put(MI_ANIM, 2); break;   /* (1.2: ANIM IDLE, #135) */
-    /* 1.2 (#72 / #73): MOMENTARY, LFO held and KNOB 1 turned on HOME (the header's hint, the hot column); on EDIT 1 */
+    /* 1.2 (#72 / #73): MOMENTARY, LFO held and HOME's VOLUME turned (the header's hint, the hot card); on EDIT 1 */
     case S_MOMENTARY:
     case S_MOMENTARY_EDIT: {
         int16_t *vp;
         song.playing = 0;
         if (s == S_MOMENTARY_EDIT)
             open_family(FAM_EDIT);
-        if (s == S_MOMENTARY) home_param(0, &vp);
+        if (s == S_MOMENTARY) home_param(HK_VOLUME, &vp);
         else page_desc(cur_page(), 0, &vp);
         mom.n = 1; mom.vp[0] = vp; mom.v[0] = *vp;
         *vp = (int16_t)(*vp > 64 ? *vp - 40 : *vp + 40);
-        ui.hot_col = 0; ui.hot_t = 40;
+        ui.hot_col = s == S_MOMENTARY ? HK_VOLUME : 0; ui.hot_t = 40;
         ui_message("MOMENTARY  [OCT+] KEEP");
         break;
     }
@@ -1474,6 +1476,8 @@ static void sweep_motion(void)
     for (c = 0; c < 4u; c++) {
         int16_t *vp = 0;
         const param_desc_t *d = ui.home ? home_param(c, &vp) : page_desc(cur_page(), c, &vp);
+        if (ui.home && vp && (vp < TSEL->p || vp >= TSEL->p + P_COUNT))
+            continue;                                   /* (HOME's TEMPO: a global, no motion) */
         uintptr_t id = vp ? ((uintptr_t)vp - (uintptr_t)TSEL->p) / sizeof *vp : P_COUNT;
         if (d && d->label && d->label[0] != '-' && id < P_COUNT && !motion_set_event(TSEL, c, (uint32_t)id, *vp))
             any = 1;
@@ -1533,10 +1537,28 @@ static void sweep_columns(void)
         draw(-1);
         lint();
         sweep_motion();
-        state(); pal(UI_GREY_INDEX); eng(e); go_home(); ui_home_view = HV_TRACKS;   /* 1.3: HOME > TRACKS, this engine on */
-        for (i = 0; i < NTRK; i++)                                                 /* every row, every one muted */
+        for (i = 0; i < ENGINES[e]->npresets; i++) {   /* VOID FOUR: every sound of this machine on HOME (its name in
+                                                         * L or M, its category, its number) */
+            apply_preset_to(TSEL, i);
+            nscr = npend = 0;
+            ui.force = 1;
+            draw_columns();
+            lint();
+            nsweep++;
+        }
+        for (i = 0; i <= 127u; i++) {                   /* .. VOLUME (LEVEL OFF .. top) and TEMPO 40 .. 240 */
+            TSEL->p[P_LEVEL] = (int16_t)i;
+            song.g[G_BPM] = (int16_t)(40u + i * 200u / 127u);
+            nscr = npend = 0;
+            ui.force = 1;
+            draw_columns();
+            lint();
+            nsweep++;
+        }
+        state(); pal(UI_GREY_INDEX); eng(e); go_home();   /* HOME, this machine on every track, every one muted */
+        for (i = 0; i < NTRK; i++)
             trk[i].p[P_MUTE] = 1, set_engine_of(&trk[i], e);
-        snprintf(name, sizeof name, "%s%s/HOME TRACKS", large_on ? "LARGE " : "", ENGINES[e]->name);
+        snprintf(name, sizeof name, "%s%s/HOME MUTED", large_on ? "LARGE " : "", ENGINES[e]->name);
         cur_name = name;
         draw(-1);
         lint();
@@ -1784,16 +1806,15 @@ static void align_sweeps(void)
         ui.layer = 0; song.sel = 0; ui_prefs = 0; ui_rec_prefs = 0;
         cur_name = st ? "sweep LINE: HELP hints" : "sweep FLAT: HELP hints";   /* (1.5: every page's, HOME's, every layer's) */
         ui_prefs2 |= PREF_HELP >> 16;
-        for (i = 0; i <= NPAGES + HV_COUNT; i++) {
+        for (i = 0; i <= NPAGES; i++) {
             ui.home = i >= NPAGES; ui.page = (uint8_t)(i < NPAGES ? i : 0u);
-            ui_home_view = (uint8_t)(i > NPAGES ? i - NPAGES - 1u : 0u);
             ui.help_t = HELP_FRAMES; ui.force = 1;
             draw_foot();
         }
         for (k = LAYER_FX; k < LAYER_N; k++) {
             ui.layer = (uint8_t)k; ui.force = 1; draw_layer(); ui.force = 0;
         }
-        ui.layer = 0; ui.home = 1; ui.help_t = 0; ui_home_view = 0; ui_prefs2 &= (uint8_t)~(PREF_HELP >> 16);
+        ui.layer = 0; ui.home = 1; ui.help_t = 0; ui_prefs2 &= (uint8_t)~(PREF_HELP >> 16);
         cur_name = st ? "sweep LINE: count-in" : "sweep FLAT: count-in";
         for (i = 1; i <= 2u; i++)                       /* 1 and 2 bars, every beat */
             for (k = 4u * i; k >= 1u; k--) {

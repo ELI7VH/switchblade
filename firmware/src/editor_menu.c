@@ -29,7 +29,8 @@ static const uint8_t ED_MENU[][2] = {
     {MI_CHADD, 20},                                    /* 1.2 (#155), a row of CONTROL */
     {MI_MIDIIN, 21},                                   /* 1.2: the project's G_ROUTE (was GLO > SYSTEM ROUT), MIDI */
     {MI_TUNE, 22},                                     /* 1.2: the project's G_TUNE (was GLO > GLOBAL), AUDIO */
-    {MI_HOME, 23},                                     /* 1.3 (Discussions #112, #134): HOME SCOPE / TRACKS, DISPLAY */
+                                                       /* (23: 1.3's MENU > DISPLAY > HOME SCOPE / TRACKS / LEVELS, gone
+                                                        * in VOID FOUR: one HOME; an unknown id now, not reused) */
     {MI_HELP, 24},                                     /* 1.5 (Discussion #156): HELP OFF / ON, SYSTEM */
     {MI_SELECT, 25},                                   /* 1.5.5 (Discussion #188): SELECT BPM / PAGE, CONTROL */
     {MI_TCH1, 26}, {MI_TCH2, 27}, {MI_TCH3, 28}, {MI_TCH4, 29},   /* 1.5.5 (#202): T1..T4 CHANNEL, the project's (song.mch)
