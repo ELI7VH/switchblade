@@ -91,7 +91,7 @@ def tc_all(*cmds):
 
 
 def generate():
-    """generated headers (UI fonts, icons, keycaps, palettes, tables, VOID wavetables)"""
+    """generated headers (UI fonts, icons, keycaps, palettes, tables, VOID wavetables, the four machines' presets)"""
     GEN.mkdir(parents=True, exist_ok=True)
     for old in ("felucca_font.h", "felucca_icons.h"):     # headers of the bitmap font and icon atlas
         (GEN / old).unlink(missing_ok=True)
@@ -111,6 +111,13 @@ def generate():
             failed.append(c[0].name)
     if failed:
         raise SystemExit(f"build: {', '.join(failed)} failed")
+    # the presets (presets/four/*.py): after the tables (WAVE's ranges read void_tables.h); a violation fails the build
+    r = subprocess.run([sys.executable, str(tools / "four_presets.py"), str(GEN / "four_presets.h"),
+                        str(GEN / "void_tables.h")], capture_output=True, text=True)
+    sys.stdout.write(r.stdout)
+    if r.returncode:
+        sys.stderr.write(r.stderr)
+        raise SystemExit("build: four_presets.py failed")
 
 
 # ---- update loader

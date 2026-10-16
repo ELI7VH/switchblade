@@ -612,7 +612,7 @@ enum { S_HOME, S_HOME_IDLE, S_MESSAGE, S_MESSAGE_KEY, S_PRESETS, S_PRESETS_NOFAV
        S_GLO_PEEK, S_GLO_ACTIVE, S_GLO_EXT, S_SCL_PEEK, S_SCL_ACTIVE, S_EDIT_PEEK, S_EDIT_ACTIVE, S_EDIT_USER,
        S_LAYER_HINT, S_LAYER_LOCK, S_LAYER_LOCK_FX, S_SEQ_TOOLS, S_SEQ_TOOLS_SONG, S_NAME_USER, S_NAME_TYPING,
        S_NAME_123, S_NAME_EMPTY, S_NAME_FULL, S_NAME_PLAYING, S_PROJECT_NAMED, S_SONG_NAMED, S_PRESETS_CAT,
-       S_PRESETS_CAT_EMPTY, S_NAME_CAT, S_NAME_RANDOM, S_MENU_ANIM_IDLE, S_MOMENTARY, S_MOMENTARY_EDIT, S_SONG_LONG,
+       S_PRESETS_CAT_WIDE, S_NAME_CAT, S_NAME_RANDOM, S_MENU_ANIM_IDLE, S_MOMENTARY, S_MOMENTARY_EDIT, S_SONG_LONG,
        S_SONG_PLAYING, S_SONG_LONG_PLAYING, S_SONG_UNSAVED, S_SONG_ADD, S_USER_FOOT, S_ROLL_EMPTY, S_ROLL_ACID,
        S_ROLL_CHORDS, S_ROLL_TIES, S_ROLL_LEN32, S_ROLL_HIGH, S_ROLL_LOW, S_ROLL_WIDE, S_ROLL_PLAYING, S_ROLL_LOCKS,
        S_ROLL_LOCK_HELD, S_MOTION_LOCKS, S_AUTO_LIST, S_AUTO_LIST_ADD, S_AUTO_NUDGE, S_AUTO_QNT, S_AUTO_ADD_NUDGE,
@@ -1207,15 +1207,15 @@ static void setup(int s)
         song.playing = 0; project_save_as(0, "LOFI JAM"); project_save_as(1, "MWMWMWMWMWMW"); project_save_as(2, "");
         song.g[G_SLOT] = 2; go_page(GR_SLOTS); ui.act = 4; ui.msg_t = 0;
         break;
-    /* 1.2 (Discussion #90): PRESETS > LIST BASS (factory basses and a user one); OTHER with none; NAME's category
-     * (the widest, PLUCK) on a rename of a long name; PROJECT's random name */
+    /* 1.2 (Discussion #90): PRESETS > LIST BASS (factory basses and a user one); STRINGS (the widest name); NAME's category
+     * (the widest, STRINGS) on a rename of a long name; PROJECT's random name */
     case S_PRESETS_CAT:
         song.playing = 0; up_store_cat(3, "MY DEEP BASS", CAT_BASS);
         eng(0); apply_preset(2); list_set(1u + CAT_BASS); go_page(GR_BROWSE);
         break;
-    case S_PRESETS_CAT_EMPTY: list_set(1u + CAT_OTHER); go_page(GR_BROWSE); break;
+    case S_PRESETS_CAT_WIDE: list_set(1u + CAT_STRINGS); go_page(GR_BROWSE); break;
     case S_NAME_CAT:
-        song.playing = 0; up_store_cat(4, "MWMWMWMWMWMW", CAT_PLUCK); go_page(GR_USER); name_open(NK_USER_RENAME, 4);
+        song.playing = 0; up_store_cat(4, "MWMWMWMWMWMW", CAT_STRINGS); go_page(GR_USER); name_open(NK_USER_RENAME, 4);
         break;
     case S_NAME_RANDOM: song.playing = 0; go_page(GR_SLOTS); name_open(NK_PROJ_SAVE, 1); nm.rnd = 12345u; nm_random(); break;
     case S_SONG_NAMED:

@@ -11,7 +11,7 @@ static const engine_t ENG_ACID = {
         {"CUT", F_CUTOFF, 0, 127, 50, 0, 0},        {"RES", F_PCT, 0, 127, 90, 0, 0},
         {"DRV", F_PCT, 0, 127, 0, 0, 0},            {"SQL", F_PCT, 0, 127, 0, 0, 0},
     },
-    .presets = OBX_PRESETS, .npresets = NELEM(OBX_PRESETS),   /* until Task 1.3 */
+    .presets = ACID_PRESETS, .npresets = NELEM(ACID_PRESETS),   /* presets/four/acid.py */
     .knob = {P_E4, P_E5, P_ED_FLT, P_E2}, .poly = 1, .keep = 0x03,
     .note_on = analog_note_on, .render = analog_render_f,
 };

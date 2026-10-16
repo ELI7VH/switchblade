@@ -500,25 +500,25 @@ static int user_preset_roundtrip(void)
     for (i = 0; i < 16u; i++, p += 2u)
         ok &= host_wire[p] == (i & 1u ? 0u : 48u + i);
     bad += check("UP_GET returns the values and the pattern UP_PUT sent", ok);
-    bad += check("  .. then kind 0 and (1.2) the category: none sent, OB-Z's (OTHER)",
-                 host_wire[p] == 0u && host_wire[p + 1u] == CAT_OTHER && host_wire[p + 2u] == 0xF7);
+    bad += check("  .. then kind 0 and (1.2) the category: none sent, OB-Z's (LEAD)",
+                 host_wire[p] == 0u && host_wire[p + 1u] == cat_of_engine(ENGI_OBX) && host_wire[p + 2u] == 0xF7);
     {   /* 1.2 (Discussion #90): UP_PUT's category after the kind's 16 bytes; UP_LIST lists the categories after the slots */
         uint32_t k0 = k;
         a[k++] = 0;
         for (i = 0; i < 16u; i++) a[k++] = 0;
-        a[k++] = CAT_PAD;
+        a[k++] = CAT_ATMOS;
         a[0] = 3;
         request(ED_UP_PUT, a, k);
-        ok = host_wire[6] != 1u && up_cat(3) == CAT_PAD;
-        a[k - 1u] = CAT_N;
+        ok = host_wire[6] != 1u && up_cat(3) == CAT_ATMOS;
+        a[k - 1u] = NCAT;
         request(ED_UP_PUT, a, k);
-        ok &= host_wire[6] == 1u && up_cat(3) == CAT_PAD;
+        ok &= host_wire[6] == 1u && up_cat(3) == CAT_ATMOS;
         a[0] = 3;
         request(ED_UP_GET, a, 1);
-        ok &= host_wire[p] == 0u && host_wire[p + 1u] == CAT_PAD;
+        ok &= host_wire[p] == 0u && host_wire[p + 1u] == CAT_ATMOS;
         a[0] = 2; a[1] = 2;
         n = request(ED_UP_LIST, a, 2);
-        ok &= host_wire[5] == 2u && host_wire[6] == 2u && host_wire[n - 3u] == 0u && host_wire[n - 2u] == CAT_PAD;
+        ok &= host_wire[5] == 2u && host_wire[6] == 2u && host_wire[n - 3u] == 0u && host_wire[n - 2u] == CAT_ATMOS;
         bad += check("UP_PUT with a category (after the kind's 16 bytes; past the last: rc 1), UP_GET and UP_LIST give it", ok);
         k = k0;
     }

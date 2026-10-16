@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
 #define FELUCCA_FAVORITES 1
-#define FAV_ROWS 4u              /* the engines with a row of favourites: the four machines (Task 1.3 rewrites this) */
+#define FAV_ROWS 4u              /* the engines with a row of favourites: the four machines */
 /* Stable engine/preset references; fixed capacity independent of optional engines. */
 typedef struct {
     uint8_t factory[16][32]; /* engine 0..3, preset 0..255 (rows 4..13 unused; 14: the MIDI LEARN map, 15: settings) */

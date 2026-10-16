@@ -393,7 +393,7 @@ static int test_sound_loads(void)
                  preset_pat_hint() == 8 && ui.ppick == 8 && str_eq(PATTERNS[8].name, "ARP"));
     t->p[P_AMODE] = 2;
     before = *t;
-    for (i = 0; i < 6u; i++)                      /* several loads, into the next engine */
+    for (i = 0; i < 40u && t->eng_req == before.eng_req; i++)     /* several loads, into the next engine */
         turn(EN_PRESET, 1);
     bad += check("browsing on, into another engine: the steps still untouched", t->eng_req != before.eng_req &&
                  !memcmp(t->step, before.step, sizeof t->step) && t->p[P_AMODE] == 2);
@@ -1078,15 +1078,14 @@ static int test_categories(void)
     memset(&favorites, 0, sizeof favorites);
     memset(up_bank, 0, sizeof up_bank);
     for (e = 0; e < NENGINES; e++) {
-        const char *c = PRESET_CAT[e];
         if (!eng_ok(e)) continue;
-        ok &= str_len(c) == ENGINES[e]->npresets;
-        for (k = 0; k < ENGINES[e]->npresets; k++)
-            ok &= preset_cat(e, k) >= CAT_BASS && preset_cat(e, k) <= CAT_OTHER;
+        for (k = 0; k < ENGINES[e]->npresets; k++)      /* (the counts: tools/four_presets.py; four_test) */
+            ok &= preset_cat(e, k) >= CAT_BASS && preset_cat(e, k) < NCAT;
     }
-    bad += check("categories: every factory preset of every engine has one (the table's strings == the preset counts)",
-                 ok && preset_cat(0, 2) == CAT_BASS && preset_cat(ENGI_WAVE, 0) == CAT_BASS && preset_cat(ENGI_OBX, 5) == CAT_KEYS &&
-                 preset_cat(ENGI_ACID, 2) == CAT_BASS && preset_cat(ENGI_DRIFT, 1) == CAT_PAD && preset_cat(0, 99) == CAT_OTHER);
+    bad += check("categories: every factory preset of every engine has one",
+                 ok && preset_cat(ENGI_OBX, 0) == CAT_LEAD && preset_cat(ENGI_WAVE, 0) == CAT_ATMOS &&
+                 preset_cat(ENGI_ACID, 2) == CAT_ACID && preset_cat(ENGI_DRIFT, 1) == CAT_BASS &&
+                 preset_cat(0, 99) == cat_of_engine(0));
     go_page(GR_BROWSE);
     select_engine(0);
     apply_preset(0);                                       /* OB-Z SAW LEAD */
@@ -1106,23 +1105,22 @@ static int test_categories(void)
     }
     bad += check("  the PRESETS knob steps through basses only (every engine), and round", ok && preset_pos(&total) == total - 1u);
     turn(EN_K4, 20);
-    bad += check("  .. right to OTHER and no further (no wrap)", list_mode() == LIST_N - 1u && str_eq(list_name(list_mode()), "OTHER"));
+    bad += check("  .. right to ACID and no further (no wrap)", list_mode() == LIST_N - 1u && str_eq(list_name(list_mode()), "ACID"));
     {
-        track_t before = *TSEL;
         ui.msg_t = 0;
         turn(EN_PRESET, 1);
-        bad += check("  OTHER is empty (no factory sound): NO SOUNDS IN LIST, the sound stays",
-                     msg_is("NO SOUNDS IN LIST") && !memcmp(TSEL, &before, sizeof before));
+        bad += check("  ACID holds ACID's sounds only: the PRESETS knob lands on that machine",
+                     TSEL->eng_req == ENGI_ACID && track_cat(TSEL) == CAT_ACID);
     }
     {   /* the settings: the category's byte, unknown = none; FAV clears it */
         persist_t p;
-        list_set(1u + CAT_PAD);
+        list_set(1u + CAT_ATMOS);
         settings_export(&p);
-        ok = p.favorites.factory[15][11] == CAT_PAD && p.favorites.filter == 0u;
-        p.favorites.factory[15][11] = 9;
+        ok = p.favorites.factory[15][11] == CAT_ATMOS && p.favorites.filter == 0u;
+        p.favorites.factory[15][11] = NCAT;
         ok &= settings_import(&p, sizeof p) == 1 && list_mode() == 0u;
-        p.favorites.factory[15][11] = CAT_FX;
-        ok &= settings_import(&p, sizeof p) == 1 && list_mode() == 1u + CAT_FX;
+        p.favorites.factory[15][11] = CAT_STRINGS;
+        ok &= settings_import(&p, sizeof p) == 1 && list_mode() == 1u + CAT_STRINGS;
         turn(EN_K4, -20);
         turn(EN_K4, 1);
         bad += check("  kept with the settings ([15][11], an unknown value: none); FAV clears it, ALL at the left end",
@@ -1152,8 +1150,8 @@ static int test_categories(void)
         bad += check("  #197 LIST / FAV (KNOB 4 / 3): saved once idle or the page left, never on a detent", ok && ok2);
     }
     /* NAME: USER SAVE takes the sound's category; KNOB 3 changes it; written with the name */
-    select_engine(0);
-    apply_preset(2);                                       /* SQR BASS */
+    select_engine(ENGI_DRIFT);
+    apply_preset(0);                                       /* DRIFT SUB */
     song.playing = 0;
     go_page(GR_USER);
     ui.uslot = 4;
@@ -1178,11 +1176,11 @@ static int test_categories(void)
     ui.uslot = 4;
     press(B_EDIT);
     ok = name_on() && nm.kind == NK_USER_RENAME && nm.cat == CAT_LEAD;
-    turn(EN_K3, 3);                                        /* LEAD -> KEYS */
+    turn(EN_K3, 1);                                        /* LEAD -> KEYS */
     press(B_OCTUP);
     up_name(4, b);
     bad += check("  a rename starts at the slot's own category and writes the new one, the sound as it was",
-                 ok && up_cat(4) == CAT_KEYS && up_engine(4) == 0u);
+                 ok && up_cat(4) == CAT_KEYS && up_engine(4) == ENGI_DRIFT);
     up_load(4);
     name_open(NK_USER_SAVE, 5);
     ok = name_on() && nm.cat == CAT_KEYS;

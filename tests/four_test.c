@@ -23,9 +23,28 @@ static void test_engine_table(void)
     CHECK(ENGINES[ENGI_ACID]->poly == 1u, "ACID mono");
 }
 
+static void test_presets(void)
+{
+    uint32_t e, k;
+    for (e = 0; e < NENGINES; e++) {
+        CHECK(ENGINES[e]->npresets == 32u, "%s has %u presets", ENGINES[e]->name, ENGINES[e]->npresets);
+        for (k = 0; k < ENGINES[e]->npresets; k++) {
+            uint32_t c = preset_cat(e, k);
+            CHECK(c >= CAT_BASS && c < NCAT, "%s/%u no category", ENGINES[e]->name, (unsigned)k);
+            CHECK((c == CAT_ACID) == (e == ENGI_ACID), "%s/%s: ACID only on ACID",
+                  ENGINES[e]->name, ENGINES[e]->presets[k].name);
+            CHECK(strlen(ENGINES[e]->presets[k].name) <= 12u, "name too long");
+        }
+    }
+    CHECK(NELEM(WAVE_PX) == 32u, "WAVE_PX %u", (unsigned)NELEM(WAVE_PX));
+    CHECK(NELEM(N_VOID_OSC2) == VOID_OSC2_N, "N_VOID_OSC2 has %u names for %u values", (unsigned)NELEM(N_VOID_OSC2),
+          (unsigned)VOID_OSC2_N);
+}
+
 int main(void)
 {
     test_engine_table();
+    test_presets();
     printf(fails ? "four_test: %d FAIL\n" : "four_test: ok\n", fails);
     return fails != 0;
 }

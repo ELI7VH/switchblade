@@ -3,6 +3,7 @@
 /* Engine table: the four machines OB-Z, WAVE, ACID, DRIFT (order = PRESETS browsing order and the engine numbers
  * of the editor protocol), the factory patterns (SAVE > PHRASES) and the parts' sounds at power-on. */
 #include "dsp.c"
+#include "category.c"           /* the CAT_* numbers, and (with four_presets.h) every machine's 32 presets and their categories */
 
 /* The parts' engine memory (1.5): a part plays one engine at a time, so the engines with per-part state
  * (engine_t.mem: WAVE's voices) keep it in one region per part instead of an array each. The region holds the

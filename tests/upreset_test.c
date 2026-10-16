@@ -179,7 +179,7 @@ int main(void)
             bad += check("UP_PUT unknown kind rejected", up_parse(g, m, &got, &slot) == 1 &&
                                                          !memcmp(&got, &keep, sizeof got));
             g[m - 17u] = 0;
-            g[m] = CAT_N;                               /* (1.2: one byte more is the category, 0..CAT_N - 1) */
+            g[m] = NCAT;                               /* (1.2: one byte more is the category, 0..NCAT - 1) */
             g[m + 1u] = 0;
             bad += check("UP_PUT trailing byte rejected (no category; two bytes)", up_parse(g, m + 1u, &got, &slot) == 1 &&
                                                          up_parse(g, m + 2u, &got, &slot) == 1 &&
@@ -267,7 +267,7 @@ int main(void)
         for (i = 0; i < 16u; i++) a[n++] = 0;
         a[n++] = CAT_KEYS;
         ok = !up_parse(a, n, &r, &slot) && up_cat_of(&r) == CAT_KEYS && UP_CAT_AT >= P_COUNT && r.np == P_COUNT;
-        a[n - 1u] = CAT_N;
+        a[n - 1u] = NCAT;
         ok &= up_parse(a, n, &got, &slot) == 1;
         n = put_frame(a, 17, ENGI_WAVE, "WAVE", 0);
         ok &= !up_parse(a, n, &got, &slot) && up_cat_of(&got) == cat_of_engine(ENGI_WAVE) && !got.packed[UP_CAT_AT];

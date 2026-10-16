@@ -226,7 +226,7 @@ def curves():
           " * Morph mix: OSC1 reading OSC2's table) */"]
     L += arr("VOID_OSC2_CT", "int16_t", st + [0])
     names = [("0" if c == 0 else f"{c // 100:+d}") if c % 100 == 0 else f"{c:+d}c" for c in st] + ["MORPH"]
-    L += [f"static const char *const N_VOID_OSC2[{len(st)}] = {{"]
+    L += [f"static const char *const N_VOID_OSC2[{len(names)}] = {{"]    # (the steps and MORPH: one name per value)
     for i in range(0, len(names), 12):
         L.append("    " + ", ".join(f'"{n}"' for n in names[i:i + 12]) + ",")
     L += ["};", f"#define VOID_OSC2_N {len(names)}", f"#define VOID_OSC2_ZERO {st.index(0)}",

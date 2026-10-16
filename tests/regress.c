@@ -770,6 +770,7 @@ static int chk_voice_cap(char *msg, uint32_t n)
         track_t *t = &trk[0];
         host_tracks_init();
         host_preset(t, ENGI_WAVE, 0);
+        t->p[P_REL] = 20;                        /* (a short release: the check waits 4 s for the voices to free) */
         t->p[P_VOICE] = mode ? V_UNISON : V_POLY;
         t->p[P_AMODE] = 0;
         for (k = 0; k < 8u; k++)

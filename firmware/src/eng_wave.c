@@ -471,29 +471,18 @@ static void void_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
 }
 
 /* ----------------------------------------------------------------------- presets --- */
-/* the factory sounds: the plugin's, converted by tools/void_presets.py (void_presets.h; what each loses:
- * docs/void_presets.md). VOID_PX holds what a preset_t cannot, applied by void_track_loaded */
-typedef struct {
-    uint8_t ftype;               /* P_FTYPE (VF_*) */
-    uint8_t voice;               /* 3: UNISON (else the preset's mono flag: POLY / LEGATO) */
-    uint8_t detune;              /* P_DETUNE + 1 (0: the default) */
-    uint8_t spread;              /* P_SPRD */
-    uint8_t glide;               /* P_GLIDE */
-    uint8_t lfo[5];              /* 1: the LFO's RATE, WAVE, TRIG, FADE below (0: the defaults) */
-    uint8_t fe[5];               /* FLT ENV: P_FM1_LEVEL (0 off, 1..127 on: its velocity sensitivity), A D S R */
-    int8_t mx[4][3];             /* the matrix: SRC, DST, AMT per slot */
-} void_px_t;
-#include "void_presets.h"
-_Static_assert(NELEM(VOID_PX) == NELEM(VOID_PRESETS), "VOID_PX: one per preset");
+/* the factory sounds: presets/four/wave.py (tools/four_presets.py: WAVE_PRESETS in four_presets.h, category.c).
+ * WAVE_PX holds what a preset_t cannot (core.h void_px_t), applied by void_track_loaded */
+_Static_assert(NELEM(WAVE_PX) == NELEM(WAVE_PRESETS), "WAVE_PX: one per preset");
 
 /* a preset just loaded on track t (ui.c apply_preset_to, after the defaults and the preset's own values) */
 static void void_track_loaded(track_t *t)
 {
     const void_px_t *x;
     uint32_t k;
-    if (t->eng_req % NENGINES != ENGI_WAVE || t->preset >= NELEM(VOID_PX))
+    if (t->eng_req % NENGINES != ENGI_WAVE || t->preset >= NELEM(WAVE_PX))
         return;
-    x = &VOID_PX[t->preset];
+    x = &WAVE_PX[t->preset];
     t->p[P_FTYPE] = x->ftype;
     if (x->voice == V_UNISON)
         t->p[P_VOICE] = V_UNISON;
@@ -532,8 +521,8 @@ static const engine_t ENG_WAVE = {
         {"OSC2", F_ENUM, 0, VOID_OSC2_N - 1, VOID_OSC2_ZERO, N_VOID_OSC2, 0},
         {"DRV", F_PCT, 0, 127, 0, 0, 0},
     },
-    .presets = VOID_PRESETS,
-    .npresets = NELEM(VOID_PRESETS),
+    .presets = WAVE_PRESETS,
+    .npresets = NELEM(WAVE_PRESETS),
     .knob = {P_E4, P_E5, P_ED_FLT, P_E1},
     .poly = VOID_POLY,
     .note_on = void_note_on,

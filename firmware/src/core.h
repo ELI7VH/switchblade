@@ -142,6 +142,16 @@ typedef struct {
                                   * never touches the steps; SEQ > PATTERNS loads a pattern (ui.c pat_load). The
                                   * arp is the track's too: a preset does not set it */
 } preset_t;
+typedef struct {                 /* WAVE's extras of a factory preset (WAVE_PX, four_presets.h; void_track_loaded) */
+    uint8_t ftype;               /* P_FTYPE (VF_*) */
+    uint8_t voice;               /* 3: UNISON (else the preset's mono flag: POLY / LEGATO) */
+    uint8_t detune;              /* P_DETUNE + 1 (0: the default) */
+    uint8_t spread;              /* P_SPRD */
+    uint8_t glide;               /* P_GLIDE */
+    uint8_t lfo[5];              /* 1: the LFO's RATE, WAVE, TRIG, FADE below (0: the defaults) */
+    uint8_t fe[5];               /* FLT ENV: P_FM1_LEVEL (0 off, 1..127 on: its velocity sensitivity), A D S R */
+    int8_t mx[4][3];             /* the matrix: SRC, DST, AMT per slot */
+} void_px_t;
 #define FX(d, c, dl, r) .fx = {(d) + 1, (c) + 1, (dl) + 1, (r) + 1}
 #define PAT(n) .pat = (n)
 

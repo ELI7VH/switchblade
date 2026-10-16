@@ -10,7 +10,7 @@ static const engine_t ENG_DRIFT = {
         {"CUT", F_CUTOFF, 0, 127, 90, 0, 0},        {"RES", F_PCT, 0, 127, 30, 0, 0},
         {"DRV", F_PCT, 0, 127, 0, 0, 0},            {"KTR", F_PCT, 0, 127, 64, 0, 0},
     },
-    .presets = OBX_PRESETS, .npresets = NELEM(OBX_PRESETS),   /* until Task 1.3 */
+    .presets = DRIFT_PRESETS, .npresets = NELEM(DRIFT_PRESETS),   /* presets/four/drift.py */
     .knob = {P_E4, P_E5, P_ED_FLT, P_E6}, .poly = 2, .keep = 0x03,
     .note_on = analog_note_on, .render = analog_render_f,
 };

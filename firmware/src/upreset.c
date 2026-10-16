@@ -62,11 +62,11 @@ static up_rec_t *up_rec(uint32_t k) { return &up_bank[k / UP_PER_BANK].r[k % UP_
 static uint32_t up_cat_of(const up_rec_t *r)
 {
     uint32_t c = r->np <= UP_CAT_AT ? r->packed[UP_CAT_AT] : 0u;
-    return c && c < CAT_N ? c : cat_of_engine(r->engine);
+    return c && c < NCAT ? c : cat_of_engine(r->engine);
 }
-static void up_set_cat(up_rec_t *r, uint32_t c)  /* c CAT_BASS..CAT_OTHER */
+static void up_set_cat(up_rec_t *r, uint32_t c)  /* c CAT_BASS..CAT_ACID */
 {
-    if (c && c < CAT_N)
+    if (c && c < NCAT)
         r->packed[UP_CAT_AT] = (uint8_t)c;
 }
 
@@ -174,7 +174,7 @@ static int up_parse(const uint8_t *a, uint32_t na, up_rec_t *r, uint32_t *slot)
     k = 3u + n;                                  /* after the name's 0 */
     end = k + 2u * P_COUNT + 32u;
     if (a[0] >= UP_SLOTS || a[1] >= NENGINES || 2u + n >= na || !up_name_ok(a + 2, n) ||
-        (na != end && ((na != end + 17u && na != end + 18u) || a[end] != 0u)) || (na == end + 18u && a[end + 17u] >= CAT_N))
+        (na != end && ((na != end + 17u && na != end + 18u) || a[end] != 0u)) || (na == end + 18u && a[end + 17u] >= NCAT))
         return 1;
     up_rec_t staged, *target = r;
     r = &staged;

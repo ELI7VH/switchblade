@@ -17,7 +17,7 @@
  *   black keys   by name, in both octaves: F# cursor left, G# SPACE, A# cursor right, C# DELETE (the character
  *                before the cursor; held: repeats, as the arrows do), D# ABC / 123.
  *   KNOB 1       the cursor; KNOB 2 the character at the cursor (SPACE A..Z 0..9 - . _ / # +; at the end: a new one).
- *   KNOB 3       (1.2, Discussion #90) USER: the sound's category (BASS LEAD PAD PLUCK KEYS DRUM FX OTHER, category.c),
+ *   KNOB 3       (1.2, Discussion #90) USER: the sound's category (BASS LEAD KEYS BRASS STRINGS ATMOS ACID, category.c),
  *                shown in the field's title row and written with the name (PRESETS > LIST filters by it); it starts at
  *                the slot's own (a rename) or the sound's (a save: its user preset's, its factory preset's).
  *                PROJECT: a random name, a new one each detent (an adjective and a noun, NM_RA / NM_RB; the field
@@ -43,7 +43,7 @@ static struct {
     uint8_t tap;                                       /* .. that letter's index in its group */
     uint8_t rep;                                       /* the key (+ 1) of a held arrow / DELETE, 0 none */
     uint32_t t, rep_t;                                 /* fm1_ms of the last tap; of the next repeat */
-    uint8_t cat;                                       /* USER: the category (CAT_BASS..CAT_OTHER) KNOB 3 sets */
+    uint8_t cat;                                       /* USER: the category (CAT_BASS..CAT_ACID) KNOB 3 sets */
     uint32_t rnd;                                      /* PROJECT: KNOB 3's random names (xorshift; 0 = not seeded) */
     uint32_t sig;                                      /* drawn-state cache */
     char s[NM_LEN + 1u];
@@ -223,7 +223,7 @@ static void nm_knob(uint32_t k, int32_t s)             /* KNOB 1 the cursor, KNO
     nm_commit();
     if (k == 2u) {                                     /* USER: the category (no wrap); PROJECT: a random name */
         if (nm.kind <= NK_USER_RENAME)
-            nm.cat = (uint8_t)clamp((int32_t)nm.cat + s, CAT_BASS, CAT_OTHER);
+            nm.cat = (uint8_t)clamp((int32_t)nm.cat + s, CAT_BASS, CAT_ACID);
         else
             nm_random();
         return;
@@ -349,7 +349,7 @@ static void nm_draw_field(void)
     str_cpy(b + str_len(b), "/12", 4);
     cv_text_r(231, 2, &AF_S, b, nm.len >= NM_LEN ? T_ACCENT : T_DIM, T_SURF);
     if (nm.kind <= NK_USER_RENAME)                     /* USER: the category KNOB 3 sets, left of the count */
-        cv_text_r(231 - text_w(&AF_S, b) - 10, 2, &AF_S, CAT_NAME[nm.cat % CAT_N], T_THEME, T_SURF);
+        cv_text_r(231 - text_w(&AF_S, b) - 10, 2, &AF_S, CAT_NAME[nm.cat % NCAT], T_THEME, T_SURF);
     for (i = 0; i < NM_LEN; i++) {
         int32_t x = NM_CX(i);
         char c[2] = {empty ? nm.ph[i] : i < nm.len ? nm.s[i] : 0, 0};
