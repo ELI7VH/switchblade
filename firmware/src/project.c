@@ -1,111 +1,20 @@
-/* FM1-Four: FOR4 is the only project format. Every Felucca format (FUN1..FUN10) is refused, not converted: the
- * text below describes the Felucca lineage this layout came from, and its migration paths are gone. */
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
-/* Projects: four slots. The slots live in .noinit RAM: they
- * survive resets and UBOOT entry. With FELUCCA_FLASH (default) every save
- * also goes to flash through storage.c, and an
- * empty RAM slot is filled from flash on load.
+/* Projects: four slots. The slots live in .noinit RAM: they survive resets and UBOOT entry. With FELUCCA_FLASH
+ * (default) every save also goes to flash through storage.c, and an empty RAM slot is filled from flash on load.
  *
- * Format 7 ("FUN7", written) stores P_COUNT (byte 66) and maps an older count as user presets do: FUN7 of
- * 89 parameters (before the chord keys P_CHRD / P_VOIC) loads its engine values at today's P_E0..P_E7,
- * the chord keys OFF / CLOSE, and its motion events' ids from its P_E0 on move up with them (proj_motion_ids).
- * 68 + 4 x (91 + 2 + 64 x 9) + chain + motion = 3040 of the 3372 bytes before the name: 332 spare, room for
- * 83 more track parameters (4 bytes each).
- * Format 6 ("FUN6") adds a 36-byte song chain before the checksum.
- * Format 5 ("FUN5", read only) = format 4 with the drum grid: a step is 10 bytes (step_t: its lane hits and
- * their accents after the 8 bytes it was), and each track has 40 reserved bytes (lane[8][5], written 0: room
- * for per-lane sounds of the DRUM engine). 4 ("FUN4": PROJ_NP_V4 parameters, the modulation matrix), 3
- * ("FUN3": PROJ_NP_V3, the SLICER), 2 ("FUN2") and 1 ("FUN1": PROJ_NP_V2) are read and converted, mapped by
- * count as user presets are (the first np - 8 are P_LEVEL.. in order, the last 8 P_E0..P_E7; the
- * parameters added since take their defaults: the SLICER OFF, every matrix slot OFF). Their steps get no
- * hits; on a DRUM track their notes that are a lane's note become its hits (proj_grid: the same notes and
- * velocities play, the grid shows them as its own).
- * Their engine bytes are kept: formats 1 and 2 had engines 0..7 (ANALOG .. WHEEL), and the engines
- * added since (SLICE 8, ..) were appended, no index moved.
- *
- * Track 4 was the GM drum part until 1.0 (no engine: its byte 0; its level and reverb send in the
- * globals G_DRLVL / G_DRREV, which are inert now). A project says which it has in `parts`: NPART
- * when written since, 0 before (a reserved byte, always written 0: the format and its size did not
- * change). proj_drums_to_part turns such a track 4 into a DRUM part with its default kit (the GM map, so
- * its drum steps still play drums; until 1.0.2 it was the SAMPLE engine's PERC set), keeping its steps, its
- * pattern and mix parameters (LEN DIV SWING GATE, PAN MUTE), its SLICER, and the drum level and reverb send
- * as LEVEL and REV.
- *
- * The byte `phys` (reserved, always 0, before 1.0) says what a PHYS track's MODEL means: 0 MODEL 2 was
- * DUST (dropped: it loads as MODAL bowed, eng_phys.c phys_legacy); 1 MODEL 4 was DRUM (the kit is the DRUM
- * engine since: such a track loads as DRUM, core.h drum_from_phys); 2 (PROJ_PHYS) as today. proj_phys.
- *
- * Format 8 ("FUN8", written since 1.0) = FUN7 with each track's FM6 patch (eng_fm6.c, the 128-byte packed
- * record, 4 x 128 bytes just before the name): a project is self-contained. On load an FM6 track's SLOT shows F n
- * when its patch is that factory one, else OWN (eng_fm6.c fm6_adopt; a stored 9..40, the B slots of the patch bank
- * before 1.0.3 or of 1.4.1's voice bank, is OWN too: the project has the patch).
- * It is 3584 bytes (FUN7: 3388); FUN7 is read (its tracks get the init patch). The retained cache (proj_slot,
- * .noinit) grew with it: after an update its slot 1 still starts with a FUN7 record, which is read; the other
- * slots fail their hash and come back from flash (persist_boot).
- *
- * Format 9 ("FUN9", written since 1.1) = FUN8 with 64 more bytes: the DRUM lane levels (P_LN0..P_LN7, #97) made
- * P_COUNT 99 (P_E0 91), and 68 + 4 x (99 + 2 + 576) + chain + motion = 3072 no longer fit before FUN8's patches
- * (3056). 3648 bytes, the patches at PROJ_FM6_OFF (3120): 48 spare, room for 12 more track parameters. FUN8 (3584,
- * its 91 parameters mapped by count: the lane levels 100 %) and FUN7 are read; the retained cache grew again (its
- * slot 1 still starts with the older record, read as above).
- *
- * Format 10 ("FUNA", written since 1.2; FUN10 in the docs) = FUN9 laid out the same way, 3840 bytes (a whole storage
- * object, storage.c ST_PAYLOAD_MAX), for four changes made together:
- *   - P_COUNT 104 (P_E0 96): LFO 2's SYNC TRIG POL, QUANTIZE and SPREAD (P_LSYNC .. P_SPRD) before the engine
- *     values. SPREAD (#148) came before FUN10's release, into the spare bytes below: a FUN10 of a 1.2 build before
- *     it holds 103 (byte 66) and loads by count (SPREAD 0, its engine values and their motion moved up by one);
- *   - 128 motion records (core.h MOTION_MAX, 64 before), 3 bytes each (place, id, the value as an int8_t: the values
- *     were always -64..127): the block is 4 + 384 = 388 bytes (FUN9's 260 held 64 of 4 bytes);
- *   - each step's NUDGE (core.h step_nudge, -8..+7) in bit 7 of its four note bytes (bit j in note j), bits every
- *     earlier format wrote 0: the step stays 9 bytes;
- *   - the song's sections (core.h chain_row_t): a slot per track (A..D or "-") and the repeats, 5 bytes a row: the
- *     chain is 4 + 16 x 5 = 84 bytes (FUN6..FUN9: 36, rows {slot, repeat}, chain_v9_t; they load as sections with the
- *     four tracks on the row's slot, song_chain.c chain_from_v9: the same song).
- * 68 + 4 x (104 + 2 + 576) + chain + motion = 3268; the patches at PROJ_FM6_OFF (3312): 44 spare, room for 11 more
- * track parameters. 1.5 took seven of them (no format change, FUN10 as it was): the INSERT (P_ITYPE .. P_IMIX, 96..100),
- * ANALOG's filter TYPE (P_FTYPE, 101) and ENV SYNC (P_ESYNC, 102), before the engine values (P_COUNT 111, P_E0 103; 16
- * spare, room for 4). A FUN10 of 1.2 .. 1.4 (104) loads by count: the INSERT OFF, TYPE LP, ENV SYNC OFF (as they
- * played), its engine values and their motion moved up by seven.
- * Firmware 1.2 .. 1.4 refuses a FUN10 of more parameters than its own (np > P_COUNT): a 1.5 project shows EMPTY there. FUN9 / FUN8 / FUN7 load as before (their 64 records of 4 bytes read by proj_motion_v9, every
- * step's nudge 0: the timing they always had; parameters mapped by count, the four new ones at their defaults:
- * SYNC OFF, TRIG NOTE, POL BI, QUANTIZE ON, SPREAD 0, which play as before 1.2), and so do FUN6..FUN1. Firmware before 1.2
- * refuses a FUN10 everywhere (its size and magic are no format it knows): a slot holding one shows EMPTY there (the
- * flash copy stays until that slot is saved over), a backup PUT of one is refused (rc 1), the retained RAM copy of
- * one fails its checks.
- *
- * Parameter locks (1.1, core.h MOTION_LOCK) are motion records with bit 7 of their id byte set (P_COUNT 99 < 128:
- * the bit is free): no byte moved for them, and every project before 1.1 has none. FUN9 holds them. A FUN8 / FUN7
- * record of a 1.1 development build may hold some: on load their ids move to today's positions as the others do,
- * the lock bit kept (proj_motion_ids). Firmware before 1.1 refuses a project that holds a lock (an id out of its
- * range), as with RATCH below; FUN9 it refuses anyway (a newer format).
- *
- * A step's RATCH (core.h SF_RATCH, the hits - 1, 0..3) is in bit 7 of its velocity byte (bit 0) and of its chance
- * byte (bit 1) of FUN7 / FUN8: bits every firmware before wrote 0, so every older project loads with its steps x1,
- * and no format or size changed. Firmware before RATCH refuses a project that holds a ratchet (those bytes out
- * of their range), as it would a newer format. FUN6..FUN1 have none (x1).
- *
- * DIGITAL (engine 1) was retired in 1.0 (fm4_convert.c): a track of it, in any format, loads as FM6 with the
- * patch converted from its values as the track's own (proj_fm4, on every import; the stored record keeps what it
- * holds until saved again). Its motion events on the EDIT or OP ENV values are dropped.
- *
- * SAMPLE's SET 4, PERC (the GM drum kit), was retired after 1.0.2: a SAMPLE track that selects it, in any
- * format, loads as the DRUM engine with its default kit (core.h drum_from_perc: the same GM key map, its steps
- * as they are, the rest of its sound kept; proj_perc, on every import as proj_fm4). Its motion events on the
- * EDIT values are dropped (SAMPLE's meanings, not DRUM's).
- *
- * FM1-Four: only OB-Z WAVE ACID DRIFT (engines 0..3) load; a track of another engine number refuses the project
- * (proj_engines_ok). The engine conversions above (the GM drum part, PHYS, DIGITAL, SAMPLE PERC, the DRUM grid) are
- * gone with their engines: a step's hits are written 0 and not read, the FM6 patches' bytes (PROJ_FM6_OFF) are
- * written 0 and not read. The format itself is rewritten in Task 1.2.
+ * FM1-Four: FOR4 is the only project format (PROJ_MAGIC "FOR4", PROJ_STORE_SIZE bytes): P_COUNT biased-byte parameters
+ * per track, engine byte 0..3 (OB-Z WAVE ACID DRIFT), 9-byte steps, the song chain, 128 motion records, the MIDI IN
+ * bytes, the retired FM6 area (written 0, not read), the 12-byte name, an FNV-1a hash. Every Felucca format (FUN1..FUN10)
+ * is refused, not converted: an engine byte 1..3 of a Felucca project would otherwise load as another machine.
  *
  * Built on the Mac too (tests/project_test.c, -DPROJ_HOST): the part above the #ifndef
  * PROJ_HOST needs core.h, params.c (TP) and engines.c. */
 #define PROJ_MAGIC 0x34524F46u                 /* "FOR4": 111 parameters, 128 motion records, nudges (FM1-Four, the only format) */
 #define PROJ_DEF_SOUND 0xFFu                   /* preset byte: the track's power-on sound, no steps */
 #define PROJ_PHYS 2u                           /* project_t.phys: PHYS without DUST and DRUM (see the top) */
-#define PROJ_NAME_LEN 12u                      /* the name: FUN7 bytes PROJ_NAME_OFF.. (the reserved tail's end) */
-#define PROJ_FM6_PACKED 128u                   /* a track's retired FM6 patch area (FUN8..FUN10), written 0 */
+#define PROJ_NAME_LEN 12u                      /* the name: bytes PROJ_NAME_OFF.. (the reserved tail's end) */
+#define PROJ_FM6_PACKED 128u                   /* a track's retired FM6 patch area, written 0 */
 typedef struct {                               /* one track */
     int16_t p[P_COUNT];
     uint8_t engine, preset;
@@ -126,17 +35,14 @@ typedef struct {
     char name[PROJ_NAME_LEN];                  /* the project's name: upper-case ASCII 32..126, 0-padded; "" = none */
     uint32_t sum;
 } project_t;
-/* Serialized FUN7 keeps the retained cache's exact extent. Params are biased
- * bytes, steps pack n/time/flags. Reserved tail is zero and covered by hash.
- * The tail's last 12 bytes (PROJ_NAME_OFF, just before the hash) are the project's name since 1.0:
- * ASCII 32..126 (upper case), 0-padded, all 0 = no name ("PROJECT A"). Firmware before wrote them 0 and
- * never reads them, so every FUN7 file stays valid both ways; FUN6..FUN1 imports get no name.
- * FUN8: the same, 3584 bytes, the four packed FM6 patches at PROJ_FM6_OFF (before the name); 16 bytes of the
- * reserved tail were left for parameters added later. FUN9: the same, 3648 bytes (see the top). */
-#define PROJ_STORE_SIZE 3840u                  /* FUN10: a whole storage object (storage.c ST_PAYLOAD_MAX) */
+/* Serialized FOR4 keeps the retained cache's exact extent. Params are biased bytes, steps pack n/time/flags. The reserved
+ * tail is zero and covered by the hash. The tail's last 12 bytes (PROJ_NAME_OFF, just before the hash) are the project's
+ * name: ASCII 32..126 (upper case), 0-padded, all 0 = no name. The four packed FM6 patches' area (PROJ_FM6_OFF, before
+ * the name) is retired: written 0, not read; 16 bytes of the reserved tail are left for parameters added later. */
+#define PROJ_STORE_SIZE 3840u                  /* FOR4: a whole storage object (storage.c ST_PAYLOAD_MAX) */
 #define PROJ_NAME_OFF (PROJ_STORE_SIZE - 4u - PROJ_NAME_LEN)
 #define PROJ_FM6_OFF (PROJ_NAME_OFF - NTRK * PROJ_FM6_PACKED)
-/* 1.5.5 (#202): MIDI IN TRACK, the last 3 of FUN10's 16 spare bytes (just before the patches: the parameters a later
+/* 1.5.5 (#202): MIDI IN TRACK, the last 3 of FOR4's 16 spare bytes (just before the patches: the parameters a later
  * version adds grow from the other end, 13 bytes, 3 more track parameters). 24 bits LE: bits 5k..5k+4 track k's channel
  * as song.mch holds it (0..15 its distance up from channel k + 1, 16 OMNI, 17 OFF; 18..31 read as 0), bit 23 set: MIDI IN
  * is TRACK. Then the globals' G_ROUTE holds the block TRACK falls back to (proj_route_fallback: the block its four
@@ -144,7 +50,7 @@ typedef struct {
  * there as that block. Every project before has them 0: channels 1..4, MIDI IN as its G_ROUTE says */
 #define PROJ_MIDI_OFF (PROJ_FM6_OFF - 3u)
 typedef union { uint32_t align; uint8_t raw[PROJ_STORE_SIZE]; } project_store_t;
-_Static_assert(G_COUNT == 27u, "FUN7 globals retain original IDs");
+_Static_assert(G_COUNT == 27u, "FOR4 globals retain the original IDs");
 _Static_assert(sizeof(project_store_t) == 3840u, "FOR4 storage size");
 project_store_t proj_slot[4] __attribute__((section(".noinit")));
 
@@ -359,7 +265,7 @@ static void proj_bound(project_t *q)
 }
 
 #if FELUCCA_FLASH
-/* slot from flash into RAM (format 7, or format 6 / 5 / 4 / 3 / 2 / 1 converted) */
+/* slot from flash into RAM (a FOR4 project; anything else leaves the slot empty) */
 static void proj_fetch(uint32_t slot)
 {
     project_store_t *q = &proj_slot[slot & 3u];

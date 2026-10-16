@@ -42,7 +42,7 @@
 #                   note's time, QUANTIZE ON plays as before, OFF plays the nudges late and early once a pass, never twice
 #                   with live notes, RATCH on its start, nudges 0 play the same either way, a tempo change of the external
 #                   clock, SEQ > AUTOMATION's QUANTIZE and NUDGE rows, STEP steps held + PRESETS), 128 motion records, FUN10 round trip, FUN9 /
-#                   FUN8 / FUN7 as 1.1 / 1.0 wrote them (tests/old_pack.h) loading exactly, user presets of 99 / 103.
+#                   user presets of 99 / 103 (Felucca FUN9 / FUN8 / FUN7 are refused in FOUR: project_test.c).
 # RATCH (tests/ratchet_test.c): a step's ratchet (x1..x4): its parts in the sequencer (equal, gated, chords
 #                   whole, one chance roll, swing, no slide or tie out, STOP), FUN8 round trip and older projects x1,
 #                   user preset patterns, SEQ > AUTOMATION's RATCH rows and the roll drawing.

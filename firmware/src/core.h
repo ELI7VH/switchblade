@@ -82,8 +82,7 @@ enum {                          /* global parameters */
                                  * unused (ids are fixed by the formats and the protocol) */
     G_CLRSEQ, G_INITSND,
     G_RTYPE,                    /* REVERB TYPE: 0 ROOM, 1 SPRING, 2 HALL (1.2, the power-on default) (fx.c). Was
-                                 * G_DRCH, the GM drum part's MIDI channel (inert since 1.0, never read); projects
-                                 * of formats before FUN7 load it as ROOM (project.c proj_rtype_room) */
+                                 * G_DRCH, the GM drum part's MIDI channel (inert since 1.0, never read); */
     G_DRLVL, G_DRREV,           /* inert (label "-", on no page): the GM drum part they set is gone; kept
                                  * because the ids and G_COUNT are fixed by the formats and the protocol (nothing
                                  * reads them) */
@@ -179,13 +178,9 @@ typedef struct {                 /* acid-style step: up to 4 notes (POLY), time,
     uint8_t time;                /* ST_NOTE / ST_TIE / ST_REST */
     uint8_t flags;               /* SF_ACCENT | SF_SLIDE | SF_RATCH */
     uint8_t vel;
-    uint8_t hit, acc;            /* the retired DRUM grid's hits: kept for the formats until Task 1.2, never read */
+    uint8_t hit, acc;            /* the retired DRUM grid's hits: kept in the struct, never read or stored */
     uint8_t probability;         /* 0 = legacy 100%; 1..100 = percent, 101 = silent; 1.5.5: 102..112 a condition */
 } step_t;
-typedef struct {                 /* a step as formats 1..4 (projects to FUN4) stored it: no hits */
-    uint8_t note[4];
-    uint8_t n, time, flags, vel;
-} step8_t;
 
 /* Probability keeps zero-initialized and legacy patterns at 100%. */
 /* 1.5.5 (#209): CONDITIONS, in the chance byte's free values (no format change): COND_FIRST + c - 1 is condition c

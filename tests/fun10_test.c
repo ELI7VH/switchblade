@@ -14,9 +14,8 @@
  *              rows (+ ADD NUDGE +4/16, KNOB 4 -8..+7, KNOB 2 the step, EDIT 0, SAVE held undoes; "QUANTIZE IS ON"
  *              while it is), and on STEP steps held + the PRESETS knob (let go: the cursor).
  *   MOTION     128 records shared by the four tracks, all played.
- *   FORMATS    FUN10 round trip (nudges, 128 records, the four parameters), FUN9 / FUN8 / FUN7 as 1.1 / 1.0 wrote
- *              them load as before (tests/old_pack.h), a FUN9 claiming more than 64 records or a nudge bit refused, a
- *              user preset's pattern keeps no nudge (its bit 4 is the tie), user presets of 99 and 103 parameters.
+ *   FORMATS    FOR4 round trip (nudges, 128 records, the four parameters); the Felucca formats are refused
+ *              (project_test.c); a user preset's pattern keeps no nudge (its bit 4 is the tie), user presets of 99 and 103 parameters.
  * Built and run by tests/run_tests.sh. */
 #define UI_TEST_NO_MAIN 1
 #include "ui_test.c"

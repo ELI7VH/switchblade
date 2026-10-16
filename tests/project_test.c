@@ -101,6 +101,11 @@ int main(void)
         static uint8_t buf[PROJ_STORE_SIZE];
         memset(buf, 0, sizeof buf);
         buf[0] = 0x41; buf[1] = 0x4E; buf[2] = 0x55; buf[3] = 0x46;          /* "FUNA" little-endian */
+        buf[4] = 0x00; buf[5] = 0x0F;                                         /* size 3840 */
+        {
+            uint32_t sum = proj_hash(buf, PROJ_STORE_SIZE - 4u);               /* a valid hash */
+            memcpy(buf + PROJ_STORE_SIZE - 4u, &sum, 4);
+        }
         bad += check("a Felucca FUN10 project must be refused", !proj_import(&c, buf, sizeof buf));
     }
     /* a Felucca FUN10 with the engine bytes 1..3 (the ones that could be misread) and a correct hash */
