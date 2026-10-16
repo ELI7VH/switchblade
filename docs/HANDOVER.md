@@ -13,7 +13,7 @@ VOID FOUR is a fork of the Felucca 1.6 firmware for the M-VAVE FM-1 (a JieLi AC7
 | 2 | ACID | `ENG_ACID`, `ENGI_ACID` | `firmware/src/eng_acid.c` | **placeholder**: borrows OB-Z's `analog_render_f`; Phase 5 makes it a real 303 |
 | 3 | DRIFT | `ENG_DRIFT`, `ENGI_DRIFT` | `firmware/src/eng_drift.c` | **placeholder**: same; Phase 6 makes it a ZDF ladder |
 
-- **Repo:** `/Users/ollie_nicklin/Documents/Projects/VOID SYNTH/FM1-Four`. It is a git repo on branch `master`, and the user has authorised committing directly.
+- **Repo:** `/Users/ollie_nicklin/Documents/Projects/VOID SYNTH/FM1-Four`. It is a git repo on branch `main` (there is no `master`; the handover said `master` in error, corrected 2026-10-16), and the user has authorised committing directly.
 - **Untouched originals:** `../Felucca-main` is the original tree with the VOID engine. Read it, never edit it. `../Felucca-main.bak` is older still.
 
 ## 2. Documents to read
