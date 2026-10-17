@@ -129,6 +129,6 @@ cpu/DRIFT/29_ANALOG_BELL 724
 cpu/DRIFT/30_DRIFT_CHORDS 742
 cpu/DRIFT/31_STRING_KEYS 727
 cpu/mix/idle 321
-cpu/mix/4parts_light 1787
+cpu/mix/4parts_light 2292
 cpu/mix/4parts_full 1705
 cpu/mix/idle_click 343
