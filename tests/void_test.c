@@ -1,17 +1,20 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* Host test of the VOID engine (eng_void.c), same sources as the firmware (hostsim.c):
  *   build/host/void_test [DEMO_DIR]      (run_tests.sh builds and runs it; demos in build/void_demo/)
- * 1. the engine: number 1 (ENGI_WAVE, "WAVE"), its knobs, its presets.
+ * 1. the engine: number 1 (ENGI_WAVE, "WAVE"), its knobs, its presets; and that loading a preset in the
+ *    harness applies WAVE_PX (void_track_loaded) as ui.c apply_preset_to does: TYPE, voice, detune,
+ *    spread, glide, LFO routing, filter envelope, matrix.
  * 2. pitch: SINE at A4 is 440 Hz within the plugin's movement (drift +-1.5 cents, micro-LFO up to 2.5); OSC2 +12
  *    alone an octave up; the fine steps (-12c) as many cents.
  * 3. band-limited: SAW, SQUARE and SPECTRAL (its top position) at C8: what is not a harmonic below -30 dB (the
  *    linear read of a level at 4 samples per cycle of its top harmonic; the plugin aliases at ~-10 dB here).
  * 4. bounded: every table x every filter TYPE at RES 127 and DRV 127, CUT 0 / 127, C1 / C4 / C8, POS 0 / 127: no
  *    wrapped sample (a jump over full scale), no DC; a TYPE and table change while notes sound.
- * 5. DC: BRASS LEAD held for 2 s at its own POS, the engine's own output (what feeds the sends, ahead of the
+ * 5. DC: every preset held for 2 s at its own POS, the engine's own output (what feeds the sends, ahead of the
  *    master's DC blocker): |mean| under 1 % of the peak. And the blocker's range against the clipper's table.
  * 6. the presets: each sounds, its loudest 0.2 s of a held chord (a pluck decays, a pad swells) near OB-Z's SAW
- *    LEAD (-18 .. +6 dB: the plugin's LP24 at a high RES loses its pass band, as a ladder does).
+ *    LEAD (-18 .. +6 dB: the plugin's LP24 at a high RES loses its pass band, as a ladder does), judged in the
+ *    loudest of four registers (C3 .. C6: an HP- or BP-voiced preset is quiet below its pass band).
  * 7. the cost: each preset at WAVE's voice cap against 8 voices of OB-Z RAVE (instructions; the reference was PHASE
  *    WIRE, retired, whose cost was within 2 % of OB-Z RAVE's on the host).
  * 8. demos (DEMO_DIR): each preset playing a phrase, a POS sweep per table.
@@ -31,6 +34,31 @@ static void check(const char *what, int ok)
 {
     printf("void: %-90s %s\n", what, ok ? "ok" : "FAIL");
     bad += !ok;
+}
+
+/* an engine or a preset a test names, by name. Not found is a failure, not index 0: leaving the index
+ * at 0 would silently retarget the test at another sound if one were renamed, and it would still pass. */
+static uint32_t engine_named(const char *name)
+{
+    uint32_t e;
+    char msg[160];
+    for (e = 0; e < NENGINES; e++)
+        if (str_eq(ENGINES[e]->name, name))
+            return e;
+    snprintf(msg, sizeof msg, "a test names engine \"%s\": it is there", name);
+    check(msg, 0);
+    return 0;
+}
+static uint32_t preset_named(uint32_t e, const char *name)
+{
+    uint32_t k;
+    char msg[160];
+    for (k = 0; k < ENGINES[e]->npresets; k++)
+        if (str_eq(ENGINES[e]->presets[k].name, name))
+            return k;
+    snprintf(msg, sizeof msg, "a test names %s's preset \"%s\": it is there", ENGINES[e]->name, name);
+    check(msg, 0);
+    return 0;
 }
 
 #define NREC (FS * 2u)
@@ -136,6 +164,47 @@ static void test_engine(void)
     check("engine 1 is WAVE, two EDIT pages of four (TBL1 POS TBL2 MIX, CUT RES OSC2 DRV), presets",
           str_eq(e->name, "WAVE") && str_eq(e->edit[0].label, "TBL1") && str_eq(e->edit[4].label, "CUT") &&
           str_eq(e->edit[6].label, "OSC2") && str_eq(e->edit[7].label, "DRV") && e->npresets >= 5u && e->mem);
+}
+
+/* ----------------------------------------------------------------- 1b --- */
+/* The harness must load a preset the way the firmware does (ui.c apply_preset_to -> void_track_loaded).
+ * WAVE_PX holds what a preset_t cannot: the filter TYPE, voice mode, detune, spread, glide, LFO routing,
+ * filter envelope and matrix. Checked on every preset against WAVE_PX itself rather than a copy of it,
+ * so a row that moves moves the expectation with it, and in the same terms void_track_loaded uses
+ * (detune and the LFO block are "0 = leave the default", voice only forces UNISON). */
+static void test_px(void)
+{
+    uint32_t k, short_n = 0;
+    char msg[200];
+    for (k = 0; k < NELEM(WAVE_PX); k++) {
+        const void_px_t *x = &WAVE_PX[k];
+        const preset_t *pr = &ENGINES[ENGI_WAVE]->presets[k];
+        const track_t *t = &trk[0];
+        uint32_t s, miss = 0;
+        fresh(ENGI_WAVE, k);
+        miss += t->p[P_FTYPE] != x->ftype;
+        miss += t->p[P_VOICE] != (x->voice == V_UNISON ? V_UNISON : pr->mono ? V_LEGATO : V_POLY);
+        miss += x->detune && t->p[P_DETUNE] != (int16_t)(x->detune - 1u);
+        miss += t->p[P_SPRD] != x->spread;
+        miss += t->p[P_GLIDE] != x->glide;
+        if (x->lfo[0])
+            miss += t->p[P_LRATE] != x->lfo[1] || t->p[P_LWAVE] != x->lfo[2] ||
+                    t->p[P_LTRIG] != x->lfo[3] || t->p[P_LFADE] != x->lfo[4];
+        miss += t->p[P_FM1_LEVEL] != x->fe[0] || t->p[P_FM1_ATK] != x->fe[1] || t->p[P_FM1_DEC] != x->fe[2] ||
+                t->p[P_FM1_SUS] != x->fe[3] || t->p[P_FM1_REL] != x->fe[4];
+        for (s = 0; s < 4u; s++)
+            miss += t->p[P_M1SRC + 3u * s] != x->mx[s][0] || t->p[P_M1DST + 3u * s] != x->mx[s][1] ||
+                    t->p[P_M1AMT + 3u * s] != x->mx[s][2];
+        if (miss) {
+            short_n++;
+            printf("void: WAVE_PX not applied: %-12s TYPE %d (want %u), SPRD %d (want %u), FLT ENV LVL %d (want %u), "
+                   "DTUNE %d, %u of 9 field groups off\n", pr->name, t->p[P_FTYPE], x->ftype, t->p[P_SPRD], x->spread,
+                   t->p[P_FM1_LEVEL], x->fe[0], t->p[P_DETUNE], miss);
+        }
+    }
+    snprintf(msg, sizeof msg, "WAVE_PX: a host-loaded preset has its TYPE, voice, detune, spread, glide, LFO, FLT ENV "
+             "and matrix (%u of %u presets short)", short_n, (unsigned)NELEM(WAVE_PX));
+    check(msg, short_n == 0u);
 }
 
 /* ------------------------------------------------------------------ 2 --- */
@@ -291,22 +360,34 @@ static double engine_dc(uint32_t pi, uint32_t note)
     return pk ? fabs((double)sum / (double)(2u * FS)) / (double)pk : 0.0;
 }
 
+/* Every preset, not one: up to Task 4.3 this held BRASS LEAD only, and the harness rendered it LP24
+ * because it never applied WAVE_PX -- the firmware ships it ftype 2 (VF_HP), which removes DC by itself.
+ * The one preset that was named was therefore the one that proved nothing. The offset the drive shaper
+ * leaves is per preset, so the whole set is the claim: 8 of the 32 were over 1 % before void_dc. */
 static void test_dc(void)
 {
-    uint32_t k, pi = 0;
-    double r;
+    uint32_t k, over = 0, worst_k = 0;
+    double worst = 0;
     char msg[160];
-    for (k = 0; k < ENGINES[ENGI_WAVE]->npresets; k++)
-        if (str_eq(ENGINES[ENGI_WAVE]->presets[k].name, "BRASS LEAD"))
-            pi = k;
-    r = engine_dc(pi, 60);
-    printf("void: BRASS LEAD held 2 s: |mean| / peak %.5f\n", r);
-    snprintf(msg, sizeof msg, "DC: BRASS LEAD's engine output, |mean| under 1 %% of the peak (%.5f)", r);
-    check(msg, r < 0.01);
+    for (k = 0; k < ENGINES[ENGI_WAVE]->npresets; k++) {
+        double r = engine_dc(k, 60);
+        if (r >= 0.01)
+            printf("void: DC over 1 %%: %-12s |mean| / peak %.5f\n", ENGINES[ENGI_WAVE]->presets[k].name, r);
+        over += r >= 0.01;
+        if (r > worst) {
+            worst = r;
+            worst_k = k;
+        }
+    }
+    printf("void: every WAVE preset held 2 s: worst |mean| / peak %.5f (%s)\n", worst,
+           ENGINES[ENGI_WAVE]->presets[worst_k].name);
+    snprintf(msg, sizeof msg, "DC: every preset's engine output, |mean| under 1 %% of the peak (worst %.5f, %s)",
+             worst, ENGINES[ENGI_WAVE]->presets[worst_k].name);
+    check(msg, over == 0u);
 }
 
 /* The soft clipper reads VOID_SOFT[k] and [k + 1] for k = (|y| - VOID_CLIP_THR) >> 8. Up to Task 4.2 the clamp
- * at VOID_OUT_LEVEL kept |y| at 62216 and that index in range on its own; the DC blocker sits after it and has
+ * at VOID_OUT_LEVEL kept |y| at 62224 and that index in range on its own; the DC blocker sits after it and has
  * a peak gain of 2, so its own recurrence leaves that range and void_dc clamps its return to VOID_CLIP_MAX.
  * Both halves are pinned here: the recurrence does overshoot (so the clamp is not decoration), and what
  * void_dc returns stays inside the table (so dropping the clamp fails here instead of reading past VOID_SOFT).
@@ -337,18 +418,18 @@ static void test_dc_range(void)
 }
 
 /* ------------------------------------------------------------------ 6 --- */
-static double phrase_rms(uint32_t e, uint32_t pi)
+static double phrase_rms(uint32_t e, uint32_t pi, uint32_t root)
 {
     track_t *t = &trk[0];
     double s = 0;
     uint32_t i;
     fresh(e, pi);
     t->p[P_DIST] = t->p[P_CHOR] = t->p[P_DLY] = t->p[P_REV] = 0;
-    trk_note_on(t, 48, 100);
-    trk_note_on(t, 55, 100);
+    trk_note_on(t, root, 100);
+    trk_note_on(t, root + 7u, 100);
     blocks(FS / CTL);
-    trk_note_off(t, 48);
-    trk_note_off(t, 55);
+    trk_note_off(t, root);
+    trk_note_off(t, root + 7u);
     {                                                  /* the loudest 0.2 s window (steps of 10 ms) */
         double best = 0;
         uint32_t w;
@@ -362,20 +443,32 @@ static double phrase_rms(uint32_t e, uint32_t pi)
     }
 }
 
+/* The same chord an octave at a time from C3 to C6, judged where the preset is loudest. One low chord
+ * was enough until Task 4.3, when the harness rendered every WAVE preset LP24 (WAVE_PX unapplied). With
+ * the real filter TYPEs a preset voiced around its pass band is quiet three octaves below it -- GLASS
+ * SHIMR (HP at ~1 kHz) reads -28 dB at C3 and -13 at C6, CYBER ARP (BP at ~2 kHz) -28 at C3 and -15 at
+ * C5 -- which is the voicing, not a fault. The loudest register is the honest yardstick for both ends:
+ * under -18 dB everywhere means the preset does not sound, over +6 dB anywhere means it blares. */
 static void test_presets(void)
 {
-    uint32_t k, ok = 1, a = 0;
-    double ref;
-    for (k = 0; k < ENGINES[0]->npresets; k++)
-        if (str_eq(ENGINES[0]->presets[k].name, "SAW LEAD"))
-            a = k;
-    ref = phrase_rms(0, a);
+    static const uint8_t ROOT[4] = {48, 60, 72, 84};
+    uint32_t k, r, ok = 1, a = preset_named(0, "SAW LEAD");
+    double ref = phrase_rms(0, a, ROOT[0]);
     for (k = 0; k < ENGINES[ENGI_WAVE]->npresets; k++) {
-        double r = phrase_rms(ENGI_WAVE, k), db = 20 * log10(r / ref + 1e-12);
-        printf("void: preset %-12s %+5.1f dB against OB-Z SAW LEAD\n", ENGINES[ENGI_WAVE]->presets[k].name, db);
-        ok &= db > -18.0 && db < 6.0;
+        double db[4], best = -999;
+        uint32_t at = 0;
+        for (r = 0; r < 4u; r++) {
+            db[r] = 20 * log10(phrase_rms(ENGI_WAVE, k, ROOT[r]) / ref + 1e-12);
+            if (db[r] > best) {
+                best = db[r];
+                at = r;
+            }
+        }
+        printf("void: preset %-12s C3 %+5.1f C4 %+5.1f C5 %+5.1f C6 %+5.1f dB against OB-Z SAW LEAD (loudest C%u)\n",
+               ENGINES[ENGI_WAVE]->presets[k].name, db[0], db[1], db[2], db[3], 3u + at);
+        ok &= best > -18.0 && best < 6.0;
     }
-    check("presets: each sounds, its loudest 0.2 s within -18 .. +6 dB of OB-Z's SAW LEAD", ok);
+    check("presets: each sounds, its loudest 0.2 s of C3 / C4 / C5 / C6 within -18 .. +6 dB of OB-Z's SAW LEAD", ok);
 }
 
 /* ------------------------------------------------------------------ 7 --- */
@@ -413,17 +506,14 @@ static double cost(uint32_t e, uint32_t pi)
 static void test_cost(void)
 {
     double a, worst = 0;
-    uint32_t k, e, pw = 0, ph = 0;
+    uint32_t k, ph, pw;
     char msg[200];
     if (!instr_now()) {
         printf("void: cost: no instruction counter on this host, skipped\n");
         return;
     }
-    for (e = 0; e < NENGINES; e++)                     /* OB-Z RAVE: the reference (PHASE WIRE's cost, retired) */
-        if (str_eq(ENGINES[e]->name, "OB-Z"))
-            for (k = 0; k < ENGINES[e]->npresets; k++)
-                if (str_eq(ENGINES[e]->presets[k].name, "RAVE"))
-                    ph = e, pw = k;
+    ph = engine_named("OB-Z");                         /* OB-Z RAVE: the reference (PHASE WIRE's cost, retired) */
+    pw = preset_named(ph, "RAVE");
     a = cost(ph, pw);
     for (k = 0; k < ENGINES[ENGI_WAVE]->npresets; k++) {   /* (cost() asks for 8 notes: the cap plays VOID_POLY) */
         double c = cost(ENGI_WAVE, k);
@@ -471,8 +561,7 @@ static void demos(const char *dir)
     char nm[64];
     for (k = 0; k < ENGINES[ENGI_WAVE]->npresets; k++) {
         track_t *t = &trk[0];
-        fresh(ENGI_WAVE, k);
-        void_track_loaded(t);
+        fresh(ENGI_WAVE, k);                               /* (host_preset applies WAVE_PX since Task 4.3) */
         for (i = 0; i < (t->p[P_ATK] > 80 ? 2u : 8u); i++) {   /* (a slow attack: two long chords) */
             trk_note_on(t, PHR[i] + (t->p[P_VOICE] == V_POLY ? 12u : 0u), 100);
             if (t->p[P_VOICE] == V_POLY)
@@ -643,6 +732,7 @@ int main(int argc, char **argv)
         if (getenv("VOID_PROF"))                           /* VOID_PROF=1: the cost by feature, and next to the heaviest */
         return prof_main();                            /* presets of the other engines */
     test_engine();
+    test_px();
     test_pitch();
     test_bandlimit();
     test_bounded();

@@ -148,13 +148,21 @@ The midi_control, project and other tests compile the same way. Take the exact l
 - **CPU checks:**
   - Add new render functions to `tests/target_budget.py FUNCS`.
   - Add their entries to `cpu_baseline.txt`, which is how new entries get added. Never overwrite existing lines.
+    One exception, taken once: Task 4.3 rewrote the 32 `cpu/WAVE/` lines, because until then
+    `tests/hostsim.c` never applied `WAVE_PX`, so those figures measured a configuration the device
+    never plays. Every other line was left alone. This is not a precedent.
   - The target is a full four-track pattern at ≤ 80% of one core on hardware.
 
 ## 7. Known issues backlog (log; triage at the final review)
 
-1. ~~**WAVE has no DC blocker.**~~ Done, Task 4.2: a one-pole blocker per voice (`eng_wave.c void_dc`,
-   R 0.995) between the voice's level and the soft clipper; BRASS LEAD is back to REV 25. The only
-   deliberate departure from the plugin in the ported signal path.
+1. ~~**WAVE has no DC blocker.**~~ Done, Task 4.2: a one-pole blocker per voice (`eng_wave.c void_dc`)
+   between the voice's level and the soft clipper; BRASS LEAD is back to REV 25. The only deliberate
+   departure from the plugin in the ported signal path. Task 4.3 moved its corner from ~35 Hz
+   (R 0.995) to ~10 Hz (R 0.9985, `VOID_DC_SH` 10): DC sits at 0 Hz either way, and C1 now loses
+   0.4 dB instead of 3.3 dB, which 10 of WAVE's 32 presets (its BASS category) were paying.
+   Measured with the blocker off and the harness corrected (4.3), 8 of the 32 presets hold over 1 %
+   DC at the engine output (worst `NEURO WOBBLE` 0.054); BRASS LEAD is not one of them -- it ships
+   `ftype = 2` (HP), so the 4.2 evidence for it was an artefact of the harness, not of the engine.
 2. **MIDI OUT minor findings:**
    - An owed note-off goes out on the current channel. Fix by adding `mout_och[k]`.
    - The owed note-off in `mout_note` uses `mout_send` instead of `mout_try`.

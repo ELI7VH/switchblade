@@ -93,6 +93,9 @@ static void host_preset_values(track_t *t, uint32_t e, uint32_t pi, const preset
     uint32_t i;
     t->eng_req = (uint8_t)e;
     t->preset = (uint8_t)pi;
+    for (i = 0; i < P_E0; i++)                    /* the rest of the sound to its defaults first, as */
+        if (!param_kept(i))                       /* apply_preset_to does: what the last preset set */
+            t->p[i] = TP[i].def;                  /* (WAVE_PX below) must not carry into this one */
     for (i = 0; i < 8u; i++)
         t->p[P_E0 + i] = p->e[i];
     t->p[P_ATK] = p->env[0];
@@ -103,6 +106,12 @@ static void host_preset_values(track_t *t, uint32_t e, uint32_t pi, const preset
     t->p[P_VOICE] = p->mono ? V_LEGATO : V_POLY;
     for (i = 0; i < 4u; i++)
         t->p[P_DIST + i] = (int16_t)(p->fx[i] ? p->fx[i] - 1 : FX_DEF[i]);
+    void_track_loaded(t);                         /* as ui.c apply_preset_to: WAVE's filter TYPE, voice mode,
+                                                   * detune, spread, glide, LFO routing, filter envelope and
+                                                   * matrix (WAVE_PX). Called, not copied: one source of truth.
+                                                   * Its "0 = keep the default" fields want the track's
+                                                   * parameters at their defaults, as host_tracks_init leaves
+                                                   * them and as apply_preset_to restores them first. */
 }
 static void host_preset_req(track_t *t, uint32_t e, uint32_t pi)
 {

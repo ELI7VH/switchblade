@@ -19,7 +19,7 @@
  * 1 + env * depth (63 = depth 1, an octave up at the top). P_FM1_LEVEL 0: the filter follows the amp ADSR by ENV
  * DEST FLT in cutoff steps, as every other engine.
  *
- * One departure from the plugin: a DC blocker per voice (void_dc, R 0.995) between the voice's level and the
+ * One departure from the plugin: a DC blocker per voice (void_dc, R 0.9985) between the voice's level and the
  * soft clipper. The plugin has none; the FM-1 takes a part's reverb send ahead of the master's DC blocker.
  *
  * Signals: Q15 with 1.0 = the plugin's 1.0 (the tables hold it as VOID_WT_ONE); products are kept
@@ -46,8 +46,8 @@ enum { VF_LP24, VF_BP, VF_HP, VF_LP12, VF_HP24, VF_NOTCH };   /* P_FTYPE (params
 #define VOID_CLIP_MAX (VOID_CLIP_THR + 255 * 256 + 255)
 _Static_assert(NELEM(VOID_SOFT) == 257, "VOID_CLIP_MAX: VOID_SOFT's length");
 #define VOID_OUT_LEVEL 18536     /* the plugin's voice: OSC level 0.8 * centre pan 0.707, Q15 */
-#define VOID_DC_R 32604          /* the DC blocker's R, 0.995 in Q15 (-3 dB at ~35 Hz, 44.1 kHz) */
-#define VOID_DC_SH 8             /* bits its state keeps below the signal's Q15 */
+#define VOID_DC_R 32719          /* the DC blocker's R, 0.9985 in Q15 (-3 dB at ~10 Hz, 44.1 kHz) */
+#define VOID_DC_SH 10            /* bits its state keeps below the signal's Q15 */
 /* voices a VOID part plays at most (POLY, UNISON). 6 of its heaviest preset cost about what 8 of PHASE WIRE, the
  * heaviest engine before it, do (tests/void_test.c, host instructions); raise it once the FM-1's PERF shows room */
 #define VOID_POLY 6
@@ -321,11 +321,18 @@ static inline int32_t void_flt_run(const void_flt_t *fl, int32_t *f, int32_t s)
  * - doff that only approximates its mean) leaves an offset the LP ladder passes straight through, and the
  * part's reverb send is taken ahead of the master's DC blocker (fx.c dc_block), so a WAVE part used to pump
  * that offset into the reverb's combs. One pole per voice, y[n] = x[n] - x[n - 1] + R y[n - 1] with
- * R = 0.995, in its transposed form: y = x + (w >> SH), w -= (1 - R) y, no x[n - 1] to keep.
- * The state sits SH bits below the signal's Q15 so the subtraction's truncation (half an LSB of w)
- * settles at 0.4 of a Q15 step; held in Q15 it would leave about 100 (1 / 2 / (1 - R)).
+ * R = 0.9985, in its transposed form: y = x + (w >> SH), w -= (1 - R) y, no x[n - 1] to keep.
+ * R = 0.9985 (1 - R = 49) puts the corner at ~10 Hz: DC sits at 0 Hz, so the blocker does its job just as
+ * completely there, and C1 (32.7 Hz) loses 0.4 dB instead of the 3.3 dB that R = 0.995 (~35 Hz) cost it --
+ * WAVE's BASS category is 10 of its 32 presets (decided 2026-10-17).
+ * The state sits SH bits below the signal's Q15 so the subtraction's truncation (half an LSB of w each
+ * sample, the floored shift) settles at 0.5 * 2^15 / 49 = 334 units of w -- 0.33 of a Q15 step at SH = 10.
+ * SH = 8 would leave 1.3 of one with this R (a settled |y| of 1 .. 2, measured), and holding the state in
+ * Q15 would leave about 334: the point of Q(15 + SH) is to keep that error well under one Q15 step, so SH
+ * rose with the time constant (it was 8 while 1 - R was 164, where the same sum gives 0.39).
  * Bounds: |x| <= 62224 (the clamp at VOID_OUT_LEVEL) and the peak gain is 2 (the l1 norm of the impulse
- * response, 1 and -(1 - R) R^n), so |y| <= 124448, |w| <= 2^26 and y * 164 <= 2^25. 124448 is past what
+ * response, 1 and -(1 - R) R^n, which is 2 for any R), so |y| <= 124448, |w| <= 62224 << 10 = 6.4e7 and
+ * y * 49 <= 2^23 -- all comfortably inside int32. VOID_CLIP_MAX does not move with R. 124448 is past what
  * the soft clipper's table covers, so the return is clamped to VOID_CLIP_MAX here rather than at the call
  * site: y is what indexes that table (tests/void_test.c test_dc_range pins both halves of this). */
 VOID_INLINE int32_t void_dc(int32_t *w, int32_t x)

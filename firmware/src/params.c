@@ -482,3 +482,15 @@ static const param_desc_t *page_desc(const page_t *pg, uint32_t slot, int16_t **
     *valp = &TSEL->p[id];
     return track_desc(TSEL, id);
 }
+
+/* the track's settings, not the sound's: what a sound load (factory or user preset, an engine jump,
+ * TOOLS INIT) leaves alone. The mix (LEVEL, PAN, MUTE: the TRACKS faders), the arpeggiator (ARP, ARP 2),
+ * the scale and key map (SCL), the pattern parameters (LEN, DIV, SWING, GATE; 1.2: QUANTIZE) and the SLICER
+ * insert, which chops whatever the track plays in time with its sequencer; MIDI OUT (FM1-Four), where it plays.
+ * Here rather than in ui.c since Task 4.3: tests/hostsim.c loads a preset the same way (ui.c apply_preset_to)
+ * and must restore the same parameters, or one preset's settings would carry into the next one's render */
+static int param_kept(uint32_t i)
+{
+    return i == P_LEVEL || i == P_PAN || i == P_MUTE || (i >= P_AMODE && i <= P_SGATE) ||
+           (i >= P_SLCR && i <= P_SLDEPTH) || i == P_CHRD || i == P_VOIC || i == P_SQNT || i == P_MOUT;
+}

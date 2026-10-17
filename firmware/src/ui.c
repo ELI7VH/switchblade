@@ -977,8 +977,6 @@ static void motion_undo_done(track_t *t)
     undo.t_ms = fm1_ms;
 }
 
-static int param_kept(uint32_t i);
-
 /* SAVE held: what the loads changed (undo.what) and the copy change places, so held again = the loads
  * again. The sound: engine, preset and its parameters (not param_kept); the pattern: the steps and LEN
  * DIV SWING GATE. The mix (LEVEL PAN MUTE) stays: no load changes it */
@@ -1133,16 +1131,6 @@ static void pat_load_ui(track_t *t, uint32_t n)
     str_cpy(b + str_len(b), " ", 2);
     str_cpy(b + str_len(b), nm, sizeof b - str_len(b));
     ui_say("LOADED ", b);
-}
-
-/* the track's settings, not the sound's: what a sound load (factory or user preset, an engine jump,
- * TOOLS INIT) leaves alone. The mix (LEVEL, PAN, MUTE: the TRACKS faders), the arpeggiator (ARP, ARP 2),
- * the scale and key map (SCL), the pattern parameters (LEN, DIV, SWING, GATE; 1.2: QUANTIZE) and the SLICER
- * insert, which chops whatever the track plays in time with its sequencer; MIDI OUT (FM1-Four), where it plays */
-static int param_kept(uint32_t i)
-{
-    return i == P_LEVEL || i == P_PAN || i == P_MUTE || (i >= P_AMODE && i <= P_SGATE) ||
-           (i >= P_SLCR && i <= P_SLDEPTH) || i == P_CHRD || i == P_VOIC || i == P_SQNT || i == P_MOUT;
 }
 
 #define preset_shown(e) (ENGINES[e]->npresets)
