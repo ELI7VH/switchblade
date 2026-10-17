@@ -8254,6 +8254,45 @@ static int test_help(void)
     return bad;
 }
 
+/* Task 5.3: ACID reads a step's accent and slide, and the big UI edits both. On track 3 (trk[2]) with the ACID machine
+ * set explicitly: STEP page, step 1, FLAG (KNOB 4) up to A+S -> flags == ACC | SLD; played, step 2 starts as a slide
+ * (t->slide_glide, seq.c) and step 1 as an accent (velocity 127) */
+static int test_acid_flags(void)
+{
+    int bad = 0, ok;
+    track_t *t;
+    uint32_t period, k, vel = 0;
+    ui_power_on();
+    song.sel = 2;
+    t = &trk[2];
+    set_engine_of(t, ENGI_ACID); apply_preset_to(t, 0); t->engine = t->eng_req;
+    track_defaults_steps(t);
+    t->p[P_SLEN] = 16;
+    t->step[0].note[0] = 45; t->step[0].n = 1; t->step[0].time = ST_NOTE; t->step[0].vel = 90;
+    t->step[1].note[0] = 48; t->step[1].n = 1; t->step[1].time = ST_NOTE; t->step[1].vel = 90;
+    go_page(GR_ROLL); cursor_set(0); frame();
+    ok = TSEL == t && t->eng_req == ENGI_ACID && str_eq(cur_page()->title, "STEP") && ui.cursor == 0 && !t->step[0].flags;
+    bad += check("ACID flags: track 3 is ACID on the STEP page, step 1 plain", ok);
+    turn(EN_K4, 1);
+    ok = t->step[0].flags == SF_ACCENT;
+    turn(EN_K4, 1);
+    ok &= t->step[0].flags == SF_SLIDE;
+    turn(EN_K4, 1);
+    ok &= t->step[0].flags == (SF_ACCENT | SF_SLIDE) && !t->step[1].flags;
+    bad += check("ACID flags: FLAG (KNOB 4) turned three detents sets ACCENT | SLIDE on step 1 only", ok);
+    transport_req = 1;                                  /* PLAY: the sequencer starts in the next block, on step 1 */
+    period = div_samples((uint32_t)t->p[P_SDIV]);
+    events_block(32);
+    for (k = 0; k < NVOICE; k++) if (t->v[k].gate) vel = t->v[k].vel;
+    ok = t->seq_idx == 0 && !t->slide_glide && vel == 127u;
+    bad += check("ACID flags: played, step 1 sounds as an accent (velocity 127), no slide into it", ok);
+    events_block(period);
+    ok = t->seq_idx == 1 && t->slide_glide == 1u;
+    bad += check("ACID flags: played, step 2 slides (slide_glide set)", ok);
+    song.playing = 0;
+    return bad;
+}
+
 /* #181: a sound load (PRESETS) or another track (ALGORITHM) draws the page again (ui.force) with no blank frame on the
  * way: MIXER cleared its panel to the background before its four columns landed, a flash on every detent. Every pixel
  * goes from what it showed straight to what it shows next (host_fl_*), on MIXER, HOME (VOID FOUR's: tabs, the sound,
@@ -8385,6 +8424,7 @@ int main(void)
     bad += test_fx_map_columns();
     bad += test_help();
     bad += test_no_flash();
+    bad += test_acid_flags();
 
     if (getenv("UI_SCREEN_DIR")) chain_screens(getenv("UI_SCREEN_DIR"));
     printf(bad ? "ui: %d FAILED\n" : "ui: all passed\n", bad);
