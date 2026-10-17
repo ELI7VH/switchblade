@@ -78,7 +78,7 @@
 #                   cursor, an edit of its step or step entry, free again after 3 s or one pass round; reset by stop / track.
 # MOD (tests/mod_test.c): the modulation matrix: slots that do nothing are bit-identical, every source on each
 #                   kind of destination, clamping, MIDI CC1 / CC11 / aftertouch routing, the cost of 4 active
-#                   slots (at most +5 %), demos in build/mod_demo/.
+#                   slots (at most +6 %, mod_test.c MOD_COST_MAX), demos in build/mod_demo/.
 # INSERT (tests/insert_test.c, 1.5; #78 #177): the per-track INSERT (src/fx.c track_insert): TYPE OFF and MIX 0 bit for
 #                   bit (POLY, SPREAD), each TYPE at its corners on 3 and 8 voices (no DC, bounded, MIX 50 % halfway
 #                   to the wet), the MIX glide and TYPE changes, MIX / TYPE as automation and locks, FUN10 and user
@@ -90,8 +90,14 @@
 # FOUR (tests/four_test.c): the four-machine contract: ENGINES[] is OB-Z WAVE ACID DRIFT, their HOME knobs, ACID mono.
 # OB-Z (tests/obx_test.c, tests/dspfft.h): the SEM-style filter morph on one voice (spectra through a plain FFT):
 #                   MODE 0 is the low-pass of before the morph bit for bit, MODE 32 notches at the cutoff, 64 passes
-#                   the highs, 127 is the 4-pole; SLOP 0 renders twice alike and SLOP 127 spreads the voices within
-#                   +-6 cents; DTN moves the second oscillator by its cents.
+#                   the highs, 96 is the band-pass, 120 the low-pass again and 127 the 4-pole; the crossfade between
+#                   every pair of corners (16 / 48 / 80 / 108: each leg moves its band one way, none is inert), the
+#                   corners meet without a step of their own (MODE 62 -> 63 against 63 -> 64), the crossfade and the
+#                   4-pole bounded and adding no DC at RES 127; SLOP 0 is inert over different note-ons and SLOP 127
+#                   spreads the voices within +-6 cents; DTN moves the second oscillator by its cents; dspfft.h's two
+#                   refusals (an n it cannot transform, a band below 0 Hz).
+#                   Plus a source check: the ANALOG render copied in eng_obx.c for the ACID / DRIFT placeholders
+#                   fails the suite once no engine binds analog_render_f (Phases 5 and 6 delete it with them).
 # WAVE (tests/void_tables_test.py, tests/void_test.c): the VOID WAVE plugin's voice (the WAVE engine, was VOID). Its wavetables against the plugin's
 #                   frames recomputed with numpy (every keyframe and level band-limited, the crossfade within its limit;
 #                   skipped without numpy); the engine: pitch, OSC2's steps, band-limited at C8, bounded and without DC at
@@ -296,7 +302,26 @@ if [ -f build/gen/felucca_tables.h ]; then
         "$OUT/void_test" build/void_demo build/void_ref
     $CC -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/four_test" tests/four_test.c -lm && "$OUT/four_test" || fail=1
     $CC -O1 -w -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/obx_test" tests/obx_test.c -lm
-    run "OB-Z: MODE 0 the legacy low-pass bit for bit, the LP / NOTCH / HP morph, the 4-pole, SLOP, DTN" "$OUT/obx_test"
+    run "OB-Z: MODE 0 the legacy low-pass bit for bit, the LP / NOTCH / HP / BP morph, the 4-pole, SLOP, DTN" "$OUT/obx_test"
+    # The ANALOG render copied into eng_obx.c (analog_tap, analog_ft, ANALOG_K, analog_note_on,
+    # analog_osc, analog_render_f) is OB-Z's engine as it stood before Task 4.1's morph. It is kept
+    # only because the ACID and DRIFT placeholders borrow it and their golden hashes are recorded
+    # against it, and the two copies are meant to diverge, so nothing in the sources can tell that
+    # one is dead. Phases 5 and 6 give those machines their own voices: the moment no engine binds
+    # analog_render_f the copy is orphaned, and this fails until it is deleted.
+    echo "== the ANALOG render copied in eng_obx.c is still borrowed (Phases 5 / 6 delete it)"
+    an_users=$(grep -l analog_render_f firmware/src/eng_*.c 2>/dev/null | grep -v eng_obx.c | tr '\n' ' ') || true
+    if ! grep -q '^static .*analog_render_f(' firmware/src/eng_obx.c; then
+        echo "   ok: the copy is gone from firmware/src/eng_obx.c"
+    elif [ -n "$an_users" ]; then
+        echo "   ok: bound by $an_users"
+    else
+        echo "   FAIL: no engine binds analog_render_f any more, so the ANALOG copy in"
+        echo "         firmware/src/eng_obx.c (analog_tap, analog_ft, ANALOG_K, analog_note_on,"
+        echo "         analog_osc, analog_render_f) is dead code -- delete it with the placeholder"
+        echo "         it was kept for, and drop this check."
+        fail=1
+    fi
     $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/slicer_test" tests/slicer_test.c -lm
     mkdir -p build/slicer_demo
     run "SLICER: no clicks, timing, sync with the sequencer, STUT, cost, demos" "$OUT/slicer_test" build/slicer_demo

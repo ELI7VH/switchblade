@@ -22,7 +22,7 @@
  *    after the ramp; the shimmer (KNOB 4 at 100, 0.82) on 4x full-scale square waves stays bounded and dies
  *    away after the input stops; KNOB 4 at 0 is plain (the delay holds only the input); the cost: over the
  *    idle song, and the harmonizer's own over REPEAT 1/16 alone (the layer's stage, which every effect of it
- *    pays): about 2 % at most (device estimate: 1.7 % per 100 instructions per sample).
+ *    pays): about 2.5 % at most (device estimate: 1.7 % per 100 instructions per sample).
  * 10. FLANGER, PHASER (1.2): silence stays silence, a silent side silent; no DC (a zero-mean noise keeps its mean, DC
  *    passes at unity) and about the input's level; bounded on 4x full-scale squares with LPF, HPF, REPEAT and CRUSH;
  *    the sweep follows the tempo (a 441 Hz saw comes out the same a bar / half a bar later at 120 and 90 BPM, not
@@ -1431,7 +1431,7 @@ static int test_cost(void)
     bad = check(what, on - idle < 400);
     printf("perform: cost: over the idle song: REPEAT 1/16 alone +%.0f (the layer's own stage), OCT UP +%.0f, with the shimmer +%.0f\n",
            rep - idle, plain - idle, harm - idle);
-    snprintf(what, sizeof what, "  OCT UP over REPEAT 1/16 (the harmonizer itself): +%.0f, with the shimmer +%.0f (device ~%.1f / %.1f %%, about 2 %%)",
+    snprintf(what, sizeof what, "  OCT UP over REPEAT 1/16 (the harmonizer itself): +%.0f, with the shimmer +%.0f (device ~%.1f / %.1f %%, at most 2.5 %%)",
              plain - rep, harm - rep, (plain - rep) * 0.017, (harm - rep) * 0.017);
     /* 2.5, not 2.2 since FM1-Four Task 4.1: the harmonizer costs exactly what it did (+256 over the
      * idle song plain, +291 with the shimmer, both unchanged), but OB-Z lost its noise and drive, so

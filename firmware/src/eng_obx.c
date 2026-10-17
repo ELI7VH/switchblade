@@ -5,9 +5,12 @@
  *
  *   E0 WAVE   E1 DTN   E2 MIX   E3 PW   E4 CUT   E5 RES   E6 MODE   E7 SLOP
  *
- *   MODE  the filter's response, morphed over 0..120: LP at 0, NOTCH at 32, HP at 64 and BP at 96
- *         (96..120 holds BP). 121..127 is the 4-pole option: a low-pass through a second SVF at
- *         the same cutoff, 24 dB an octave. MODE 0 is the low-pass OB-Z always had, step for step.
+ *   MODE  the filter's response, morphed over 0..120 and back: LP at 0, NOTCH at 32, HP at 64, BP
+ *         at 96, and over 96..120 the band-pass crossfades back to the low-pass, so MODE 120 is
+ *         the low-pass corner again (sample for sample what MODE 0 plays) and the morph has no dead
+ *         step. 121..127 is the 4-pole option, which the closing leg ramps into: a low-pass through
+ *         a second SVF at the same cutoff, 24 dB an octave. MODE 0 is the low-pass OB-Z always had,
+ *         step for step.
  *   SLOP  the voice's own analogue error, seeded from the note-on counter: +-SLOP x 6 cents of
  *         pitch and +-SLOP x 2 semitones of cutoff, the same for a voice's whole note and another
  *         draw on the next note-on (a retrigger never keeps it).
@@ -94,8 +97,10 @@ static void obx_mode_weights(obx_flt_t *w, int32_t mode)
     } else if (mode < OBX_M_BP) {                     /* HP -> BP */
         w->wh = 4096 - f;
         w->wb = f;
-    } else {                                          /* BP, held from 96 to 120 */
-        w->wb = 4096;
+    } else {                                          /* BP -> LP: the morph closes, 96 to 120 */
+        f = (mode - OBX_M_BP) * 4096 / (OBX_M_4POLE - 1 - OBX_M_BP);   /* 24 steps, 4096 at 120 */
+        w->wb = 4096 - f;
+        w->wl = f;
     }
     w->kind = !w->wh && !w->wb                 ? (uint32_t)OBX_T_LP
               : w->wl == 4096 && w->wh == 4096 ? (uint32_t)OBX_T_NOTCH
@@ -125,7 +130,19 @@ static inline int32_t obx_tap(const tsvf_t *c, int32_t k, int32_t in, int32_t *i
     default:
         break;
     }
-    hp = clamp(in - ((k * v1) >> 12) - v2, -400000, 400000);   /* x 4096 has to stay in 32 bits */
+    /* The crossfade. Nothing here is clamped, and the three taps are the same expressions the
+     * pinned branches above return, so a MODE sitting a step short of a corner meets the corner
+     * itself without anything but the morph's own 1/32 between them. The widest product fits:
+     * ic1 / ic2 are held to +-150000 by the two lines above, |in| <= 32768 (the oscillator mix,
+     * s >> 1), and a sweep of every CUT and every RES (k 592..8192) over the eight corners of that
+     * box -- hp and v1 and v2 are each linear in (ic1, ic2, in), so a corner is where they peak --
+     * gives |v1| <= 183328, |v2| <= 184627 and |hp| <= 481203. Against 2^31 - 1 = 2.147e9 the
+     * products x 4096 are then 7.51e8, 7.56e8 and 1.97e9: the hp term has the least room, and 8 %
+     * of it. Renders reach nothing like that -- a sweep of RES 127 over every WAVE, CUT and the
+     * keyboard (tests/obx_test.c test_mode_bounded) peaks at |hp| ~ 48000, a factor of ten below
+     * the bound -- and a +-400000 clamp on hp used to stand here for the overflow the bound rules
+     * out. It only put a step across MODE 64, where the pinned high-pass has no clamp. */
+    hp = in - ((k * v1) >> 12) - v2;
     return ((v2 * w->wl) >> 12) + ((hp * w->wh) >> 12) + ((v1 * w->wb) >> 12);
 }
 
@@ -437,6 +454,10 @@ static __attribute__((noinline)) void analog_render_f(track_t *t, voice_t *v, in
 }
 
 /* OBX_PRESETS: presets/four/obx.py (tools/four_presets.py, four_presets.h) */
+/* edit[] is the contract Task 4.1's brief pins and later tasks read, so the slots keep their order.
+ * icons.c param_icon matches MODE by its address, `d == &ENG_OBX.edit[6]` (the label "MODE" is the
+ * arp's, and ui_test wants each label once): reordering edit[] silently re-points that icon, so the
+ * index there has to move with the slot. */
 static const engine_t ENG_OBX = {
     .name = "OB-Z",
     .page_title = {"OSC", "FLT"},

@@ -228,12 +228,229 @@ static void test_mode_4pole(void)
     CHECK(four <= two - 10.0f, "MODE 127 (4-pole): only %.1f dB further down at 4x the cutoff", two - four);
 }
 
+/* ------------------------------------------ the morph between its corners --- */
+/* Each corner above is a single tap of the filter. Everything between two of them runs the
+ * crossfade (obx_tap's OBX_T_MIX), which no corner test, no factory preset and so neither
+ * tests/golden.txt nor tests/cpu_baseline.txt ever reaches. Each leg of the morph moves one band
+ * one way from end to end, so a walk of its inside has to land between the two corner figures: a
+ * leg that went inert, or that steps the wrong way, fails here.
+ *
+ * The legs and the band each one moves, at a 1 kHz cutoff over a 100 Hz saw:
+ *   0..32    LP -> NOTCH   the notch at the cutoff deepens as the high-pass weight comes in
+ *   32..64   NOTCH -> HP   the fundamental falls as the low-pass weight leaves
+ *   64..96   HP -> BP      the band two octaves above the cutoff falls as the band-pass takes over
+ *   96..120  BP -> LP      the fundamental comes back as the morph closes onto the low-pass
+ *
+ * The fundamental, a decade below the cutoff, measures the passband gain the crossfade has there:
+ * only the low-pass tap reaches that far down (the high-pass falls as f^2 and the band-pass as f),
+ * so the figure is the low-pass weight itself and moves with it from end to end. Half an octave
+ * below the cutoff would not do: there the notch the crossfade makes between lp and hp sweeps
+ * down through the band on the way to HP, and the reading dips and comes back. */
+static int32_t morph_cut;                              /* the CUT step the walks are measured at */
+static double morph_fc;
+
+static void morph_at(int32_t mode) { saw_spectrum(mode, morph_cut, 0); }
+
+static double m_fund(void)                             /* the 100 Hz fundamental: the passband gain */
+{
+    return band_db(mag_a, REN_N, (float)FS, 80.0f, 130.0f);
+}
+static double m_high(void)                             /* two octaves above the cutoff */
+{
+    return band_db(mag_a, REN_N, (float)FS, (float)(morph_fc * 3.5), (float)(morph_fc * 4.5));
+}
+static double m_notch(void)                            /* the cutoff below its neighbouring octaves */
+{
+    double at = band_db(mag_a, REN_N, (float)FS, (float)(morph_fc * 0.97), (float)(morph_fc * 1.03));
+    double below = band_db(mag_a, REN_N, (float)FS, (float)(morph_fc * 0.485), (float)(morph_fc * 0.515));
+    double above = band_db(mag_a, REN_N, (float)FS, (float)(morph_fc * 1.94), (float)(morph_fc * 2.06));
+    return 0.5 * (below + above) - at;
+}
+
+/* `mid` has to sit between the corners `a` and `b`, `dir` the way the figure moves with MODE */
+static void morph_leg(const char *what, int32_t a, int32_t mid, int32_t b, double (*meas)(void),
+                      double dir, double margin)
+{
+    double va, vm, vb;
+    morph_at(a);
+    va = meas();
+    morph_at(mid);
+    vm = meas();
+    morph_at(b);
+    vb = meas();
+    printf("obx: morph %-12s MODE %3d %6.1f -> %3d %6.1f -> %3d %6.1f dB\n", what, a, va, mid, vm, b, vb);
+    CHECK(dir * (vm - va) >= margin && dir * (vb - vm) >= margin,
+          "MODE %d..%d (%s): %.1f -> %.1f -> %.1f dB does not move %.1f dB a step toward the next corner",
+          a, b, what, va, vm, vb, margin);
+}
+
+static void test_mode_between(void)
+{
+    morph_cut = cut_for_hz(1000);
+    morph_fc = CUTOFF_HZ[morph_cut];
+    morph_leg("LP -> NOTCH", 0, 16, OBX_M_NOTCH, m_notch, +1.0, 1.0);
+    morph_leg("NOTCH -> HP", OBX_M_NOTCH, 48, OBX_M_HP, m_fund, -1.0, 2.0);
+    morph_leg("HP -> BP", OBX_M_HP, 80, OBX_M_BP, m_high, -1.0, 1.0);
+}
+
+/* MODE 96..120 was a flat band-pass plateau: 24 of the knob's steps did nothing. It now crossfades
+ * the band-pass back to the low-pass, so the morph spans 0..120 whole and meets the 4-pole
+ * low-pass above 120 where it ends. MODE 120 is then the low-pass corner exactly -- the same
+ * single tap MODE 0 takes, sample for sample. */
+static uint64_t saw_hash(int32_t mode, int32_t res)
+{
+    int16_t e[8] = {0, 0, 0, 64, 0, 0, 0, 0};
+    e[4] = (int16_t)morph_cut;
+    e[5] = (int16_t)res;
+    e[6] = (int16_t)mode;
+    obx_voice(e, pitch16_of_hz(100.0), 1, ren_b, REN_SKIP + REN_N);
+    return ren_hash(ren_b, REN_SKIP + REN_N);
+}
+
+static void test_mode_bp_to_lp(void)
+{
+    uint64_t h[4];
+    morph_leg("BP -> LP", OBX_M_BP, 108, OBX_M_4POLE - 1, m_fund, +1.0, 2.0);
+    h[0] = saw_hash(OBX_M_BP, 0);
+    h[1] = saw_hash(108, 0);
+    h[2] = saw_hash(OBX_M_4POLE - 1, 0);
+    h[3] = saw_hash(0, 0);
+    printf("obx: MODE 96 %016llx  108 %016llx  120 %016llx  (MODE 0 %016llx)\n",
+           (unsigned long long)h[0], (unsigned long long)h[1], (unsigned long long)h[2],
+           (unsigned long long)h[3]);
+    CHECK(h[0] != h[1] && h[1] != h[2], "MODE 96..120 is inert: 96 / 108 / 120 render alike");
+    CHECK(h[2] == h[3], "MODE 120 is not the low-pass corner sample for sample: %016llx (MODE 0 %016llx)",
+          (unsigned long long)h[2], (unsigned long long)h[3]);
+}
+
+/* ------------------------------------- the crossfade and the 4-pole, bounded --- */
+/* The corner taps are measured bounded and free of DC by sound15_test (its ANALOG filter TYPE
+ * section); the crossfade and the 4-pole had no counterpart. Both are walked here at RES 127: the
+ * crossfade carries the widest arithmetic in the engine (obx_tap's OBX_T_MIX), and the 4-pole runs
+ * two stages at the same k, so its resonant peak is the two-pole's squared.
+ *
+ * DC is held to the 5 % of rms sound15_test holds the corner taps to, but as an increment over the
+ * same patch through MODE 0 rather than over zero. Neither path is free of offset and neither can
+ * be: the morph's gain at DC is its low-pass weight, so it passes through whatever the oscillators
+ * carry, and WAVE SYNC's hard-synced saw carries 10 % of rms at a low cutoff -- through the legacy
+ * low-pass too, so it has nothing to do with the morph. The 4-pole, in turn, drives the soft knee
+ * hard enough at RES 127 that clipping an asymmetric resonant waveform symmetrically leaves an
+ * offset behind: 4.5 % of rms at the worst of these settings, where the pre-knee signal has 0.1 %
+ * (probed). So what the morph and the 4-pole must not do is add DC of their own. */
+#define OBX_CEIL 94866            /* the engine's own ceiling: soft_knee(.,16000) <= 32383, << 1 */
+                                  /* through voice_amp at amp 32767 (x 24000 / 32768), << 1 */
+#define BND_N 16384u
+typedef struct { double mean, rms, peak; } stats_t;
+static stats_t ren_stats(const int32_t *x, uint32_t n)
+{
+    stats_t s = {0.0, 0.0, 0.0};
+    uint32_t i;
+    for (i = 0; i < n; i++) {
+        double v = (double)x[i];
+        s.mean += v;
+        s.rms += v * v;
+        s.peak = fabs(v) > s.peak ? fabs(v) : s.peak;
+    }
+    s.mean /= (double)n;
+    s.rms = sqrt(s.rms / (double)n);
+    return s;
+}
+
+static stats_t bnd_render(const int16_t *wcn, int32_t mode)       /* {WAVE, CUT, note} at RES 127 */
+{
+    int16_t e[8] = {0, 11, 64, 64, 0, 127, 0, 0};
+    e[0] = wcn[0];
+    e[4] = wcn[1];
+    e[6] = (int16_t)mode;
+    obx_voice(e, wcn[2] * 16, 1, ren_a, REN_SKIP + BND_N);
+    return ren_stats(ren_a + REN_SKIP, BND_N);
+}
+
+static void test_mode_bounded(void)
+{
+    static const int16_t MODES[] = {8, 16, 48, 80, 100, 108, 119, 121, 127};
+    static const int16_t WAVES[] = {0, 1, 4, 5, 6};
+    static const int32_t NOTES[] = {33, 60, 88};
+    static const int16_t CUTS[] = {40, 90, 120};
+    double worst = 0.0, dc = 0.0, quiet = 1e30;
+    uint32_t w, md, nt, ct, bad = 0, n = 0;
+    for (w = 0; w < NELEM(WAVES); w++)
+        for (ct = 0; ct < NELEM(CUTS); ct++)
+            for (nt = 0; nt < NELEM(NOTES); nt++) {
+                int16_t wcn[3] = {WAVES[w], CUTS[ct], (int16_t)NOTES[nt]};
+                double dc0 = fabs(bnd_render(wcn, 0).mean);         /* what the legacy LP carries */
+                for (md = 0; md < NELEM(MODES); md++) {
+                    stats_t s = bnd_render(wcn, MODES[md]);
+                    double r = s.rms >= 500.0 ? (fabs(s.mean) - dc0) / s.rms : 0.0;
+                    n++;
+                    worst = s.peak > worst ? s.peak : worst;
+                    quiet = s.rms < quiet ? s.rms : quiet;
+                    dc = r > dc ? r : dc;
+                    if (s.peak <= (double)OBX_CEIL && r < 0.05)
+                        continue;
+                    if (bad++ < 4u)
+                        printf("FAIL MODE %d WAVE %d CUT %d note %d: peak %.0f mean %.0f rms %.0f"
+                               " (%.3f of rms past MODE 0's %.0f)\n",
+                               MODES[md], WAVES[w], CUTS[ct], NOTES[nt], s.peak, s.mean, s.rms, r, dc0);
+                }
+            }
+    printf("obx: RES 127 over the crossfade and the 4-pole (%u renders): peak %.0f of %d, DC %.3f of rms past"
+           " MODE 0's, quietest rms %.0f\n",
+           n, worst, OBX_CEIL, dc, quiet);
+    CHECK(!bad, "RES 127: %u of the renders are unbounded or add DC past 5 %% of rms", bad);
+}
+
+/* Where one leg meets the next, nothing may come between them but the morph's own granularity.
+ * MODE 63 is the crossfade one step short of the high-pass and MODE 64 is the pinned high-pass tap
+ * itself; MODE 63 still carries 128/4096 of the low-pass tap, and each step inside the leg moves
+ * that weight by the same 128. So the step across the corner is measured against the step just
+ * inside it (62 -> 63), which has to be the same size: a clamp or a saturation that bites on one
+ * side of the corner and not the other -- the +-400000 hp clamp the crossfade used to carry was
+ * exactly that -- makes the crossing the larger of the two. RES 127, where the taps are widest.
+ * (A fixed threshold would not do: 63 -> 64 is 15 % of the signal at a high cutoff, because there
+ * the low-pass tap it drops is several times the high-pass tap that remains.) */
+static double ren_diff_rel(int32_t mode_a, int32_t mode_b, int16_t cut)
+{
+    int16_t e[8] = {0, 11, 64, 64, 0, 127, 0, 0};
+    double d = 0.0, r = 0.0;
+    uint32_t i;
+    e[4] = cut;
+    e[6] = (int16_t)mode_a;
+    obx_voice(e, 45 * 16, 1, ren_a, REN_SKIP + BND_N);
+    e[6] = (int16_t)mode_b;
+    obx_voice(e, 45 * 16, 1, ren_b, REN_SKIP + BND_N);
+    for (i = REN_SKIP; i < REN_SKIP + BND_N; i++) {
+        double x = (double)ren_a[i] - ren_b[i], y = (double)ren_b[i];
+        d += x * x;
+        r += y * y;
+    }
+    return r > 0.0 ? sqrt(d / r) : 0.0;
+}
+
+static void test_mode_corner_step(void)
+{
+    static const int16_t CUTS[] = {40, 90, 120};
+    uint32_t ct;
+    for (ct = 0; ct < NELEM(CUTS); ct++) {
+        double in = ren_diff_rel(OBX_M_HP - 2, OBX_M_HP - 1, CUTS[ct]);
+        double over = ren_diff_rel(OBX_M_HP - 1, OBX_M_HP, CUTS[ct]);
+        printf("obx: RES 127 CUT %3d: MODE 62 -> 63 moves %5.2f %% of the signal, 63 -> 64 %5.2f %%\n",
+               CUTS[ct], 100.0 * in, 100.0 * over);
+        CHECK(over <= in * 1.5 + 0.002,
+              "MODE 63 -> 64 moves %.2f %% at CUT %d where 62 -> 63 moves %.2f %%: the corner has a step of"
+              " its own", 100.0 * over, CUTS[ct], 100.0 * in);
+    }
+}
+
+/* SLOP 0 is inert: two different note-on counters have to give the same samples. (Two renders of
+ * the same counter would only pin the renderer's own determinism.) */
 static void test_slop_deterministic(void)
 {
     static const int16_t E[8] = {0, 7, 64, 64, 90, 40, 0, 0};       /* SLOP 0 */
     obx_voice(E, 60 * 16, 3, ren_a, REN_SKIP + REN_N);
-    obx_voice(E, 60 * 16, 3, ren_b, REN_SKIP + REN_N);
-    CHECK(memcmp(ren_a, ren_b, sizeof ren_a) == 0, "SLOP 0: two renders of the same voice differ");
+    obx_voice(E, 60 * 16, 11, ren_b, REN_SKIP + REN_N);
+    CHECK(memcmp(ren_a, ren_b, sizeof ren_a) == 0,
+          "SLOP 0: note-on 3 and note-on 11 do not render alike");
 }
 
 static void test_slop_spread(void)
@@ -291,6 +508,31 @@ static void test_dtn(void)
     CHECK(sep >= 115.0 && sep <= 140.0, "DTN 127: the peaks are %.1f cents apart, not DTN's 127", sep);
 }
 
+/* dspfft.h's two refusals, pinned here because Tasks 5.2 and 6.1 include the header and would
+ * otherwise inherit them as traps: an n the FFT cannot transform must leave no stale magnitudes
+ * behind, and a band wholly below 0 Hz must not read as the whole spectrum. */
+static void test_dspfft_guards(void)
+{
+    unsigned i;
+    for (i = 0; i < 512u; i++)
+        mag_b[i] = 1234.0f;
+    printf("obx: dspfft refusals (the next line on stderr is the one being tested)\n");
+    fflush(stdout);
+    fft_mag(ren_a, 1000u, mag_b);                      /* 1000 is not a power of two */
+    for (i = 0; i < 500u; i++)
+        if (mag_b[i] != 0.0f)
+            break;
+    CHECK(i == 500u, "fft_mag(n = 1000) left mag[%u] at %.0f: the caller reads stale magnitudes", i,
+          mag_b[i]);
+    saw_spectrum(0, cut_for_hz(1000), 0);
+    CHECK(band_db(mag_a, REN_N, (float)FS, -10.0f, -5.0f) == DSPFFT_FLOOR_DB,
+          "band_db(-10, -5) reads %.1f dB: a band below 0 Hz is not empty",
+          band_db(mag_a, REN_N, (float)FS, -10.0f, -5.0f));
+    CHECK(band_db(mag_a, REN_N, (float)FS, 900.0f, 100.0f) == DSPFFT_FLOOR_DB,
+          "band_db(900, 100) reads %.1f dB: hi below lo is not empty",
+          band_db(mag_a, REN_N, (float)FS, 900.0f, 100.0f));
+}
+
 int main(void)
 {
     test_mode0_legacy_lp();
@@ -298,9 +540,14 @@ int main(void)
     test_mode_hp();
     test_mode_notch();
     test_mode_4pole();
+    test_mode_between();
+    test_mode_bp_to_lp();
+    test_mode_bounded();
+    test_mode_corner_step();
     test_slop_deterministic();
     test_slop_spread();
     test_dtn();
+    test_dspfft_guards();
     printf(fails ? "obx_test: %d FAIL\n" : "obx_test: ok\n", fails);
     return fails != 0;
 }
