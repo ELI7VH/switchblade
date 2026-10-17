@@ -52,11 +52,6 @@ static float drift_in(float s)
 #include "hostsim.c"
 #undef main
 #include "dspfft.h"
-#ifndef DRIFT_POLY            /* (the placeholder engine has none of these: stand-ins so that tier 1 runs and tier 2 fails, loudly) */
-#define DRIFT_POLY 1
-#define DRIFT_OS 2
-typedef struct { va_ladder_t l; } drift_vc_t;
-#endif
 #ifdef __APPLE__
 #include <libproc.h>
 #include <sys/resource.h>
@@ -202,7 +197,7 @@ static int32_t buf[NFFT * 12u];                    /* 196608 samples, 4.5 s */
 /* a note held with the seam set, rendered: skip the first `skip` samples, then n into buf */
 static void play(unsigned note, unsigned skip, unsigned n)
 {
-    trk_note_on(T, note, 127);
+    trk_note_on(T, note, 100);                     /* (VEL 100: above 110 voice.c adds the accent's cutoff boost) */
     run(0, skip);
     run(buf, n);
 }
@@ -351,7 +346,7 @@ static double thd_at(int drv)
     inj_step = (float)(2.0 * M_PI * K / 32768.0 / DRIFT_OS);   /* per oversampled sample; 32768 base samples = K cycles */
     {
         static int32_t b2[32768];
-        trk_note_on(T, 60, 127);
+        trk_note_on(T, 60, 100);
         run(0, 8192);
         run(b2, 32768);
         {
@@ -387,7 +382,7 @@ static void test_selfosc(void)
         drift_fresh();
         pots(64, 64, 0, 0, (int)ci, 127, 0, 0);
         inj_mode = INJ_SILENCE;
-        trk_note_on(T, 60, 127);
+        trk_note_on(T, 60, 100);
         run(0, 16384);
         run(buf, NFFT);
         fft_mag(buf, NFFT, mag_);
@@ -470,7 +465,7 @@ static void direct_voice(unsigned i, unsigned note, unsigned nblk, int32_t *out)
     v->active = v->gate = 1;
     v->stage = 2;
     v->note = (uint8_t)note;
-    v->vel = 127;
+    v->vel = 100;
     v->pitch16 = v->pitch_cur = (int32_t)note * 16;
     memset(&m, 0, sizeof m);
     m.pitch16 = v->pitch16;
@@ -491,24 +486,39 @@ static void direct_voice(unsigned i, unsigned note, unsigned nblk, int32_t *out)
 }
 static void test_variance(void)
 {
-    double hz[2][2];
-    unsigned var, i;
+    double hz[2][4], lo, hi;
+    unsigned var, i, part, k;
     int ok0, ok1;
     for (var = 0; var < 2u; var++) {
-        for (i = 0; i < 2u; i++) {
-            drift_fresh();
-            pots(64, 64, 0, var ? 127 : 0, 80, 127, 0, 0);
-            inj_mode = INJ_SILENCE;
-            direct_voice(i, 60, NFFT / CTL + 512u, buf);
-            fft_mag(buf + 512 * CTL, NFFT, mag_);
-            hz[var][i] = pk_hz(mag_, NFFT, 200.0, 4000.0);
+        k = 0;
+        for (part = 0; part < 2u; part++) {            /* two parts, so four voices' offsets (they are seeded by part and voice) */
+            for (i = 0; i < DRIFT_POLY; i++) {
+                drift_fresh();
+                pots(64, 64, 0, var ? 127 : 0, 80, 127, 0, 0);
+                trk[1] = trk[0];
+                memset(eng_mem[1].b, 0, sizeof eng_mem[1].b);
+                T = &trk[part];
+                inj_mode = INJ_SILENCE;
+                direct_voice(i, 60, NFFT / CTL + 512u, buf);
+                fft_mag(buf + 512 * CTL, NFFT, mag_);
+                hz[var][k++] = pk_hz(mag_, NFFT, 200.0, 4000.0);
+            }
         }
     }
-    ok0 = fabs(hz[0][0] / hz[0][1] - 1.0) < 0.002;
-    ok1 = fabs(hz[1][0] / hz[1][1] - 1.0) > 0.005;
-    check(ok0, "(f) VAR 0: voices 0 and 1 self-oscillate at %.1f and %.1f Hz (the same cutoff)", hz[0][0], hz[0][1]);
-    check(ok1, "(f) VAR 127: voices 0 and 1 self-oscillate at %.1f and %.1f Hz (%.2f %% apart, >= 0.5)", hz[1][0], hz[1][1],
-          100.0 * fabs(hz[1][0] / hz[1][1] - 1.0));
+    lo = hi = hz[0][0];
+    for (i = 1; i < k; i++) {
+        lo = hz[0][i] < lo ? hz[0][i] : lo;
+        hi = hz[0][i] > hi ? hz[0][i] : hi;
+    }
+    ok0 = hi / lo - 1.0 < 0.002;
+    check(ok0, "(f) VAR 0: the %u voices self-oscillate at %.1f .. %.1f Hz (the same cutoff, within 0.2 %%)", k, lo, hi);
+    lo = hi = hz[1][0];
+    for (i = 1; i < k; i++) {
+        lo = hz[1][i] < lo ? hz[1][i] : lo;
+        hi = hz[1][i] > hi ? hz[1][i] : hi;
+    }
+    ok1 = hi / lo - 1.0 > 0.01;
+    check(ok1, "(f) VAR 127: the %u voices self-oscillate at %.1f .. %.1f Hz (%.2f %% apart, >= 1)", k, lo, hi, 100.0 * (hi / lo - 1.0));
 }
 
 /* ------------------------------------------------------------ (g) --- */
@@ -523,7 +533,7 @@ static void test_mix(void)
         double f1, f2, f3, f4, s1;
         drift_fresh();
         pots((int)mixes[k], 64, 0, 0, 127, 0, 0, 0);
-        trk_note_on(T, 57, 127);
+        trk_note_on(T, 57, 100);
         run(0, 16384);
         run(buf, NFFT * 2u);
         fft_mag(buf, NFFT * 2u, mag2_);
@@ -595,7 +605,7 @@ static void test_corners(void)
                             drift_fresh();
                             pots(MIXES[a], 100, 127, 127, CUT[d], RES[b], DRV[c], KTR[e]);
                             T->p[P_ED_FLT] = 63;
-                            trk_note_on(T, NOTES[n], 127);
+                            trk_note_on(T, NOTES[n], 100);
                             run(buf, 4096);
                             for (i = 0; i < 4096u; i++)
                                 mx = (buf[i] < 0 ? -buf[i] : buf[i]) > mx ? (buf[i] < 0 ? -buf[i] : buf[i]) : mx;
@@ -683,7 +693,7 @@ static double mix_cost(const uint8_t (*parts)[3])
  * regress.c and acid_test.c; another compiler or -O level moves it: re-measure and move the bound with a stated reason, never
  * to hide a regression). The device's PERF meter (Task 8.1) is the real gate: FPU divides are one instruction here. */
 #define DRIFT_MIX_MAX 2137.0
-#define DRIFT_COST_MAX 0.0     /* set from the measurement (the plan's "Measured result") */
+#define DRIFT_COST_MAX 950.0   /* the measured worst (HOOVER, 862 at DRIFT_POLY 1, DRIFT_OS 1) + 10 % */
 
 static void test_cost(void)
 {
@@ -717,7 +727,7 @@ static void test_cost(void)
     printf("drift: (i) DRIFT_POLY %d, DRIFT_OS %d: the mix alone %.0f; 4parts_light %.0f, 4parts_full %.0f; the DRIFT part alone, worst preset %s %.0f (%.0f per voice)\n",
            (int)DRIFT_POLY, (int)DRIFT_OS, idle, light, full, ENGINES[ENGI_DRIFT]->presets[worst_k].name, worst,
            (worst - idle) / DRIFT_POLY);
-    check(full <= DRIFT_MIX_MAX && worst <= DRIFT_MIX_MAX && (DRIFT_COST_MAX == 0.0 || worst <= DRIFT_COST_MAX),
+    check(full <= DRIFT_MIX_MAX && worst <= DRIFT_MIX_MAX && worst <= DRIFT_COST_MAX,
           "(i) 4parts_full %.0f and the DRIFT part %.0f both <= %.0f (the heaviest part shipped), and the part <= its pin %.0f", full, worst,
           DRIFT_MIX_MAX, DRIFT_COST_MAX);
 }

@@ -11,7 +11,7 @@ VOID FOUR is a fork of the Felucca 1.6 firmware for the M-VAVE FM-1 (a JieLi AC7
 | 0 | OB-Z | `ENG_OBX`, `ENGI_OBX`, `OBX_PRESETS` | `firmware/src/eng_obx.c` (the old ANALOG engine) | works; Phase 4 adds the SEM filter morph and slop |
 | 1 | WAVE | `ENG_WAVE`, `ENGI_WAVE` | `firmware/src/eng_wave.c` (the VOID WAVE plugin port) | works; DC blocker added in Task 4.2 |
 | 2 | ACID | `ENG_ACID`, `ENGI_ACID` | `firmware/src/eng_acid.c` | **real 303 voice** (Task 5.2): `bass303.c` after Open303, float, own envelope (`ownenv`); `docs/plans/2026-10-17-acid-303.md`. Its 32 seeds are still the placeholder-era ones (Task 7.2 re-voices 12) |
-| 3 | DRIFT | `ENG_DRIFT`, `ENGI_DRIFT` | `firmware/src/eng_drift.c` | **placeholder**: same; Phase 6 makes it a ZDF ladder |
+| 3 | DRIFT | `ENG_DRIFT`, `ENGI_DRIFT` | `firmware/src/eng_drift.c`, `dsp_va.c` | **real Juno voice** (Task 6.1): a float port of the Ultramaster KR-106 (polyBLEP DCO, OTA ladder, 4-position HPF), `ownenv = 0`; `docs/plans/2026-10-17-drift-juno.md`. **`DRIFT_POLY 1`, `DRIFT_OS 1` by the CPU measurement (mono!), raise them if Task 8.1's PERF shows room.** Its 32 seeds are the placeholder-era ones with only `e[1]` (DTN -> PW) remapped (Task 7.2 converts the KR-106's 43 presets) |
 
 - **Repo:** `/Users/ollie_nicklin/Documents/Projects/VOID SYNTH/FM1-Four`. It is a git repo on branch `main` (there is no `master`; the handover said `master` in error, corrected 2026-10-16), and the user has authorised committing directly.
 - **Untouched originals:** `../Felucca-main` is the original tree with the VOID engine. Read it, never edit it. `../Felucca-main.bak` is older still.
@@ -52,7 +52,7 @@ VOID FOUR is a fork of the Felucca 1.6 firmware for the M-VAVE FM-1 (a JieLi AC7
 | 5.0 own-envelope hooks / 5.1 FPU on | done, reviewed | 5595251, d537314 / 893f3b7 |
 | 5.2 ACID: float 303 (bass303 / Open303 port) | done, reviewed | 3cd1204..3138e9d, e2e47ec |
 | 5.3 Accent and slide editable on ACID | to do | |
-| 6.1 DRIFT: ZDF nonlinear ladder plus `dsp_va.c` | to do | |
+| 6.1 DRIFT: the Juno voice (KR-106 port) plus `dsp_va.c` | done, NOT yet reviewed | see `git log` (feat(drift) ...) |
 | 7.1 Audition renderer (WAV + rating page) | to do | |
 | 7.2 Final 128 presets, with user sign-off by ear | to do | |
 | 8.1 Hardware: release build, install (**ask first**), PERF, MIDI check | to do | |
@@ -112,7 +112,12 @@ mkdir -p build/ui_new/ppm build/ui_slot && build/host/ui_render build/ui_new bui
 
 - **Never** use `GOLDEN_UPDATE=1` or `BUDGET_UPDATE=1` to hide a regression.
 - Regenerate only after a deliberate sound change, and review the `tests/golden.txt` diff. For any changed hash on a kept engine, write the reason in the commit message.
-- `tests/cpu_baseline.txt` was recorded on this Mac in Task 0.1.
+- `tests/cpu_baseline.txt` was recorded on this Mac in Task 0.1. Its only rewrites since, each by the user's decision and each
+  limited to lines that measured a placeholder: Task 4.3 (the 32 `cpu/WAVE/` lines), Task 5.2 (the 32 `cpu/ACID/` lines, e2e47ec) and
+  Task 6.1 (the 32 `cpu/DRIFT/` lines, which measured OB-Z's ANALOG render, and `cpu/mix/4parts_light`, whose DRIFT part did the
+  same: 2292 against the old 1787 (+28 %) once DRIFT was real, beyond the check's +25 %; `4parts_full` stays at 1705 and reads
+  +15 %). `BUDGET_UPDATE` was not used. Task 6.1 also took `analog_render_f` out of `target_budget.txt` (the dead ANALOG copy in
+  `eng_obx.c` and the `run_tests.sh` guard that waited for its removal are gone) and added `drift_render`.
 
 ## 6. Architecture notes you need
 

@@ -24,8 +24,9 @@ static inline void *eng_mem_of(uint32_t p);
 
 #include "eng_obx.c"            /* OB-Z: two oscillators, noise, drive, the filter */
 #include "eng_acid.c"           /* ACID: the TB-303 voice (bass303.c, after Open303) */
-#include "eng_drift.c"          /* DRIFT (placeholder: OB-Z's render) */
+#include "eng_drift.c"          /* DRIFT: the Juno voice (dsp_va.c, after the Ultramaster KR-106) */
 #include "eng_wave.c"           /* WAVE: the VOID WAVE plugin's voice (wavetables: tools/gen_void_tables.py) */
+ENG_MEM_FITS("DRIFT", DRIFT_MEM);
 ENG_MEM_FITS("ACID", ACID_MEM);    /* (against the region, not against WAVE: ACID owes the pool nothing but its own size; the test pins that the pool did not grow) */
 
 static union {

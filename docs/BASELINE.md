@@ -22,6 +22,36 @@ Confirms the handover's figures before the Phase 4-6 DSP work starts.
 - Suite failures: only the two known environment ones below (perform FLANGER/PHASER, and the
   ASan probe aborting so the sanitizer stage is skipped).
 
+## Task 6.1: DRIFT, the Juno voice (2026-10-17)
+
+Measured on this Mac. Plan and derivation: `docs/plans/2026-10-17-drift-juno.md`.
+
+- **`ENG_MEM_PART`: 800 B before, 800 B after** (WAVE's `VOID_MEM`, 8 x 100 B, is still the largest; ACID 764 B;
+  DRIFT `sizeof(drift_vc_t)` 196 B x `DRIFT_POLY` 1 = 196 B; even OS 2 x POLY 2 would be 584 B). So the four-part
+  engine pool is **3,200 B before and after**, and the brief's expected growth (768 B -> 7 KB) did not happen: DRIFT
+  fits inside the region WAVE already sizes.
+- **Image 361,616 B -> 366,128 B** of APP_SLOT 581,564 (+4,512 B, net of the deleted ANALOG copy); **RAM `.data+.bss`
+  43,380 B of 73,728, unchanged**; **pool 275,624 B of 368,640, unchanged** (the 275,496 B of R0 grew by 128 B in
+  Task 5.2, not here). `build.py check()`: no soft-double routines.
+- **CPU (host instructions per sample, `-O2`, mix included, idle mix 359 / 337):**
+
+  | DRIFT_OS | DRIFT_POLY | `4parts_full` | DRIFT part alone (HOOVER, the dearest seed) | per voice |
+  |---|---|---|---|---|
+  | 2 | 2 (the plan's start) | 2966 | 1985 | 813 |
+  | 1 | 2 | 2302 | 1268 | 455 |
+  | 2 | 1 | 2349 | 1221 | 862 |
+  | **1** | **1 (shipped)** | **2018** | **863** | **504** |
+
+  Bound: `4parts_full` and the DRIFT part each <= 2137 (the heaviest configuration the baseline already records,
+  `cpu/WAVE/27_CYBER_BASS`, six voices). Only OS 1 x POLY 1 is inside it. Before this task `4parts_full` read 1791
+  (1705 in the file) and the placeholder cost ~400 for its two voices.
+  Where a voice's ~500 goes (OS 1): the filter ~230, the DCO ~70, the rest (DC blockers, HPF, amplitude, output, voice.c's
+  share, coefficient updates) ~150. The filter does six divides per oversampled sample. **The host count sees a divide as
+  one instruction; the device's FPU divide is dearer, so Task 8.1's PERF run is the real gate and the first thing
+  to try raising (`DRIFT_POLY`, then `DRIFT_OS`) if it shows room.**
+- `regress`: 141 goldens, 34 moved (all the 32 DRIFT presets, `song/4track_mix_four`, `slicer/song_gate_stut_four`;
+  no OB-Z, WAVE or ACID engine hash moved), `union_golden.txt` 168 of 168 (every sequence plays DRIFT on part 3).
+
 ## Host tests (`sh tests/run_tests.sh`, ~6 min) failures that exist before any FM1-Four change
 These are environment failures on this Mac, not regressions. Later tasks may not add to this list.
 1. `perform: FLANGER over REPEAT 1/16 ... PHASER ... FAIL` (perform_test cost check, host timing).

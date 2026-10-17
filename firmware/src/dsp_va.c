@@ -45,6 +45,8 @@ typedef struct {
     /* the donor's cached Coeffs, its thermal-noise state and its follower */
     float G, inv_den;            /* g1^4; 1 / (1 + k G) */
     float fb_scale, inv_fb;      /* the feedback OTA's scale and its inverse */
+    float c0, c1, c2, c3;        /* the linear predictor's weights, (1 - g1) g1^3 .. (1 - g1), times fb_scale */
+    float xa, xg, ko;            /* 0.065 fb_scale; 0.142 / (1 + k G); k / (1 + k G) / fb_scale */
     float noise_lvl;             /* adaptive thermal noise, set by va_ladder_coeffs */
     float env, edec;             /* peak follower (noise suppression) and its per-call decay */
     float cfrq, cres;            /* the (frq, res) the coefficients were computed for; cfrq < 0 = none */
@@ -160,6 +162,16 @@ static void va_ladder_coeffs(va_ladder_t *f, float cutoff_hz, float res, float s
         f->inv_den = 1.0f / (1.0f + k * G);
         f->fb_scale = 4.20f * (k - 2.5f < 0.3f ? 0.3f : k - 2.5f > 1.0f ? 1.0f : k - 2.5f);
         f->inv_fb = 1.0f / f->fb_scale;
+        {   /* what the sample loop folds: S and the OTA's argument scaled once, here */
+            float o = (1.0f - g1) * f->fb_scale;
+            f->c0 = o * f->g1_3;
+            f->c1 = o * g1_2;
+            f->c2 = o * g1;
+            f->c3 = o;
+            f->xa = VA_INPUT_RATIO * f->fb_scale;
+            f->xg = VA_DIRECT_GAIN * f->inv_den;
+            f->ko = k * f->inv_den * f->inv_fb;
+        }
     }
     /* Adaptive noise level: runs every call, because the follower and the state energy change with the signal. When the filter
      * is loud the noise floor shrinks (so it is not amplified through the resonant peak); when quiet it can be larger (it
@@ -172,19 +184,21 @@ static void va_ladder_coeffs(va_ladder_t *f, float cutoff_hz, float res, float s
 
 /* The audio-rate sample, called os x per base sample. The OTA stage solves y = s + g tanh(x - y) by one Newton-Raphson
  * iteration from the linear TPT estimate, which avoids the zipper artifacts the explicit form has at high cutoff and
- * resonance. The tanh is the Pade x (27 + x^2) / (27 + 9 x^2) (|x| > 3: +-1, derivative 0). With d = 27 + 9 x^2 the
- * stage is   y_new = y - f / df,   f = y - s - g t,   df = 1 + g t',
- *   t = x (27 + x^2) / (0.35 d),   t' = 27 (27 - 3 x^2) / d^2        (x = 0.35 (in - y))
- * which is   y - F d / D,   F = (y - s) d - g x (27 + x^2) / 0.35,   D = d^2 + 27 g (27 - 3 x^2):  one divide. */
-static inline float va_stage(float *s, float x, float g, float g1)
+ * resonance. The tanh is the Pade x (27 + x^2) / (27 + 9 x^2) (|x| > 3: +-1, derivative 0).
+ *
+ * The donor evaluates f = y0 - s - g t and df = 1 + g t' for y0 = s + g1 (x - s) and subtracts f / df. Written out, with
+ * xs = 0.35 (x - y0) = 0.35 (1 - g1)(x - s), w = xs^2 and d = 27 + 9 w, the linear parts cancel exactly (g1 / (1 - g1) = g):
+ *     f = 8 g xs w / (0.35 d),   df = (d^2 + 27 g (27 - 3 w)) / d^2,   so   y = y0 - 8 g xs w d / (0.35 (d^2 + 27 g (27 - 3 w)))
+ * the same number with one divide, no cancellation, and about 19 operations a stage in place of 30. Saturated (|xs| > 3: tanh
+ * = +-1, slope 0) the stage is s +- g / 0.35. */
+static inline float va_stage(float *s, float x, float h, float g1, float kg, float g27, float gk)
 {
-    float y = *s + g1 * (x - *s), a = y - *s, xs = (x - y) * VA_OTA_SCALE;
-    if (xs > 3.0f || xs < -3.0f)
-        y = y - (a - g * (xs > 0.0f ? 1.0f : -1.0f) * (1.0f / VA_OTA_SCALE));           /* saturated: tanh = +-1, slope 0 */
-    else {
-        float x2 = xs * xs, d = 27.0f + 9.0f * x2, F = a * d - g * xs * (27.0f + x2) * (1.0f / VA_OTA_SCALE);
-        float D = d * d + 27.0f * g * (27.0f - 3.0f * x2);
-        y = y - F * d / D;
+    float dxs = x - *s, xs = dxs * h, y;
+    if (xs > 3.0f || xs < -3.0f) {
+        y = xs > 0.0f ? *s + gk : *s - gk;
+    } else {
+        float w = xs * xs, d = 27.0f + 9.0f * w, dd = d * d + g27 * (27.0f - 3.0f * w);
+        y = *s + g1 * dxs - kg * xs * w * d / dd;
     }
     *s = 2.0f * y - *s;
     return y;
@@ -203,7 +217,7 @@ static inline float va_ota_sat(float x)       /* the feedback OTA's tanh (Pade),
 
 static inline float va_ladder_tick(va_ladder_t *f, float x)
 {
-    float S, ota, u, amp, q, sq, g1nl, gnl, lp;
+    float S, u, amp, q, sq, g1nl, gnl, lp;
     union { uint32_t u; float f; } n;
     /* thermal noise: a deterministic LCG, a white float in [-1, 1) */
     f->seed = f->seed * 196314165u + 907633515u;
@@ -214,32 +228,51 @@ static inline float va_ladder_tick(va_ladder_t *f, float x)
     /* Linear cascade predictor: y4 when u = 0. The (1 - g1) factor comes from the last stage's output = g1 input_prev +
      * (1 - g1) s_last, and propagates through to all state contributions. Missing this factor doubles the effective k at
      * g1 = 0.5 (cutoff near Fs/4), which made the filter self-oscillate at a much lower nominal k than it should. */
-    S = (1.0f - f->g1) * (f->s[0] * f->g1_3 + f->s[1] * f->g1_2 + f->s[2] * f->g1 + f->s[3]);
+    S = f->s[0] * f->c0 + f->s[1] * f->c1 + f->s[2] * f->c2 + f->s[3] * f->c3;   /* (the weights carry fb_scale and 1 - g1) */
     /* The BA662 OTA: input and feedback share the differential pair (+IN: the oscillator mix x 1.5/(47+1.5); -IN: the
      * filter output x 1.5/(100+1.5)). In DSP-normalised units the input enters at VA_INPUT_RATIO relative to the feedback S.
      * Self-oscillation (input = 0): the differential is -S, identical to a feedback-only model. Low cutoff (S ~ 0): the OTA
      * boosts the input in proportion to k, a natural passband compensation. High cutoff (S ~ input x gain): the differential
-     * partly cancels and the passband returns to its uncompensated level. */
-    ota = va_ota_sat((x * VA_INPUT_RATIO - S) * f->fb_scale) * f->inv_fb;
-    /* the filter input = the direct path (10K) + the resonance-controlled OTA output */
-    u = (x * VA_DIRECT_GAIN + f->k * ota) * f->inv_den;
+     * partly cancels and the passband returns to its uncompensated level. The filter input is the direct path (10K) + the
+     * resonance-controlled OTA output, over 1 + k G:
+     *     u = (x 0.142 + k sat((0.065 x - S) fb_scale) / fb_scale) / (1 + k G)                                              */
+    u = x * f->xg + va_ota_sat(x * f->xa - S) * f->ko;
     /* Per-stage describing-function pitch compensation: at a high state amplitude (self-oscillation, large feedback) the tanh
      * in a stage effectively lowers its gain, which shifts the pitch; dfGain pushes g1 up when the state amplitude is large.
      * It works alongside the k-based compensation in va_ladder_coeffs, which handles the linear bilinear warping; this
      * handles the nonlinear, saturation-induced pitch shift that only appears in self-oscillation. g1 / dfGain with
-     * dfGain = max(1/sqrt(q), 0.65) is g1 x min(sqrt(q), 1/0.65). */
+     * dfGain = max(1/sqrt(q), 0.65), q = 1 + 0.6 a^2, is g1 x min(sqrt(q), 1/0.65). For a < 0.1 (a state this small is the
+     * ordinary playing level) sqrt(q) = 1 + 0.3 a^2 - 0.045 a^4 + ..., the series to a^2 with an error under 5e-6. */
     amp = fm_fabsf(f->s[3]);
-    q = 1.0f + 0.6f * amp * amp;
-    sq = q * fm_rsqrtf(q);
+    if (amp < 0.1f)
+        sq = 1.0f + 0.3f * amp * amp;
+    else {
+        q = 1.0f + 0.6f * amp * amp;
+        sq = q * fm_rsqrtf(q);
+    }
     g1nl = f->g1 * (sq < 1.53846154f ? sq : 1.53846154f);
     g1nl = g1nl < 0.98f ? g1nl : 0.98f;
     gnl = g1nl / (1.0f - g1nl);
-    lp = va_stage(&f->s[0], u, gnl, g1nl);
-    lp = va_stage(&f->s[1], lp, gnl, g1nl);
-    lp = va_stage(&f->s[2], lp, gnl, g1nl);
-    lp = va_stage(&f->s[3], lp, gnl, g1nl);
+    {
+        float h = VA_OTA_SCALE * (1.0f - g1nl), kg = (8.0f / VA_OTA_SCALE) * gnl, g27 = 27.0f * gnl, gk = gnl * (1.0f / VA_OTA_SCALE);
+        lp = va_stage(&f->s[0], u, h, g1nl, kg, g27, gk);
+        lp = va_stage(&f->s[1], lp, h, g1nl, kg, g27, gk);
+        lp = va_stage(&f->s[2], lp, h, g1nl, kg, g27, gk);
+        lp = va_stage(&f->s[3], lp, h, g1nl, kg, g27, gk);
+    }
     /* output gain: passband makeup for the 4-pole cascade (direct gain x 8.59 = 1.22: unity near R = 0) */
     return lp * VA_OUT_GAIN;
+}
+
+/* n samples through the filter. The state is copied to locals for the run, so it and the coefficients stay in registers
+ * (the same arithmetic as n calls of va_ladder_tick) */
+static void va_ladder_run(va_ladder_t *f, const float *x, float *y, int n)
+{
+    va_ladder_t l = *f;
+    int i;
+    for (i = 0; i < n; i++)
+        y[i] = va_ladder_tick(&l, x[i]);
+    *f = l;
 }
 
 /* ============================================================

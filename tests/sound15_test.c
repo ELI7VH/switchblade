@@ -213,8 +213,7 @@ static void test_filter(void)
               k && PAGES[k - 1u].fam == FAM_EDIT && PAGES[k - 1u].id[0] == P_FTYPE && PAGES[k - 1u].id[1] == P_E4 &&
               PAGES[k - 1u].id[2] == P_E5 && PAGES[k - 1u].id[3] == P_E7 && str_eq(PAGES[k - 2u].title, "MACHINE 2"));
     }
-    /* (every engine but ANALOG and VOID ignored TYPE: FM1-Four has none such, ACID and DRIFT play OB-Z's render until
-     * their phases) */
+    /* (TYPE is OB-Z's and WAVE's; DRIFT reads it as its HPF position, tests/drift_test.c (h); ACID ignores it) */
     check("ANALOG: VOID's LP12 / HP24 / NOTCH play as its LP / HP / LP, bit for bit",
           phrase_child(0, 0, type_lp12) == phrase_child(0, 0, 0) && phrase_child(0, 0, type_hp24) == phrase_child(0, 0, type_hp) &&
           phrase_child(0, 0, type_notch) == phrase_child(0, 0, 0));

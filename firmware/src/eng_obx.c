@@ -25,38 +25,13 @@
  *   SUB   OSC 1 a saw, OSC 2 a square an octave below it (detuned by DTN in cents as before): MIX (shown SUB) is the
  *         sub oscillator's level
  *
- * The ANALOG render below (analog_note_on, analog_osc, analog_render_f) is the engine as it stood
- * before the morph, left untouched for the ACID and DRIFT placeholders that borrow it. Phases 5
- * and 6 give those machines their own voices and this copy goes with them. */
+ * (The copy of the ANALOG render that the ACID and DRIFT placeholders borrowed is gone: both machines have their own voices.) */
 static const char *const N_ANALOG_WAVE[] = {"SAW", "SQR", "TRI", "SIN", "PWM", "SYNC", "SUB"};
 enum { AW_SYNC = 5, AW_SUB = 6 };
 static const param_desc_t ANALOG_SYNC = {"SYNC", F_INT, 0, 127, 10, 0, 0};   /* DTN's range and default */
 static const param_desc_t ANALOG_SUB = {"SUB", F_PCT, 0, 127, 64, 0, 0};      /* MIX's */
 
-/* the filter's TYPE (1.5, #104: track parameter P_FTYPE, EDIT > FILTER; ANALOG's 8 values are full): the SVF's
- * outputs (dsp.c tsvf_lp, written out here with the taps: Simper's trapezoidal state-variable filter), 0 LP the
- * low-pass as always (the same steps, bit for bit), 1 BP its band-pass v1, 2 HP in - k v1 - v2. At the cutoff the three peak alike (1/k, k the damping
- * RES sets: 2 at RES 0, ~0.15 at 127), so the soft knee after them and the level stay as LP's */
-static inline int32_t analog_tap(const tsvf_t *c, int32_t k, int32_t in, int32_t *ic1, int32_t *ic2, uint32_t ft)
-{
-    int32_t v3 = in - *ic2;
-    int32_t v1 = (c->a1 * *ic1 + c->a2 * v3) >> 13;
-    int32_t v2 = *ic2 + ((c->a2 * *ic1 + c->a3 * v3) >> 13);
-    *ic1 = clamp(2 * v1 - *ic1, -150000, 150000);
-    *ic2 = clamp(2 * v2 - *ic2, -150000, 150000);
-    if (!ft)
-        return v2;                                    /* LP: tsvf_lp's (the same steps) */
-    return ft == 1u ? v1 : in - ((k * v1) >> 12) - v2;
-}
-#define ANALOG_K(res) (8192 - (res) * 7600 / 127)     /* tsvf_coef's damping, Q12 */
-
-/* TYPE as ANALOG plays it: VOID's LP12 / HP24 / NOTCH (params.c N_FTYPE, 3..5) as its LP / HP / LP */
-static inline uint32_t analog_ft(const int16_t *p)
-{
-    static const uint8_t FT[6] = {0, 1, 2, 0, 2, 0};
-    uint32_t f = (uint32_t)p[P_FTYPE];
-    return f < 6u ? FT[f] : 0u;
-}
+#define ANALOG_K(res) (8192 - (res) * 7600 / 127)     /* tsvf_coef's damping, Q12 (the morph's and the 4-pole's taps) */
 
 /* ------------------------------------------------------- OB-Z: the MODE morph --- */
 /* The SVF hands out all three responses at once: the low-pass v2, the band-pass v1 and the
@@ -405,93 +380,6 @@ static void obx_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const v
         obx_render_p4(t, v, out, n, m);
     else
         obx_render_f(t, v, out, n, m);
-}
-
-/* ------------------------------------------- the ANALOG render, for ACID and DRIFT --- */
-/* The engine as it stood before the morph: two oscillators, noise (E3), drive (E6), key tracking
- * (E7) and the LP / BP / HP tap of the filter TYPE. OB-Z does not use it any more; the ACID and
- * DRIFT placeholders do (eng_acid.c, eng_drift.c), and it goes when their phases give them their
- * own voices. Left untouched so their renders do not move. */
-static void analog_note_on(track_t *t, voice_t *v)
-{
-    (void)t;
-    v->ph[1] = v->ph[0] + 0x40000000u;
-    v->s[0] = v->s[1] = 0;                            /* filter */
-    if (!v->s[2])
-        v->s[2] = 0x1234567 + (int32_t)v->age;        /* noise state */
-    v->s[3] = 0;                                      /* SYNC: no restart pending */
-}
-
-static inline __attribute__((always_inline)) void analog_osc(track_t *t, voice_t *v, int32_t *out, uint32_t n,
-                                                             const vmod_t *m, uint32_t ft)
-{
-    const int16_t *p = t->p;
-    uint32_t wave = (uint32_t)p[P_E0], i;
-    int32_t det = p[P_E1], mix = p[P_E2], noise = p[P_E3];
-    int32_t cut = (p[P_E4] << 8) + m->cutoff + (p[P_E7] * (v->pitch16 - 60 * 16) >> 4);
-    tsvf_t flt;
-    int32_t drive = 32768 + p[P_E6] * 512;                       /* 1x .. 3x */
-    uint32_t inc1 = m->inc;
-    uint32_t inc2 = det ? cents_inc(m->pitch16, det, 0) : inc1;      /* DTN in cents */
-    uint32_t pw = 0x80000000u + (uint32_t)((m->shape - (64 << 8)) << 15);
-    int32_t m2 = mix * 258, m1 = 32767 - m2;                    /* osc mix Q15 */
-    int32_t nz = noise * 200, drv = p[P_E6];
-    uint32_t ph0 = v->ph[0], ph1 = v->ph[1];                  /* state in locals: out[] may alias v->s[] */
-    int32_t ic1 = v->s[0], ic2 = v->s[1], nst = v->s[2];
-    int32_t fk = ft ? ANALOG_K(p[P_E5]) : 0;
-    tsvf_coef(&flt, cut, p[P_E5]);
-    for (i = 0; i < n; i++) {
-        int32_t a, b, s;
-        switch (wave) {
-        case 1:
-            a = osc_pulse(ph0, inc1, 0x80000000u);
-            b = osc_pulse(ph1, inc2, 0x80000000u);
-            break;
-        case 2:
-            a = osc_tri(ph0);
-            b = osc_tri(ph1);
-            break;
-        case 3:
-            a = osc_sine(ph0);
-            b = osc_sine(ph1);
-            break;
-        case 4:
-            a = osc_pulse(ph0, inc1, pw);
-            b = osc_pulse(ph1, inc2, pw);
-            break;
-        default:
-            a = osc_saw(ph0, inc1);
-            b = osc_saw(ph1, inc2);
-            break;
-        }
-        ph0 += inc1;
-        ph1 += inc2;
-        s = mulq15(a, m1) + mulq15(b, m2);
-        if (nz)
-            s += mulq15((int32_t)(noise32(&nst) >> 17) - 16384, nz);
-        if (drv)
-            s = softclip(((s >> 2) * (drive >> 2)) >> 11);   /* pre-shifts: drive is up to 3x, no overflow */
-        {   /* filter, linear up to half scale, then a soft knee (only resonance peaks saturate); soft_knee()
-             * written out: the host compiler makes this loop 1 % slower with the call */
-            int32_t y = ft ? analog_tap(&flt, fk, s >> 1, &ic1, &ic2, ft) : tsvf_lp(&flt, s >> 1, &ic1, &ic2);
-            int32_t a = y < 0 ? -y : y;
-            if (a > 16000) {
-                a = 16000 + (softclip((a - 16000) * 2) >> 1);
-                y = y < 0 ? -a : a;
-            }
-            s = y << 1;
-        }
-        out[i] += voice_amp(s, m, i) << 1;
-    }
-    v->ph[0] = ph0;
-    v->ph[1] = ph1;
-    v->s[0] = ic1;
-    v->s[1] = ic2;
-    v->s[2] = nst;
-}
-static __attribute__((noinline)) void analog_render_f(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
-{
-    analog_osc(t, v, out, n, m, analog_ft(t->p));
 }
 
 /* OBX_PRESETS: presets/four/obx.py (tools/four_presets.py, four_presets.h) */

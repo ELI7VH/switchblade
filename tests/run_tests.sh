@@ -96,8 +96,6 @@
 #                   4-pole bounded and adding no DC at RES 127; SLOP 0 is inert over different note-ons and SLOP 127
 #                   spreads the voices within +-6 cents; DTN moves the second oscillator by its cents; dspfft.h's two
 #                   refusals (an n it cannot transform, a band below 0 Hz).
-#                   Plus a source check: the ANALOG render copied in eng_obx.c for the DRIFT placeholder
-#                   fails the suite once no engine binds analog_render_f (Phase 6 deletes it with the placeholder).
 # ACID (tests/acid_test.c, tests/acid_ref/, tests/acid_meas.h): the 303 voice (bass303.c, eng_acid.c) through the real voice path against
 #                   the donor's own vectors (tests/acid_ref.sh regenerates them from fm1-x0x's bass303.c): the filter's impulse response on
 #                   a 5 x 5 CUT / RES grid within 1 dB, the RES 127 resonance within 3 % of the donor's and tracking CUT, an accented step >= 3 dB
@@ -105,6 +103,12 @@
 #                   the edit slots the vectors do not reach (E0 WAVE saw / square harmonics, E1 TUNE the measured pitch, E6 DRV level and
 #                   harmonics, E7 SQL's RES / accent decay on an accented step only), the cost per voice (<= 3 x OB-Z, <= 1080 instructions /
 #                   sample: macOS only, a loud SKIP elsewhere), amp() in [0, 32767], done() ends released and held notes.
+# DRIFT (tests/drift_test.c, tests/drift_ref.cpp, tests/drift_ref_cfg.h): the Juno voice (eng_drift.c, dsp_va.c; the Ultramaster KR-106, GPL-3.0). Tier 1: the
+#                   lifted ladder against the donor's own kr106::VCF on 34 cases (a 5 x 5 cutoff x resonance grid at OS 2, OS 1 and 4, loud inputs),
+#                   within 1e-4 of the peak; the half-band pair (unity gain, image rejection). Tier 2, through the real voice path: 24 dB/oct, the THD
+#                   of DRV 0 / 127, RES 127 self-oscillating within 3 % of the cutoff, DRFT (0: two renders identical; 127: within +-8 cents), VAR (0: one
+#                   cutoff; 127: spread), the MIX spectrum (sub / saw / pulse), P_FTYPE's HPF corners, a bounded sweep of the corners, and the cost:
+#                   4parts_full and the DRIFT part inside the heaviest part shipped (macOS only, a loud SKIP elsewhere).
 # WAVE (tests/void_tables_test.py, tests/void_test.c): the VOID WAVE plugin's voice (the WAVE engine, was VOID). Its wavetables against the plugin's
 #                   frames recomputed with numpy (every keyframe and level band-limited, the crossfade within its limit;
 #                   skipped without numpy); the engine: pitch, OSC2's steps, band-limited at C8, bounded and without DC at
@@ -313,25 +317,19 @@ if [ -f build/gen/felucca_tables.h ]; then
     $CC -O2 -w -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/acid_test" tests/acid_test.c -lm
     run "ACID: the 303 voice against the donor's vectors (filter grid, resonance, accent, slide, decay), the cost, amp() / done()" \
         "$OUT/acid_test" tests/acid_ref
-    # The ANALOG render copied into eng_obx.c (analog_tap, analog_ft, ANALOG_K, analog_note_on,
-    # analog_osc, analog_render_f) is OB-Z's engine as it stood before Task 4.1's morph. It is kept
-    # only because the DRIFT placeholder borrows it (ACID has had its own voice since Task 5.2) and its
-    # golden hashes are recorded against it, and the two copies are meant to diverge, so nothing in the
-    # sources can tell that one is dead. Phase 6 gives DRIFT its own voice: the moment no engine binds
-    # analog_render_f the copy is orphaned, and this fails until it is deleted.
-    echo "== the ANALOG render copied in eng_obx.c is still borrowed (Phase 6 deletes it with the DRIFT placeholder)"
-    an_users=$(grep -l analog_render_f firmware/src/eng_*.c 2>/dev/null | grep -v eng_obx.c | tr '\n' ' ') || true
-    if ! grep -q '^static .*analog_render_f(' firmware/src/eng_obx.c; then
-        echo "   ok: the copy is gone from firmware/src/eng_obx.c"
-    elif [ -n "$an_users" ]; then
-        echo "   ok: bound by $an_users"
+    # DRIFT: the Juno voice (eng_drift.c, dsp_va.c), after the Ultramaster KR-106. Tier 1 holds the lifted filter to the donor's own
+    # kr106::VCF (tests/drift_ref.cpp, built from ../ultramaster_kr106-main or KR106_DIR; without it (a) says NOT CHECKED), tier 2 the voice.
+    KR=${KR106_DIR:-../ultramaster_kr106-main}
+    mkdir -p build/drift_ref
+    if [ -f "$KR/Source/DSP/KR106VCF_OPTIMIZED.h" ] && ${CXX:-c++} -std=c++17 -O2 -ffp-contract=off -w -I"$KR/Source/DSP" -Itests \
+            -o "$OUT/drift_ref" tests/drift_ref.cpp 2>/dev/null; then
+        "$OUT/drift_ref" build/drift_ref >/dev/null
     else
-        echo "   FAIL: no engine binds analog_render_f any more, so the ANALOG copy in"
-        echo "         firmware/src/eng_obx.c (analog_tap, analog_ft, ANALOG_K, analog_note_on,"
-        echo "         analog_osc, analog_render_f) is dead code -- delete it with the placeholder"
-        echo "         it was kept for, and drop this check."
-        fail=1
+        rm -f build/drift_ref/*.f32
     fi
+    $CC -O2 -w -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/drift_test" tests/drift_test.c -lm
+    run "DRIFT: the filter against the donor's kr106::VCF (34 cases), the halfband, 24 dB/oct, DRV's THD, self-oscillation, DRFT, VAR, the MIX spectrum, the HPF, the corners, the cost" \
+        "$OUT/drift_test" build/drift_ref
     $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/slicer_test" tests/slicer_test.c -lm
     mkdir -p build/slicer_demo
     run "SLICER: no clicks, timing, sync with the sequencer, STUT, cost, demos" "$OUT/slicer_test" build/slicer_demo

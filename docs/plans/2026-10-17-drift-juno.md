@@ -119,4 +119,28 @@ no OB-Z, WAVE or ACID engine hash may move (checked by diffing `tests/golden.txt
 
 ## Measured result
 
-(filled in at the end of the task)
+Host instructions per sample, `-O2`, `tests/drift_test.c` (i) (the mix alone 359; before the task `4parts_full` read 1791):
+
+| DRIFT_OS | DRIFT_POLY | `4parts_full` | DRIFT part alone (worst seed, HOOVER) | per voice |
+|---|---|---|---|---|
+| 2 | 2 (start) | 2966 | 1985 | 813 |
+| 1 | 2 (ladder rung 1: OS 2 -> 1) | 2302 | 1268 | 455 |
+| 2 | 1 | 2349 | 1221 | 862 |
+| **1** | **1 (ladder rung 2: POLY 2 -> 1)** | **2018** | **863** | **504** |
+
+**Chosen: `DRIFT_OS 1`, `DRIFT_POLY 1`.** Rung 1 alone leaves `4parts_full` 7.7 % over the 2137 bound, rung 2 puts it inside
+(2018). Rungs 3 (coefficient update cadence: 8 -> 32 samples moves it by 17 instructions) and 4 (the explicit TPT stage) were
+not needed and not taken. **DRIFT is monophonic as shipped**, a consequence of the bound derived above, not of a defect: the
+ten KEYS seeds play one note. The bound is conservative (the heaviest configuration already shipped); Task 8.1's PERF run is
+the real gate, and `DRIFT_POLY` / `DRIFT_OS` are the two macros to raise if it shows room. The six divides a sample (host: one
+instruction each) are the cost most likely to be dearer on the device than here.
+
+Before the choice, the ladder code was tightened without changing the sound: the stage written without the cancelling
+linear parts (one divide, ~19 operations in place of 30), the three passes per segment with the filter state in registers, the
+small-state series for the pitch compensation, the folded constants. That took OS 2 x POLY 2 from 3399 to 2966. The same
+(a) bound still holds (worst 6e-6 of the peak against 1e-4).
+
+Pinned: `DRIFT_COST_MAX` 950 = the dearest seed's 863 + 10 % (+/-1 run to run), at `-O2`; `DRIFT_MIX_MAX` 2137.
+
+State: `sizeof(drift_vc_t)` 196 B (OS 1; 292 B at OS 2). `ENG_MEM_PART` 800 B before and after (WAVE's 8 x 100 B), the pool
+275,624 B before and after. Image 361,616 -> 366,128 B. RAM unchanged.

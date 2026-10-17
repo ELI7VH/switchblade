@@ -5,7 +5,6 @@ obx_render 584
 obx_render_f 613
 obx_render_p4 591
 obx_render_x 420
-analog_render_f 627
 slicer_track 632
 fm1_alnk0_irq 37502
 fm1_timer5_irq 33387
@@ -30,3 +29,4 @@ ins_drive 277
 ins_swept 230
 acid_render 86
 bass303_render 8524
+drift_render 59764
