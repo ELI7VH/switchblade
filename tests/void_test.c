@@ -8,12 +8,14 @@
  *    linear read of a level at 4 samples per cycle of its top harmonic; the plugin aliases at ~-10 dB here).
  * 4. bounded: every table x every filter TYPE at RES 127 and DRV 127, CUT 0 / 127, C1 / C4 / C8, POS 0 / 127: no
  *    wrapped sample (a jump over full scale), no DC; a TYPE and table change while notes sound.
- * 5. the presets: each sounds, its loudest 0.2 s of a held chord (a pluck decays, a pad swells) near OB-Z's SAW
+ * 5. DC: BRASS LEAD held for 2 s at its own POS, the engine's own output (what feeds the sends, ahead of the
+ *    master's DC blocker): |mean| under 1 % of the peak. And the blocker's range against the clipper's table.
+ * 6. the presets: each sounds, its loudest 0.2 s of a held chord (a pluck decays, a pad swells) near OB-Z's SAW
  *    LEAD (-18 .. +6 dB: the plugin's LP24 at a high RES loses its pass band, as a ladder does).
- * 6. the cost: each preset at WAVE's voice cap against 8 voices of OB-Z RAVE (instructions; the reference was PHASE
+ * 7. the cost: each preset at WAVE's voice cap against 8 voices of OB-Z RAVE (instructions; the reference was PHASE
  *    WIRE, retired, whose cost was within 2 % of OB-Z RAVE's on the host).
- * 7. demos (DEMO_DIR): each preset playing a phrase, a POS sweep per table.
- * 8. against the plugin: eng_void.c's filter and the plugin's own Filter.cpp (build/void_ref, tools/void_ref.cpp:
+ * 8. demos (DEMO_DIR): each preset playing a phrase, a POS sweep per table.
+ * 9. against the plugin: eng_void.c's filter and the plugin's own Filter.cpp (build/void_ref, tools/void_ref.cpp:
  *    skipped without it) on the same saw: the level, and the harmonics within 50 dB of the loudest. */
 #define main hostsim_main
 #include "hostsim.c"
@@ -260,6 +262,81 @@ static void test_bounded(void)
 }
 
 /* ------------------------------------------------------------------ 5 --- */
+/* the engine's own output for 2 s of a held note: what mix_part hands the sends, so the master's DC blocker
+ * (fx.c dc_block, after the sends are taken) is not in the way. A preset's position stays where it is. */
+static double engine_dc(uint32_t pi, uint32_t note)
+{
+    static int32_t part[CTL];
+    track_t *t = &trk[0];
+    int64_t sum = 0;
+    int32_t pk = 0;
+    uint32_t i, b;
+    fresh(ENGI_WAVE, pi);
+    t->p[P_DIST] = t->p[P_CHOR] = t->p[P_DLY] = t->p[P_REV] = 0;
+    trk_note_on(t, note, 100);
+    for (b = 0; b < 2u * FS / CTL; b++) {
+        int on = mod_begin(t);                         /* (the matrix, as mix_part does) */
+        spread_on = 0;
+        for (i = 0; i < CTL; i++)
+            part[i] = 0;
+        track_render(t, part, CTL);
+        if (on)
+            mod_end(t);
+        for (i = 0; i < CTL; i++) {
+            int32_t v = part[i];
+            sum += v;
+            pk = (v < 0 ? -v : v) > pk ? (v < 0 ? -v : v) : pk;
+        }
+    }
+    return pk ? fabs((double)sum / (double)(2u * FS)) / (double)pk : 0.0;
+}
+
+static void test_dc(void)
+{
+    uint32_t k, pi = 0;
+    double r;
+    char msg[160];
+    for (k = 0; k < ENGINES[ENGI_WAVE]->npresets; k++)
+        if (str_eq(ENGINES[ENGI_WAVE]->presets[k].name, "BRASS LEAD"))
+            pi = k;
+    r = engine_dc(pi, 60);
+    printf("void: BRASS LEAD held 2 s: |mean| / peak %.5f\n", r);
+    snprintf(msg, sizeof msg, "DC: BRASS LEAD's engine output, |mean| under 1 %% of the peak (%.5f)", r);
+    check(msg, r < 0.01);
+}
+
+/* The soft clipper reads VOID_SOFT[k] and [k + 1] for k = (|y| - VOID_CLIP_THR) >> 8. Up to Task 4.2 the clamp
+ * at VOID_OUT_LEVEL kept |y| at 62216 and that index in range on its own; the DC blocker sits after it and has
+ * a peak gain of 2, so its own recurrence leaves that range and void_dc clamps its return to VOID_CLIP_MAX.
+ * Both halves are pinned here: the recurrence does overshoot (so the clamp is not decoration), and what
+ * void_dc returns stays inside the table (so dropping the clamp fails here instead of reading past VOID_SOFT).
+ * The input is held at -full scale and then at +full scale: the sequence that reaches the l1 norm of the
+ * impulse response (1, then -(1 - R) R^n), which is the blocker's worst-case peak gain. */
+static void test_dc_range(void)
+{
+    int32_t full = mulq15(110000, VOID_OUT_LEVEL), w = 0, raw = 0, wr = 0, got = 0;
+    uint32_t i;
+    char msg[200];
+    for (i = 0; i < 3u * FS; i++) {
+        int32_t x = i < 2u * FS ? -full : full;
+        int32_t y = void_dc(&w, x), u;
+        got = (y < 0 ? -y : y) > got ? (y < 0 ? -y : y) : got;
+        u = x + (wr >> VOID_DC_SH);                    /* the same recurrence, unclamped */
+        wr -= (u * (32768 - VOID_DC_R)) >> (15 - VOID_DC_SH);
+        raw = (u < 0 ? -u : u) > raw ? (u < 0 ? -u : u) : raw;
+    }
+    printf("void: the DC blocker at +-%d: worst |y| %d unclamped, %d as returned (VOID_CLIP_MAX %d)\n",
+           full, raw, got, VOID_CLIP_MAX);
+    snprintf(msg, sizeof msg, "DC: the blocker's recurrence overshoots the clipper's table (|y| %d > %d)",
+             raw, VOID_CLIP_MAX);
+    check(msg, raw > VOID_CLIP_MAX);
+    snprintf(msg, sizeof msg,
+             "DC: what void_dc returns stays inside the clipper's table (%d <= VOID_CLIP_MAX %d, VOID_SOFT[%u])",
+             got, VOID_CLIP_MAX, (unsigned)NELEM(VOID_SOFT));
+    check(msg, got <= VOID_CLIP_MAX && (uint32_t)((VOID_CLIP_MAX - VOID_CLIP_THR) >> 8) + 1u < NELEM(VOID_SOFT));
+}
+
+/* ------------------------------------------------------------------ 6 --- */
 static double phrase_rms(uint32_t e, uint32_t pi)
 {
     track_t *t = &trk[0];
@@ -301,7 +378,7 @@ static void test_presets(void)
     check("presets: each sounds, its loudest 0.2 s within -18 .. +6 dB of OB-Z's SAW LEAD", ok);
 }
 
-/* ------------------------------------------------------------------ 6 --- */
+/* ------------------------------------------------------------------ 7 --- */
 static uint64_t instr_now(void)
 {
 #ifdef __APPLE__
@@ -361,7 +438,7 @@ static void test_cost(void)
     check(msg, worst < 1.75);
 }
 
-/* ------------------------------------------------------------------ 7 --- */
+/* ------------------------------------------------------------------ 8 --- */
 static void wav16(const char *dir, const char *name)
 {
     char path[512];
@@ -423,7 +500,7 @@ static void demos(const char *dir)
     printf("void: demos in %s\n", dir);
 }
 
-/* ------------------------------------------------------------------ 8 --- */
+/* ------------------------------------------------------------------ 9 --- */
 /* |X| at harmonic h of f0 over x[0, n) (n a whole number of cycles), and the RMS */
 static double harm_mag(const double *x, uint32_t n, double f0, uint32_t h)
 {
@@ -569,6 +646,8 @@ int main(int argc, char **argv)
     test_pitch();
     test_bandlimit();
     test_bounded();
+    test_dc();
+    test_dc_range();
     test_presets();
     test_cost();
     test_reference(argc > 2 ? argv[2] : "build/void_ref");

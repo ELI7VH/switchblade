@@ -9,7 +9,7 @@ VOID FOUR is a fork of the Felucca 1.6 firmware for the M-VAVE FM-1 (a JieLi AC7
 | id | Machine (display) | C ids | Source file | State |
 |---|---|---|---|---|
 | 0 | OB-Z | `ENG_OBX`, `ENGI_OBX`, `OBX_PRESETS` | `firmware/src/eng_obx.c` (the old ANALOG engine) | works; Phase 4 adds the SEM filter morph and slop |
-| 1 | WAVE | `ENG_WAVE`, `ENGI_WAVE` | `firmware/src/eng_wave.c` (the VOID WAVE plugin port) | works; needs a DC blocker (see §6) |
+| 1 | WAVE | `ENG_WAVE`, `ENGI_WAVE` | `firmware/src/eng_wave.c` (the VOID WAVE plugin port) | works; DC blocker added in Task 4.2 |
 | 2 | ACID | `ENG_ACID`, `ENGI_ACID` | `firmware/src/eng_acid.c` | **placeholder**: borrows OB-Z's `analog_render_f`; Phase 5 makes it a real 303 |
 | 3 | DRIFT | `ENG_DRIFT`, `ENGI_DRIFT` | `firmware/src/eng_drift.c` | **placeholder**: same; Phase 6 makes it a ZDF ladder |
 
@@ -152,10 +152,9 @@ The midi_control, project and other tests compile the same way. Take the exact l
 
 ## 7. Known issues backlog (log; triage at the final review)
 
-1. **WAVE has no DC blocker.**
-   - DC leaks into the reverb send, so `presets/four/wave.py` BRASS LEAD has REV 0 as a workaround.
-   - Fix: add a per-voice or per-engine DC blocker in `eng_wave.c`, then restore REV 25.
-   - Do this in Phase 4–6.
+1. ~~**WAVE has no DC blocker.**~~ Done, Task 4.2: a one-pole blocker per voice (`eng_wave.c void_dc`,
+   R 0.995) between the voice's level and the soft clipper; BRASS LEAD is back to REV 25. The only
+   deliberate departure from the plugin in the ported signal path.
 2. **MIDI OUT minor findings:**
    - An owed note-off goes out on the current channel. Fix by adding `mout_och[k]`.
    - The owed note-off in `mout_note` uses `mout_send` instead of `mout_try`.

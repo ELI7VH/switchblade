@@ -19,6 +19,9 @@
  * 1 + env * depth (63 = depth 1, an octave up at the top). P_FM1_LEVEL 0: the filter follows the amp ADSR by ENV
  * DEST FLT in cutoff steps, as every other engine.
  *
+ * One departure from the plugin: a DC blocker per voice (void_dc, R 0.995) between the voice's level and the
+ * soft clipper. The plugin has none; the FM-1 takes a part's reverb send ahead of the master's DC blocker.
+ *
  * Signals: Q15 with 1.0 = the plugin's 1.0 (the tables hold it as VOID_WT_ONE); products are kept
  * under 2^31 by the shifts noted at them. State: per voice in the part's engine memory (void_vc_t). */
 #include "void_tables.h"
@@ -36,7 +39,15 @@ enum { VF_LP24, VF_BP, VF_HP, VF_LP12, VF_HP24, VF_NOTCH };   /* P_FTYPE (params
 #define VOID_LIM_INC 1753014234u /* 18 kHz as a phase increment: the top harmonic of a level stays below */
 #define VOID_RAMP_STEP 149       /* the 5 ms fade-in, Q15 per sample (32768 / 220.5) */
 #define VOID_CLIP_THR 23593      /* the soft clipper's 0.72 */
+/* the largest |y| the soft clipper's table reaches: it reads VOID_SOFT[o >> 8] and [(o >> 8) + 1] for
+ * o = |y| - VOID_CLIP_THR, so o must stay at or below 255 * 256 + 255. Up to Task 4.2 the clamp at
+ * VOID_OUT_LEVEL held that on its own (|y| <= 62224); the DC blocker after it has a peak gain of 2
+ * (the l1 norm of 1, -(1 - R) R^n), so its output is clamped here instead. */
+#define VOID_CLIP_MAX (VOID_CLIP_THR + 255 * 256 + 255)
+_Static_assert(NELEM(VOID_SOFT) == 257, "VOID_CLIP_MAX: VOID_SOFT's length");
 #define VOID_OUT_LEVEL 18536     /* the plugin's voice: OSC level 0.8 * centre pan 0.707, Q15 */
+#define VOID_DC_R 32604          /* the DC blocker's R, 0.995 in Q15 (-3 dB at ~35 Hz, 44.1 kHz) */
+#define VOID_DC_SH 8             /* bits its state keeps below the signal's Q15 */
 /* voices a VOID part plays at most (POLY, UNISON). 6 of its heaviest preset cost about what 8 of PHASE WIRE, the
  * heaviest engine before it, do (tests/void_test.c, host instructions); raise it once the FM-1's PERF shows room */
 #define VOID_POLY 6
@@ -49,6 +60,7 @@ typedef struct {                 /* per voice (engine memory) */
     int32_t lpit[2], llev[2];    /* their depths: cents Q20, level Q15 */
     int32_t rng;
     int32_t ramp;                /* fade-in, Q15 */
+    int32_t dcw;                 /* the DC blocker's state, Q(15 + VOID_DC_SH) */
     uint32_t tick;               /* control blocks since the note: the plugin's per-block walk every 4th */
     uint32_t est, eu;            /* the filter envelope: stage (0 off, 1 attack, 2 decay / sustain, 3 release), */
     int32_t elv, epk, ers;       /* progress Q24; level, peak (velocity), the release's start, Q15 */
@@ -304,6 +316,25 @@ static inline int32_t void_flt_run(const void_flt_t *fl, int32_t *f, int32_t s)
     return void_close(fl, f, fl->ft == VF_LP24 ? void_ladder(fl, f, s) : void_svf(fl, f, s));
 }
 
+/* --------------------------------------------------------------------- DC blocker --- */
+/* NOT the plugin's: a deliberate departure. The drive shaper's asymmetry (void_front: + dasym, and the
+ * - doff that only approximates its mean) leaves an offset the LP ladder passes straight through, and the
+ * part's reverb send is taken ahead of the master's DC blocker (fx.c dc_block), so a WAVE part used to pump
+ * that offset into the reverb's combs. One pole per voice, y[n] = x[n] - x[n - 1] + R y[n - 1] with
+ * R = 0.995, in its transposed form: y = x + (w >> SH), w -= (1 - R) y, no x[n - 1] to keep.
+ * The state sits SH bits below the signal's Q15 so the subtraction's truncation (half an LSB of w)
+ * settles at 0.4 of a Q15 step; held in Q15 it would leave about 100 (1 / 2 / (1 - R)).
+ * Bounds: |x| <= 62224 (the clamp at VOID_OUT_LEVEL) and the peak gain is 2 (the l1 norm of the impulse
+ * response, 1 and -(1 - R) R^n), so |y| <= 124448, |w| <= 2^26 and y * 164 <= 2^25. 124448 is past what
+ * the soft clipper's table covers, so the return is clamped to VOID_CLIP_MAX here rather than at the call
+ * site: y is what indexes that table (tests/void_test.c test_dc_range pins both halves of this). */
+VOID_INLINE int32_t void_dc(int32_t *w, int32_t x)
+{
+    int32_t y = x + (*w >> VOID_DC_SH);
+    *w -= (y * (32768 - VOID_DC_R)) >> (15 - VOID_DC_SH);
+    return clamp(y, -VOID_CLIP_MAX, VOID_CLIP_MAX);    /* the state keeps the unclamped y: the response is */
+}                                                      /* linear, the clamp only guards the table index */
+
 /* ------------------------------------------------------------------------- voice --- */
 static void void_note_on(track_t *t, voice_t *v)
 {
@@ -315,6 +346,7 @@ static void void_note_on(track_t *t, voice_t *v)
     if (!v->env) {                                     /* keeps its phases: voice.c) */
         c->f[0] = c->f[1] = c->f[2] = c->f[3] = 0;
         c->ramp = 0;
+        c->dcw = 0;
     }
     c->pd = c->pdv = c->wd = c->wdv = 0;               /* the plugin starts its drifts at the note */
     c->est = 1;                                        /* the filter envelope: an attack from 0 (the plugin's */
@@ -366,7 +398,7 @@ VOID_INLINE void void_block(const void_blk_t *b, voice_t *v, void_vc_t *c, int32
     const int32_t c1 = b->c1, c2 = b->c2, two = b->two;
     const uint32_t inc1 = b->inc1, inc2 = b->inc2;
     uint32_t i, ph1 = v->ph[0], ph2 = v->ph[1];
-    int32_t ramp = c->ramp, f[4] = {c->f[0], c->f[1], c->f[2], c->f[3]};
+    int32_t ramp = c->ramp, dcw = c->dcw, f[4] = {c->f[0], c->f[1], c->f[2], c->f[3]};
     int32_t amp = m->amp0 << CTL_LOG2, damp = m->amp1 - m->amp0;   /* voice_amp's ramp, stepped */
     for (i = 0; i < n; i++) {
         int32_t s = void_osc(&o1, ph1) * c1, y, a;
@@ -381,11 +413,13 @@ VOID_INLINE void void_block(const void_blk_t *b, voice_t *v, void_vc_t *c, int32
         }
         s = void_front(&fl, s, drv);
         y = void_close(&fl, f, lad ? void_ladder(&fl, f, s) : void_svf(&fl, f, s));
-        /* the voice at the plugin's level, then its soft clipper: above 0.72, thr + o / (1 + o); the plugin's level
-         * is ~6 dB below Felucca's other engines, made up after the clipper (which stays at the plugin's level) */
-        y = mulq15(clamp(y, -110000, 110000), VOID_OUT_LEVEL);
+        /* the voice at the plugin's level, the DC blocker (void_dc: not the plugin's), then its soft clipper:
+         * above 0.72, thr + o / (1 + o). The blocker comes first so the clipper keeps its two sides symmetric
+         * about 0, as the plugin's does. The plugin's level is ~6 dB below Felucca's other engines, made up
+         * after the clipper (which stays at the plugin's level) */
+        y = void_dc(&dcw, mulq15(clamp(y, -110000, 110000), VOID_OUT_LEVEL));
         a = y < 0 ? -y : y;
-        if (a > VOID_CLIP_THR) {                       /* o / (1 + o) from VOID_SOFT (o < 2: the clamp above) */
+        if (a > VOID_CLIP_THR) {                       /* o / (1 + o) from VOID_SOFT (o < 2: VOID_CLIP_MAX) */
             uint32_t o = (uint32_t)(a - VOID_CLIP_THR), k = o >> 8;
             a = VOID_CLIP_THR + VOID_SOFT[k] + (((VOID_SOFT[k + 1u] - VOID_SOFT[k]) * (int32_t)(o & 255u)) >> 8);
             y = y < 0 ? -a : a;
@@ -396,6 +430,7 @@ VOID_INLINE void void_block(const void_blk_t *b, voice_t *v, void_vc_t *c, int32
     v->ph[0] = ph1;
     v->ph[1] = ph2;
     c->ramp = ramp;
+    c->dcw = dcw;
     c->f[0] = f[0];
     c->f[1] = f[1];
     c->f[2] = f[2];
