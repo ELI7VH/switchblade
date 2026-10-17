@@ -72,30 +72,41 @@ typedef struct { int32_t wl, wh, wb; uint32_t kind, p4; } obx_flt_t;
 /* The signal handed to the 4-pole's second tsvf_lp stage is held to +-OBX_P4_IN.
  *
  * Why it needs a bound: stage 1's output is not the oscillator mix. With |in| <= 32768 and RES 127
- * the corner sweep in obx_tap's comment puts |v2| at up
- * to 184627, past dsp.c's contract for tsvf_lp ("signals stay within +-150000 so products fit in 32
- * bits"). Fed that, stage 2's inner products overflow int32: with ic1 held to +-150000 by tsvf_lp's
- * own state clamp, |in| = 184627 and |ic2| = 150000 (v3 = in - ic2, up to 334627) the worst
- * coefficient pair gives |a2 ic1 + a3 v3| = 2.59e9, 120 % of INT32_MAX. (Renders stay far inside
- * that, 63..81 % of it, but nothing proves they must.)
+ * the corner sweep in obx_tap's comment puts |v2| at up to 184627, past dsp.c's contract for
+ * tsvf_lp ("signals stay within +-150000 so products fit in 32 bits"). Fed that, stage 2's inner
+ * products overflow int32: with ic1 held to +-150000 by tsvf_lp's own state clamp, |in| = 184627
+ * and |ic2| = 150000 (v3 = in - ic2, up to 334627) the worst coefficient pair gives
+ * |a2 ic1 + a3 v3| = 2.59e9, 120 % of INT32_MAX. (Renders stay far inside that, 63..81 % of it,
+ * but nothing proves they must.)
  *
  * The derivation of the bound: v3 = in - ic2 gives |v3| <= OBX_P4_IN + 150000. a1, a2, a3 peak at
- * 8190, 3820 and 6406 over every (CUT, RES) the coefficient table makes, and the pair that matters
- * peaks together, so |a1 ic1 + a2 v3| and |a2 ic1 + a3 v3| are at most
+ * 8190, 3820 and 6406 over every (CUT, RES) the coefficient table makes, and the pair that
+ * matters peaks together (CUT 32510, RES 127), so |a1 ic1 + a2 v3| and |a2 ic1 + a3 v3| are at
+ * most
  *     a2 * 150000 + a3 * (OBX_P4_IN + 150000)      -- worst case over the table, swept in the test
  * = 2.044e9 at OBX_P4_IN = 100000 (95.2 % of 2^31 - 1), against 2.364e9 (110 %) at the dsp.c
  * contract's 150000: so the contract on its own is not enough for this stage, and the bound is
- * tighter. The most that fits is about 118000; 100000 leaves a margin. A render's stage 1 reaches
- * 86316 at most (tests/obx_test.c test_p4_second_stage: RES 127, every CUT, MIDI 24..99, SLOP 0 and
- * 127), so the clamp never touches one and no hash moves; it only closes the proof.
- * OBX_P4_FEED is a seam for that test, which swaps in a recording version; (y, c, ic1, ic2) are the
- * value, the stage's coefficients and its state. */
+ * tighter. The largest bound that provably fits is about 116200 (118000 already reaches 100.5 %);
+ * 100000 leaves 4.8 % of margin. A render's stage 1 reaches 86316 at most (tests/obx_test.c
+ * test_p4_second_stage: RES 127, every CUT, MIDI 24..99, SLOP 0 and 127), so the clamp never
+ * touches one and no hash moves; it only closes the proof.
+ *
+ * Two seams for that test, both observe-only in the sense that the clamp itself always runs,
+ * unmodified, between them: OBX_P4_PRE(y) sees the value before the clamp (the test uses it to
+ * drive stage 1 past the bound, so that the clamp has something to do), and OBX_P4_SEEN(x, y, c,
+ * i1, i2) sees what the clamp produced (x), the value it was given (y), the stage's coefficients
+ * and its state, and returns x. Both default to nothing. */
 #ifndef OBX_P4_IN
 #define OBX_P4_IN 100000
 #endif
-#ifndef OBX_P4_FEED
-#define OBX_P4_FEED(y, c, i1, i2) clamp((y), -OBX_P4_IN, OBX_P4_IN)
+#ifndef OBX_P4_PRE
+#define OBX_P4_PRE(y) (y)
 #endif
+#ifndef OBX_P4_SEEN
+#define OBX_P4_SEEN(x, y, c, i1, i2) (x)
+#endif
+#define OBX_P4_FEED(y, c, i1, i2) \
+    OBX_P4_SEEN(clamp(OBX_P4_PRE(y), -OBX_P4_IN, OBX_P4_IN), (y), (c), (i1), (i2))
 
 /* the morph's position. OB-Z keeps 1.5's filter TYPE (P_FTYPE, EDIT > FILTER): TYPE LP (the
  * default, and LP12 / NOTCH, which ANALOG always played as LP) leaves the response to MODE, while
@@ -167,10 +178,11 @@ static inline int32_t obx_tap(const tsvf_t *c, int32_t k, int32_t in, int32_t *i
      * gives |v1| <= 183328, |v2| <= 184627 and |hp| <= 481203. Against 2^31 - 1 = 2.147e9 the
      * products x 4096 are then 7.51e8, 7.56e8 and 1.97e9: of the crossfade the hp term has the
      * least room, and 8 % of it. It is not the least in the engine: the 4-pole's second stage has
-     * 4.8 % (95.2 % used), see OBX_P4_IN. Renders reach nothing like that -- a sweep of RES 127 over every WAVE, CUT and the
-     * keyboard (tests/obx_test.c test_mode_bounded) peaks at |hp| ~ 48000, a factor of ten below
-     * the bound -- and a +-400000 clamp on hp used to stand here for the overflow the bound rules
-     * out. It only put a step across MODE 64, where the pinned high-pass has no clamp. */
+     * 4.8 % (95.2 % used), see OBX_P4_IN. Renders reach nothing like that -- a sweep of RES 127
+     * over every WAVE, CUT and the keyboard (tests/obx_test.c test_mode_bounded) peaks at
+     * |hp| ~ 48000, a factor of ten below the bound -- and a +-400000 clamp on hp used to stand
+     * here for the overflow the bound rules out. It only put a step across MODE 64, where the
+     * pinned high-pass has no clamp. */
     hp = in - ((k * v1) >> 12) - v2;
     return ((v2 * w->wl) >> 12) + ((hp * w->wh) >> 12) + ((v1 * w->wb) >> 12);
 }

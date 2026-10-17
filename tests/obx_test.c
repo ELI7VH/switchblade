@@ -9,12 +9,16 @@
  *
  * The invariant the morph has to hold: MODE 0 with SLOP 0 is the low-pass OB-Z always had, step for
  * step. test_mode0_legacy_lp pins that with hashes taken from the engine before the morph existed. */
-/* the seam eng_obx.c leaves at the 4-pole's second stage (OBX_P4_FEED): p4_feed records what the stage
- * is handed and does the engine's own clamp. OBX_P4_IN (eng_obx.c) can be overridden on the command
- * line (-DOBX_P4_IN=...) to run this test against another bound, e.g. none. */
+/* the seams eng_obx.c leaves around the 4-pole's second-stage clamp. They only observe: the engine's
+ * own clamp runs between them, unmodified. p4_pre sees the value before it (and can scale it, to drive
+ * stage 1 past the bound so that the clamp has work to do); p4_seen sees what the clamp produced, and
+ * returns it untouched. OBX_P4_IN (eng_obx.c) can be overridden on the command line (-DOBX_P4_IN=...)
+ * to run this test against another bound. */
 #include <stdint.h>
-static int32_t p4_feed(int32_t y, const void *c, int32_t ic1, int32_t ic2);
-#define OBX_P4_FEED(y, c, i1, i2) p4_feed((y), (c), (i1), (i2))
+static int32_t p4_pre(int32_t y);
+static int32_t p4_seen(int32_t x, int32_t y, const void *c, int32_t ic1, int32_t ic2);
+#define OBX_P4_PRE(y) p4_pre(y)
+#define OBX_P4_SEEN(x, y, c, i1, i2) p4_seen((x), (y), (c), (i1), (i2))
 #define main hostsim_main
 #include "hostsim.c"
 #undef main
@@ -418,31 +422,54 @@ static void test_mode_bounded(void)
  * |ic| <= 150000 (the state clamp), v3 = in - ic2; and (b) the engine keeps to it: a dense sweep of a
  * full-scale square at RES 127 over every CUT and MIDI 24..99, in both render paths, with stage 2's
  * actual inner products evaluated in 64 bits at every sample. */
-static struct { int32_t fed, raw; double num; uint32_t clipped, over; } p4;
+static struct { int32_t fed, raw, gain; double num; uint32_t clipped, over; } p4;
 
-static int32_t p4_feed(int32_t y, const void *c, int32_t ic1, int32_t ic2)
+static int32_t p4_pre(int32_t y)
+{
+    int32_t ay = y < 0 ? -y : y;
+    p4.raw = ay > p4.raw ? ay : p4.raw;                 /* stage 1's own output, before any stress */
+    return y * (p4.gain ? p4.gain : 1);
+}
+
+static int32_t p4_seen(int32_t x, int32_t y, const void *c, int32_t ic1, int32_t ic2)
 {
     const tsvf_t *f = (const tsvf_t *)c;
-    int32_t x = y < -OBX_P4_IN ? -OBX_P4_IN : y > OBX_P4_IN ? OBX_P4_IN : y;      /* the engine's clamp */
-    int64_t v3 = (int64_t)x - ic2;
+    int64_t v3 = (int64_t)x - ic2;                      /* x is what the engine's clamp handed over */
     int64_t n1 = (int64_t)f->a1 * ic1 + (int64_t)f->a2 * v3;
     int64_t n2 = (int64_t)f->a2 * ic1 + (int64_t)f->a3 * v3;
     double m = (double)(n1 < 0 ? -n1 : n1), m2 = (double)(n2 < 0 ? -n2 : n2);
-    int32_t ay = y < 0 ? -y : y, ax = x < 0 ? -x : x;
+    int32_t ax = x < 0 ? -x : x;
     m = m2 > m ? m2 : m;
-    p4.raw = ay > p4.raw ? ay : p4.raw;
     p4.fed = ax > p4.fed ? ax : p4.fed;
     p4.num = m > p4.num ? m : p4.num;
-    p4.clipped += x != y;
+    p4.clipped += (p4.gain ? p4.gain : 1) * y != x;
     p4.over += m > 2147483647.0;
     return x;
 }
 
-static void test_p4_second_stage(void)
+/* the sweep: a full-scale square at RES 127, 4-pole, every CUT x MIDI 24..99 x 4 waves x SLOP 0 / 127.
+ * ct_step thins the cutoffs for the stressed pass. */
+static uint32_t p4_sweep(uint32_t ct_step)
 {
     static const int16_t WAVES[] = {1, 4, 5, 6};          /* pulse, PW pulse, SYNC, SUB: the square-ish ones */
+    uint32_t w, ct, note, renders = 0;
+    for (w = 0; w < 2u * NELEM(WAVES); w++)               /* the second pass with SLOP 127: its cutoff error */
+        for (ct = 0; ct < 128u; ct += ct_step)
+            for (note = 24; note <= 99u; note++) {
+                int16_t e[8] = {0, 0, 0, 64, 0, 127, 127, 0};   /* OSC 1 alone, full scale; RES 127; 4-pole */
+                e[0] = WAVES[w % NELEM(WAVES)];
+                e[4] = (int16_t)ct;
+                e[7] = w >= NELEM(WAVES) ? 127 : 0;
+                obx_voice(e, (int32_t)note * 16, note, ren_a, 3072u);
+                renders++;
+            }
+    return renders;
+}
+
+static void test_p4_second_stage(void)
+{
     double bound = 0.0, bnd1 = 0.0;
-    uint32_t w, cut, note, ct, r, renders = 0;
+    uint32_t cut, r, renders;
     for (cut = 0; cut <= 127u * 256u; cut++)              /* every cutoff and resonance the table makes */
         for (r = 0; r < 128u; r++) {
             tsvf_t c;
@@ -459,23 +486,57 @@ static void test_p4_second_stage(void)
     CHECK(OBX_P4_IN <= 150000, "OBX_P4_IN = %d is past dsp.c's +-150000 signal contract", OBX_P4_IN);
     CHECK(bnd1 <= 2147483647.0 && bound <= 2147483647.0,
           "stage 2 with |in| <= %d can reach %.4g: past INT32_MAX", OBX_P4_IN, bound > bnd1 ? bound : bnd1);
+
+    /* The real wrap, at the worst state the bound has to cover: CUT 32510, RES 127, same-sign state corner
+     * (ic1 = +150000, ic2 = -150000, so v3 = in + 150000). At |in| = 150000, dsp.c's own contract, the
+     * unclamped product is past INT32_MAX and tsvf_lp, the real one, returns the wrong v2; at OBX_P4_IN
+     * (what the engine's clamp lets through) the product fits and tsvf_lp agrees with exact arithmetic. */
+    {
+        tsvf_t c;
+        int32_t in_hi = 150000, in_ok = OBX_P4_IN, ic1, ic2, got_hi, got_ok;
+        int64_t n_hi, n_ok, want_hi, want_ok;
+        tsvf_coef(&c, 32510, 127);
+        n_hi = (int64_t)c.a2 * 150000 + (int64_t)c.a3 * ((int64_t)in_hi + 150000);
+        n_ok = (int64_t)c.a2 * 150000 + (int64_t)c.a3 * ((int64_t)in_ok + 150000);
+        want_hi = -150000 + (n_hi >> 13);
+        want_ok = -150000 + (n_ok >> 13);
+        ic1 = 150000; ic2 = -150000; got_hi = tsvf_lp(&c, in_hi, &ic1, &ic2);
+        ic1 = 150000; ic2 = -150000; got_ok = tsvf_lp(&c, in_ok, &ic1, &ic2);
+        printf("obx: 4-pole stage 2 worst state (CUT 32510, RES 127, ic1 +150000, ic2 -150000): |in| 150000 -> product"
+               " %.4g (%.1f %% of INT32_MAX), tsvf_lp %d vs exact %d; |in| %d -> %.4g (%.1f %%), %d vs %d\n",
+               (double)n_hi, 100.0 * (double)n_hi / 2147483647.0, got_hi, (int)want_hi, in_ok, (double)n_ok,
+               100.0 * (double)n_ok / 2147483647.0, got_ok, (int)want_ok);
+        CHECK(n_hi > 2147483647ll, "the unclamped worst product %.4g does not exceed INT32_MAX: no wrap to witness",
+              (double)n_hi);
+        CHECK(got_hi != (int32_t)want_hi, "tsvf_lp did not wrap at |in| = 150000 (%d): the witness is void", got_hi);
+        CHECK(n_ok <= 2147483647ll, "the worst product at OBX_P4_IN = %d is %.4g: past INT32_MAX", in_ok, (double)n_ok);
+        CHECK(got_ok == (int32_t)want_ok, "tsvf_lp at OBX_P4_IN = %d gave %d, exact arithmetic %d", in_ok, got_ok,
+              (int)want_ok);
+    }
+
+    /* (b1) as the engine renders: stage 1's own output goes through the clamp as it is */
     memset(&p4, 0, sizeof p4);
-    for (w = 0; w < 2u * NELEM(WAVES); w++)               /* the second pass with SLOP 127: its cutoff error */
-        for (ct = 0; ct < 128u; ct++)
-            for (note = 24; note <= 99u; note++) {
-                int16_t e[8] = {0, 0, 0, 64, 0, 127, 127, 0};   /* OSC 1 alone, full scale; RES 127; 4-pole */
-                e[0] = WAVES[w % NELEM(WAVES)];
-                e[4] = (int16_t)ct;
-                e[7] = w >= NELEM(WAVES) ? 127 : 0;
-                obx_voice(e, (int32_t)note * 16, note, ren_a, 3072u);
-                renders++;
-            }
+    renders = p4_sweep(1u);
     printf("obx: 4-pole stage 2 at RES 127, %u renders (CUT 0..127 x MIDI 24..99 x 4 waves x SLOP 0 / 127): stage 1 reaches"
            " %d, stage 2 is fed %d (%u samples clamped); inner product peaks at %.4g = %.1f %% of INT32_MAX\n",
            renders, p4.raw, p4.fed, p4.clipped, p4.num, 100.0 * p4.num / 2147483647.0);
     CHECK(p4.raw > 0, "the stage-2 seam never fired: the sweep did not reach the 4-pole");
     CHECK(p4.fed <= OBX_P4_IN, "stage 2 was fed %d, past OBX_P4_IN = %d", p4.fed, OBX_P4_IN);
     CHECK(!p4.over, "%u samples had a stage-2 inner product past INT32_MAX (int32 wrap)", p4.over);
+
+    /* (b2) the clamp itself: stage 1's output is scaled x4 before the engine's clamp (so up to ~345000, past
+     * dsp.c's contract), and what the clamp then hands stage 2 must still be inside OBX_P4_IN and the
+     * inner products inside int32. Deleting or weakening the engine's clamp fails this. */
+    memset(&p4, 0, sizeof p4);
+    p4.gain = 4;
+    renders = p4_sweep(4u);
+    printf("obx: 4-pole stage 2, stage 1 scaled x4 before the clamp, %u renders: stage 1 reaches %d (x4), stage 2 is fed"
+           " %d (%u samples clamped); inner product peaks at %.4g = %.1f %% of INT32_MAX\n",
+           renders, p4.raw, p4.fed, p4.clipped, p4.num, 100.0 * p4.num / 2147483647.0);
+    CHECK(p4.clipped > 0, "nothing was clamped under x4 stress: the engine's clamp is missing or the stress did not reach it");
+    CHECK(p4.fed <= OBX_P4_IN, "the engine's clamp let %d through stage 2, past OBX_P4_IN = %d", p4.fed, OBX_P4_IN);
+    CHECK(!p4.over, "%u samples had a stage-2 inner product past INT32_MAX after the clamp (int32 wrap)", p4.over);
+    p4.gain = 0;
 }
 
 /* Where one leg meets the next, nothing may come between them but the morph's own granularity.
