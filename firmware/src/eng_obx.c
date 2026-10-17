@@ -69,6 +69,34 @@ enum { OBX_M_NOTCH = 32, OBX_M_HP = 64, OBX_M_BP = 96, OBX_M_4POLE = 121 };
 enum { OBX_T_LP, OBX_T_NOTCH, OBX_T_HP, OBX_T_BP, OBX_T_MIX };
 typedef struct { int32_t wl, wh, wb; uint32_t kind, p4; } obx_flt_t;
 
+/* The signal handed to the 4-pole's second tsvf_lp stage is held to +-OBX_P4_IN.
+ *
+ * Why it needs a bound: stage 1's output is not the oscillator mix. With |in| <= 32768 and RES 127
+ * the corner sweep in obx_tap's comment puts |v2| at up
+ * to 184627, past dsp.c's contract for tsvf_lp ("signals stay within +-150000 so products fit in 32
+ * bits"). Fed that, stage 2's inner products overflow int32: with ic1 held to +-150000 by tsvf_lp's
+ * own state clamp, |in| = 184627 and |ic2| = 150000 (v3 = in - ic2, up to 334627) the worst
+ * coefficient pair gives |a2 ic1 + a3 v3| = 2.59e9, 120 % of INT32_MAX. (Renders stay far inside
+ * that, 63..81 % of it, but nothing proves they must.)
+ *
+ * The derivation of the bound: v3 = in - ic2 gives |v3| <= OBX_P4_IN + 150000. a1, a2, a3 peak at
+ * 8190, 3820 and 6406 over every (CUT, RES) the coefficient table makes, and the pair that matters
+ * peaks together, so |a1 ic1 + a2 v3| and |a2 ic1 + a3 v3| are at most
+ *     a2 * 150000 + a3 * (OBX_P4_IN + 150000)      -- worst case over the table, swept in the test
+ * = 2.044e9 at OBX_P4_IN = 100000 (95.2 % of 2^31 - 1), against 2.364e9 (110 %) at the dsp.c
+ * contract's 150000: so the contract on its own is not enough for this stage, and the bound is
+ * tighter. The most that fits is about 118000; 100000 leaves a margin. A render's stage 1 reaches
+ * 86316 at most (tests/obx_test.c test_p4_second_stage: RES 127, every CUT, MIDI 24..99, SLOP 0 and
+ * 127), so the clamp never touches one and no hash moves; it only closes the proof.
+ * OBX_P4_FEED is a seam for that test, which swaps in a recording version; (y, c, ic1, ic2) are the
+ * value, the stage's coefficients and its state. */
+#ifndef OBX_P4_IN
+#define OBX_P4_IN 100000
+#endif
+#ifndef OBX_P4_FEED
+#define OBX_P4_FEED(y, c, i1, i2) clamp((y), -OBX_P4_IN, OBX_P4_IN)
+#endif
+
 /* the morph's position. OB-Z keeps 1.5's filter TYPE (P_FTYPE, EDIT > FILTER): TYPE LP (the
  * default, and LP12 / NOTCH, which ANALOG always played as LP) leaves the response to MODE, while
  * TYPE BP / HP (and HP24, played as HP) still pin it where they always put it. */
@@ -137,8 +165,9 @@ static inline int32_t obx_tap(const tsvf_t *c, int32_t k, int32_t in, int32_t *i
      * s >> 1), and a sweep of every CUT and every RES (k 592..8192) over the eight corners of that
      * box -- hp and v1 and v2 are each linear in (ic1, ic2, in), so a corner is where they peak --
      * gives |v1| <= 183328, |v2| <= 184627 and |hp| <= 481203. Against 2^31 - 1 = 2.147e9 the
-     * products x 4096 are then 7.51e8, 7.56e8 and 1.97e9: the hp term has the least room, and 8 %
-     * of it. Renders reach nothing like that -- a sweep of RES 127 over every WAVE, CUT and the
+     * products x 4096 are then 7.51e8, 7.56e8 and 1.97e9: of the crossfade the hp term has the
+     * least room, and 8 % of it. It is not the least in the engine: the 4-pole's second stage has
+     * 4.8 % (95.2 % used), see OBX_P4_IN. Renders reach nothing like that -- a sweep of RES 127 over every WAVE, CUT and the
      * keyboard (tests/obx_test.c test_mode_bounded) peaks at |hp| ~ 48000, a factor of ten below
      * the bound -- and a +-400000 clamp on hp used to stand here for the overflow the bound rules
      * out. It only put a step across MODE 64, where the pinned high-pass has no clamp. */
@@ -246,7 +275,7 @@ static __attribute__((noinline)) void obx_render_x(track_t *t, voice_t *v, int32
         s = mulq15(a, m1) + mulq15(b, m2);
         y = obx_tap(&flt, fk, s >> 1, &ic1, &ic2, &w);
         if (w.p4)
-            y = tsvf_lp(&flt, y, &ic3, &ic4);
+            y = tsvf_lp(&flt, OBX_P4_FEED(y, &flt, ic3, ic4), &ic3, &ic4);
         s = soft_knee(y, 16000) << 1;
         out[i] += voice_amp(s, m, i) << 1;
     }
@@ -320,7 +349,7 @@ static inline __attribute__((always_inline)) void obx_osc(track_t *t, voice_t *v
             int32_t q;
             if (morph == 2u) {                               /* the 4-pole: two low-pass stages */
                 y = tsvf_lp(&flt, s >> 1, &ic1, &ic2);
-                y = tsvf_lp(&flt, y, &ic3, &ic4);
+                y = tsvf_lp(&flt, OBX_P4_FEED(y, &flt, ic3, ic4), &ic3, &ic4);
             } else if (morph) {
                 y = obx_tap(&flt, fk, s >> 1, &ic1, &ic2, &w);
             } else {

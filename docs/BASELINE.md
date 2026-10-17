@@ -39,3 +39,11 @@ These are environment failures on this Mac, not regressions. Later tasks may not
 
 ## Focused commands
 - regress: `cc -O2 -w -Ibuild/gen -Ifirmware/src -o build/host/regress tests/regress.c -lm && build/host/regress tests/golden.txt tests/cpu_baseline.txt`
+
+## Limits that sit at their value on purpose (Task 4.1, `tests/obx_test.c test_mode_bounded`)
+Both read close to their limits, and that is not drift to chase:
+- DC past MODE 0's: **0.045 of rms against the 0.05 limit.** This is the 4-pole at RES 127 (the soft knee
+  clipping an asymmetric resonant waveform), not the morph. Tightening the limit, or anything that adds a
+  little DC to the 4-pole, fails the test; loosening it hides a real DC regression. See HANDOVER section 7.
+- Peak: **93146 against OBX_CEIL 94866**, the engine's own ceiling (soft_knee(., 16000) <= 32383, << 1,
+  through voice_amp at full amplitude). The headroom is the knee's, 1.8 %, by construction.

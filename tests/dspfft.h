@@ -35,8 +35,13 @@ static void fft_mag(const int32_t *x, unsigned n, float *mag)
     if (!n || n > DSPFFT_MAX || (n & (n - 1u))) {              /* not a usable power of two */
         fprintf(stderr, "fft_mag: n = %u is not a power of two in 1..%u; mag[] zeroed\n", n,
                 DSPFFT_MAX);
-        for (i = 0; i < n / 2u; i++)                           /* not the caller's stale data */
-            mag[i] = 0.0f;
+        /* Zero mag[] so the caller does not read stale data -- but only when n is within the range a
+         * transform could have been asked for (n <= DSPFFT_MAX): a caller sizing mag[n / 2] for that n
+         * owns n / 2 floats. For n = 0 or n > DSPFFT_MAX (typically a size that is a mistake, e.g. 2N
+         * for a buffer sized N / 2) the size of mag[] is unknowable, so nothing is written. */
+        if (n && n <= DSPFFT_MAX)
+            for (i = 0; i < n / 2u; i++)
+                mag[i] = 0.0f;
         return;
     }
     for (i = 0; i < n; i++) {                                  /* Hann window into the scratch */

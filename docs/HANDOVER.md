@@ -175,6 +175,14 @@ The midi_control, project and other tests compile the same way. Take the exact l
    - `web/EDITOR_PROTOCOL.md` doesn't describe G_CLKOUT or MOUT.
 5. **`category.c:20`:** stale comment ("PRESETS[32]"; the arrays are now unsized).
 6. **Big EDIT values:** "-100" is the only value that falls back to AF_M. ENV +100 shows as "100" (decision taken; the ring still shows the sign).
+7. **OB-Z carries DC of its own** (logged in Task 4.1 fix round 2; not fixed, deliberately):
+   - WAVE SYNC puts about 10 % of rms as DC through the legacy low-pass (MODE 0), nothing to do
+     with the morph; and the 4-pole at RES 127 adds about 4.5 % more, because the soft knee clips an
+     asymmetric resonant waveform symmetrically (the pre-knee signal has 0.1 %).
+   - No blocker stands in front of it: the part's reverb send is taken ahead of the master's `fx.c`
+     dc_block, so the DC reaches the reverb. A one-pole blocker per voice, as WAVE has (item 1),
+     is the likely fix. `test_mode_bounded` only holds the morph and the 4-pole to adding under 5 %
+     past what MODE 0 already carries.
 
 ## 8. Gotchas learned so far
 

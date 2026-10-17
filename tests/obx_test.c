@@ -9,6 +9,12 @@
  *
  * The invariant the morph has to hold: MODE 0 with SLOP 0 is the low-pass OB-Z always had, step for
  * step. test_mode0_legacy_lp pins that with hashes taken from the engine before the morph existed. */
+/* the seam eng_obx.c leaves at the 4-pole's second stage (OBX_P4_FEED): p4_feed records what the stage
+ * is handed and does the engine's own clamp. OBX_P4_IN (eng_obx.c) can be overridden on the command
+ * line (-DOBX_P4_IN=...) to run this test against another bound, e.g. none. */
+#include <stdint.h>
+static int32_t p4_feed(int32_t y, const void *c, int32_t ic1, int32_t ic2);
+#define OBX_P4_FEED(y, c, i1, i2) p4_feed((y), (c), (i1), (i2))
 #define main hostsim_main
 #include "hostsim.c"
 #undef main
@@ -340,6 +346,9 @@ static void test_mode_bp_to_lp(void)
 #define OBX_CEIL 94866            /* the engine's own ceiling: soft_knee(.,16000) <= 32383, << 1 */
                                   /* through voice_amp at amp 32767 (x 24000 / 32768), << 1 */
 #define BND_N 16384u
+#define BND_DC_FLOOR 500.0        /* below this rms the DC check is skipped, and counted: a ratio of two small numbers.
+                                   * 100 was tried and fails on a legitimate render -- WAVE SAW, CUT 40, note 88 sits at
+                                   * rms 281 (0.3 % of the ceiling) with 225 of DC, 0.39 of its rms */
 typedef struct { double mean, rms, peak; } stats_t;
 static stats_t ren_stats(const int32_t *x, uint32_t n)
 {
@@ -373,7 +382,7 @@ static void test_mode_bounded(void)
     static const int32_t NOTES[] = {33, 60, 88};
     static const int16_t CUTS[] = {40, 90, 120};
     double worst = 0.0, dc = 0.0, quiet = 1e30;
-    uint32_t w, md, nt, ct, bad = 0, n = 0;
+    uint32_t w, md, nt, ct, bad = 0, n = 0, skipped = 0;
     for (w = 0; w < NELEM(WAVES); w++)
         for (ct = 0; ct < NELEM(CUTS); ct++)
             for (nt = 0; nt < NELEM(NOTES); nt++) {
@@ -381,8 +390,9 @@ static void test_mode_bounded(void)
                 double dc0 = fabs(bnd_render(wcn, 0).mean);         /* what the legacy LP carries */
                 for (md = 0; md < NELEM(MODES); md++) {
                     stats_t s = bnd_render(wcn, MODES[md]);
-                    double r = s.rms >= 500.0 ? (fabs(s.mean) - dc0) / s.rms : 0.0;
+                    double r = s.rms >= BND_DC_FLOOR ? (fabs(s.mean) - dc0) / s.rms : 0.0;
                     n++;
+                    skipped += s.rms < BND_DC_FLOOR;                /* too quiet for a DC ratio to mean anything */
                     worst = s.peak > worst ? s.peak : worst;
                     quiet = s.rms < quiet ? s.rms : quiet;
                     dc = r > dc ? r : dc;
@@ -395,16 +405,84 @@ static void test_mode_bounded(void)
                 }
             }
     printf("obx: RES 127 over the crossfade and the 4-pole (%u renders): peak %.0f of %d, DC %.3f of rms past"
-           " MODE 0's, quietest rms %.0f\n",
-           n, worst, OBX_CEIL, dc, quiet);
+           " MODE 0's, quietest rms %.0f (%u renders under rms %.0f skipped by the DC check)\n",
+           n, worst, OBX_CEIL, dc, quiet, skipped, BND_DC_FLOOR);
     CHECK(!bad, "RES 127: %u of the renders are unbounded or add DC past 5 %% of rms", bad);
+}
+
+/* ------------------------------------------------- the 4-pole's second stage --- */
+/* Stage 2 is fed stage 1's output, which a resonant stage 1 takes to ~185000, past dsp.c's +-150000
+ * contract for tsvf_lp ("products fit in 32 bits"). eng_obx.c clamps what it hands over to
+ * +-OBX_P4_IN. This pins (a) that the bound is real: for every cutoff and resonance the coefficient
+ * table can produce, |a1 ic1 + a2 v3| and |a2 ic1 + a3 v3| stay inside int32 for any |in| <= OBX_P4_IN,
+ * |ic| <= 150000 (the state clamp), v3 = in - ic2; and (b) the engine keeps to it: a dense sweep of a
+ * full-scale square at RES 127 over every CUT and MIDI 24..99, in both render paths, with stage 2's
+ * actual inner products evaluated in 64 bits at every sample. */
+static struct { int32_t fed, raw; double num; uint32_t clipped, over; } p4;
+
+static int32_t p4_feed(int32_t y, const void *c, int32_t ic1, int32_t ic2)
+{
+    const tsvf_t *f = (const tsvf_t *)c;
+    int32_t x = y < -OBX_P4_IN ? -OBX_P4_IN : y > OBX_P4_IN ? OBX_P4_IN : y;      /* the engine's clamp */
+    int64_t v3 = (int64_t)x - ic2;
+    int64_t n1 = (int64_t)f->a1 * ic1 + (int64_t)f->a2 * v3;
+    int64_t n2 = (int64_t)f->a2 * ic1 + (int64_t)f->a3 * v3;
+    double m = (double)(n1 < 0 ? -n1 : n1), m2 = (double)(n2 < 0 ? -n2 : n2);
+    int32_t ay = y < 0 ? -y : y, ax = x < 0 ? -x : x;
+    m = m2 > m ? m2 : m;
+    p4.raw = ay > p4.raw ? ay : p4.raw;
+    p4.fed = ax > p4.fed ? ax : p4.fed;
+    p4.num = m > p4.num ? m : p4.num;
+    p4.clipped += x != y;
+    p4.over += m > 2147483647.0;
+    return x;
+}
+
+static void test_p4_second_stage(void)
+{
+    static const int16_t WAVES[] = {1, 4, 5, 6};          /* pulse, PW pulse, SYNC, SUB: the square-ish ones */
+    double bound = 0.0, bnd1 = 0.0;
+    uint32_t w, cut, note, ct, r, renders = 0;
+    for (cut = 0; cut <= 127u * 256u; cut++)              /* every cutoff and resonance the table makes */
+        for (r = 0; r < 128u; r++) {
+            tsvf_t c;
+            double v = (double)OBX_P4_IN + 150000.0, m1, m2;
+            tsvf_coef(&c, (int32_t)cut, (int32_t)r);
+            m1 = c.a1 * 150000.0 + c.a2 * v;
+            m2 = c.a2 * 150000.0 + c.a3 * v;
+            bnd1 = m1 > bnd1 ? m1 : bnd1;
+            bound = m2 > bound ? m2 : bound;
+        }
+    printf("obx: 4-pole stage 2, |in| <= %d: the inner products are bounded by %.4g and %.4g of INT32_MAX"
+           " (%.1f %%, %.1f %%)\n", OBX_P4_IN, bnd1, bound, 100.0 * bnd1 / 2147483647.0,
+           100.0 * bound / 2147483647.0);
+    CHECK(OBX_P4_IN <= 150000, "OBX_P4_IN = %d is past dsp.c's +-150000 signal contract", OBX_P4_IN);
+    CHECK(bnd1 <= 2147483647.0 && bound <= 2147483647.0,
+          "stage 2 with |in| <= %d can reach %.4g: past INT32_MAX", OBX_P4_IN, bound > bnd1 ? bound : bnd1);
+    memset(&p4, 0, sizeof p4);
+    for (w = 0; w < 2u * NELEM(WAVES); w++)               /* the second pass with SLOP 127: its cutoff error */
+        for (ct = 0; ct < 128u; ct++)
+            for (note = 24; note <= 99u; note++) {
+                int16_t e[8] = {0, 0, 0, 64, 0, 127, 127, 0};   /* OSC 1 alone, full scale; RES 127; 4-pole */
+                e[0] = WAVES[w % NELEM(WAVES)];
+                e[4] = (int16_t)ct;
+                e[7] = w >= NELEM(WAVES) ? 127 : 0;
+                obx_voice(e, (int32_t)note * 16, note, ren_a, 3072u);
+                renders++;
+            }
+    printf("obx: 4-pole stage 2 at RES 127, %u renders (CUT 0..127 x MIDI 24..99 x 4 waves x SLOP 0 / 127): stage 1 reaches"
+           " %d, stage 2 is fed %d (%u samples clamped); inner product peaks at %.4g = %.1f %% of INT32_MAX\n",
+           renders, p4.raw, p4.fed, p4.clipped, p4.num, 100.0 * p4.num / 2147483647.0);
+    CHECK(p4.raw > 0, "the stage-2 seam never fired: the sweep did not reach the 4-pole");
+    CHECK(p4.fed <= OBX_P4_IN, "stage 2 was fed %d, past OBX_P4_IN = %d", p4.fed, OBX_P4_IN);
+    CHECK(!p4.over, "%u samples had a stage-2 inner product past INT32_MAX (int32 wrap)", p4.over);
 }
 
 /* Where one leg meets the next, nothing may come between them but the morph's own granularity.
  * MODE 63 is the crossfade one step short of the high-pass and MODE 64 is the pinned high-pass tap
  * itself; MODE 63 still carries 128/4096 of the low-pass tap, and each step inside the leg moves
  * that weight by the same 128. So the step across the corner is measured against the step just
- * inside it (62 -> 63), which has to be the same size: a clamp or a saturation that bites on one
+ * inside it (62 -> 63 at the high-pass; the notch and band-pass corners likewise), which has to be the same size: a clamp or a saturation that bites on one
  * side of the corner and not the other -- the +-400000 hp clamp the crossfade used to carry was
  * exactly that -- makes the crossing the larger of the two. RES 127, where the taps are widest.
  * (A fixed threshold would not do: 63 -> 64 is 15 % of the signal at a high cutoff, because there
@@ -430,16 +508,19 @@ static double ren_diff_rel(int32_t mode_a, int32_t mode_b, int16_t cut)
 static void test_mode_corner_step(void)
 {
     static const int16_t CUTS[] = {40, 90, 120};
-    uint32_t ct;
-    for (ct = 0; ct < NELEM(CUTS); ct++) {
-        double in = ren_diff_rel(OBX_M_HP - 2, OBX_M_HP - 1, CUTS[ct]);
-        double over = ren_diff_rel(OBX_M_HP - 1, OBX_M_HP, CUTS[ct]);
-        printf("obx: RES 127 CUT %3d: MODE 62 -> 63 moves %5.2f %% of the signal, 63 -> 64 %5.2f %%\n",
-               CUTS[ct], 100.0 * in, 100.0 * over);
-        CHECK(over <= in * 1.5 + 0.002,
-              "MODE 63 -> 64 moves %.2f %% at CUT %d where 62 -> 63 moves %.2f %%: the corner has a step of"
-              " its own", 100.0 * over, CUTS[ct], 100.0 * in);
-    }
+    static const int16_t CORNERS[] = {OBX_M_NOTCH, OBX_M_HP, OBX_M_BP};   /* 32, 64, 96: the pinned taps */
+    uint32_t ct, k;
+    for (k = 0; k < NELEM(CORNERS); k++)
+        for (ct = 0; ct < NELEM(CUTS); ct++) {
+            int32_t c = CORNERS[k];
+            double in = ren_diff_rel(c - 2, c - 1, CUTS[ct]);
+            double over = ren_diff_rel(c - 1, c, CUTS[ct]);
+            printf("obx: RES 127 CUT %3d: MODE %d -> %d moves %5.2f %% of the signal, %d -> %d %5.2f %%\n",
+                   CUTS[ct], c - 2, c - 1, 100.0 * in, c - 1, c, 100.0 * over);
+            CHECK(over <= in * 1.25 + 0.002,
+                  "MODE %d -> %d moves %.2f %% at CUT %d where %d -> %d moves %.2f %%: the corner has a step of"
+                  " its own", c - 1, c, 100.0 * over, CUTS[ct], c - 2, c - 1, 100.0 * in);
+        }
 }
 
 /* SLOP 0 is inert: two different note-on counters have to give the same samples. (Two renders of
@@ -516,14 +597,21 @@ static void test_dspfft_guards(void)
     unsigned i;
     for (i = 0; i < 512u; i++)
         mag_b[i] = 1234.0f;
-    printf("obx: dspfft refusals (the next line on stderr is the one being tested)\n");
-    fflush(stdout);
+    fprintf(stderr, "obx: dspfft refusals (the next line on stderr is the one being tested)\n");
     fft_mag(ren_a, 1000u, mag_b);                      /* 1000 is not a power of two */
     for (i = 0; i < 500u; i++)
         if (mag_b[i] != 0.0f)
             break;
     CHECK(i == 500u, "fft_mag(n = 1000) left mag[%u] at %.0f: the caller reads stale magnitudes", i,
           mag_b[i]);
+    for (i = 0; i < 512u; i++)
+        mag_b[i] = 1234.0f;
+    fft_mag(ren_a, 2u * DSPFFT_MAX, mag_b);            /* past the scratch: the size of mag[] is unknowable */
+    for (i = 0; i < 512u; i++)
+        if (mag_b[i] != 1234.0f)
+            break;
+    CHECK(i == 512u, "fft_mag(n = 2 * DSPFFT_MAX) wrote mag[%u]: a refusal must not write past a buffer it cannot size",
+          i);
     saw_spectrum(0, cut_for_hz(1000), 0);
     CHECK(band_db(mag_a, REN_N, (float)FS, -10.0f, -5.0f) == DSPFFT_FLOOR_DB,
           "band_db(-10, -5) reads %.1f dB: a band below 0 Hz is not empty",
@@ -543,6 +631,7 @@ int main(void)
     test_mode_between();
     test_mode_bp_to_lp();
     test_mode_bounded();
+    test_p4_second_stage();
     test_mode_corner_step();
     test_slop_deterministic();
     test_slop_spread();
