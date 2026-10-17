@@ -117,6 +117,9 @@
 #                   the corners (every table x TYPE, RES and DRV 127), the presets' levels, the cost at its voice cap
 #                   against OB-Z RAVE; its filter against the plugin's own Filter.cpp (tools/void_ref.cpp, built from
 #                   ../VoidWave or VOIDWAVE_DIR; skipped without it); demos in build/void_demo/.
+# AUDITION (tests/audition.c, tools/audition_index.py, 7.1): build/host/audition build/audition renders every factory preset through the mix path to
+#                   a 6 s WAV + summary.json and reports the ones outside the loudness / DC limits (exit 1; NOT part of this suite);
+#                   tools/audition_index.py build/audition writes the rating page. Here: --selftest, the rules against synthetic signals.
 # PERFORM (tests/perform_test.c): the FX hold layer (src/perform.c): 1/16 starts, stereo buffer effects, the
 #                   too-long REPEAT, the SLICER interplay, silent layer keys, idle bit-identical, cost; build/perform_demo/;
 #                   OCT UP / DN (the harmonizer): pitch, stereo, clicks, the shimmer bounded, cost; FLANGER / PHASER (1.2): no DC,
@@ -222,6 +225,8 @@ run "update loader: other app -> this build" "$OUT/ldr_test" "$OUT/old.fwsc" bui
 
 if [ -f build/gen/felucca_tables.h ]; then
     $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/hostsim" tests/hostsim.c -lm
+    $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/audition" tests/audition.c -lm
+    run "AUDITION checks: peak / RMS / DC / silence rules against synthetic signals (the renderer itself, build/host/audition build/audition, is not a gate)" "$OUT/audition" --selftest
     $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/scale_test" tests/scale_test.c -lm
     run "scales: white-key mapping and note lifecycle" "$OUT/scale_test"
     $CC -w -Ibuild/gen -Ifirmware/src -o "$OUT/chord_test" tests/chord_test.c -lm
