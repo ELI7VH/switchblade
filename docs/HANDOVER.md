@@ -10,7 +10,7 @@ VOID FOUR is a fork of the Felucca 1.6 firmware for the M-VAVE FM-1 (a JieLi AC7
 |---|---|---|---|---|
 | 0 | OB-Z | `ENG_OBX`, `ENGI_OBX`, `OBX_PRESETS` | `firmware/src/eng_obx.c` (the old ANALOG engine) | works; Phase 4 adds the SEM filter morph and slop |
 | 1 | WAVE | `ENG_WAVE`, `ENGI_WAVE` | `firmware/src/eng_wave.c` (the VOID WAVE plugin port) | works; DC blocker added in Task 4.2 |
-| 2 | ACID | `ENG_ACID`, `ENGI_ACID` | `firmware/src/eng_acid.c` | **placeholder**: borrows OB-Z's `analog_render_f`; Phase 5 makes it a real 303 |
+| 2 | ACID | `ENG_ACID`, `ENGI_ACID` | `firmware/src/eng_acid.c` | **real 303 voice** (Task 5.2): `bass303.c` after Open303, float, own envelope (`ownenv`); `docs/plans/2026-10-17-acid-303.md`. Its 32 seeds are still the placeholder-era ones (Task 7.2 re-voices 12) |
 | 3 | DRIFT | `ENG_DRIFT`, `ENGI_DRIFT` | `firmware/src/eng_drift.c` | **placeholder**: same; Phase 6 makes it a ZDF ladder |
 
 - **Repo:** `/Users/ollie_nicklin/Documents/Projects/VOID SYNTH/FM1-Four`. It is a git repo on branch `main` (there is no `master`; the handover said `master` in error, corrected 2026-10-16), and the user has authorised committing directly.

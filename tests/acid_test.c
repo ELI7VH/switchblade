@@ -50,7 +50,7 @@ static void check(int ok, const char *fmt, ...)
 
 /* ------------------------------------------------------------ harness --- */
 static track_t *T;
-#ifdef BASS303_NPARAMS
+#ifdef BASS303_PORT
 static acid_t *ac_of(void) { return (acid_t *)ENG_MEM(0); }
 #endif
 
@@ -299,7 +299,7 @@ static void test_accent(void)
 /* ------------------------------------------------------------------ (d) --- */
 #define SL_N (AM_SLIDE_END * CTL)
 static int32_t slb[SL_N];
-#ifdef BASS303_NPARAMS
+#ifdef BASS303_PORT
 static float sl_slew[AM_SLIDE_END], sl_env[AM_SLIDE_END];
 #endif
 
@@ -329,7 +329,7 @@ static void slide_phrase(unsigned mode, int retrig)
         if (b == AM_SLIDE_OFF)
             trk_note_off(T, 60);
         run(slb + b * CTL, 1);
-#ifdef BASS303_NPARAMS
+#ifdef BASS303_PORT
         sl_slew[b] = ac_of()->b.slew_y;
         sl_env[b] = ac_of()->b.env_y;
 #endif
@@ -409,7 +409,7 @@ static void test_slide_mode(unsigned mode, const char *name)
     /* the pitch climbs across 50-70 ms: the audio's zero crossings, and the engine's own slew */
     slope = f0_slope(slb, s0 + (unsigned)(0.050 * AM_FS), s0 + (unsigned)(0.070 * AM_FS), &f0, &f1);
     check(slope > 0.0 && f0 < f1 + 3.0, "(d) %s: pitch rising across 50-70 ms (audio: %.1f -> %.1f Hz, slope %+.0f Hz/s)", name, f0, f1, slope);
-#ifdef BASS303_NPARAMS
+#ifdef BASS303_PORT
     {
         unsigned b0 = AM_SLIDE_AT + (unsigned)(0.050 * AM_FS / CTL), b1 = AM_SLIDE_AT + (unsigned)(0.070 * AM_FS / CTL), mono = 1, ok_env = 1;
         float fa = 440.0f * powf(2.0f, (48 - 69) / 12.0f), fb = 440.0f * powf(2.0f, (60 - 69) / 12.0f);
@@ -442,7 +442,7 @@ static void test_slide(void)
 /* an unaccented slide target after an accented step is unaccented (the legato branch of mono_play must hand the new velocity on) */
 static void test_legato_accent(void)
 {
-#ifdef BASS303_NPARAMS
+#ifdef BASS303_PORT
     acid_fresh();
     pots(0, 0, 0, 100, 50, 80, 0, 0, 81);
     trk_note_on(T, 36, 127);
@@ -458,8 +458,49 @@ static void test_legato_accent(void)
     trk_note_off(T, 48);
     run(0, 2);
     check(ac_of()->b.accent_gain > 0.0f && T->v[0].vel == 127, "legato: an accented slide target is accented (vel %u)", T->v[0].vel);
+    {   /* overlapped notes with no slide: the pitch jumps (no slew), and still no envelope retrigger */
+        float e0, f52 = 440.0f * powf(2.0f, (52 - 69) / 12.0f);
+        run(0, 4);
+        e0 = ac_of()->b.env_y;
+        T->slide_glide = 0;
+        trk_note_on(T, 52, 96);
+        trk_note_off(T, 40);
+        run(0, 1);
+        check(fabsf(ac_of()->b.slew_y / f52 - 1.0f) < 0.0005f && ac_of()->b.env_y < e0, "legato: overlapped notes with no slide jump to the pitch (%.2f Hz of %.2f) without a retrigger", ac_of()->b.slew_y, f52);
+    }
 #else
     check(0, "legato: no bass303 state to read (ACID is still the placeholder)");
+#endif
+}
+
+/* the cutoff the voice gets is CUT plus the LFO and the matrix only: ENV x ED_FLT and the accent's boost (voice.c m->cutoff) are
+ * taken out, the 303's own filter envelope being ENVMOD */
+static void test_cutoff_path(void)
+{
+#ifdef BASS303_PORT
+    unsigned b;
+    int32_t lo = 1 << 30, hi = -(1 << 30);
+    acid_fresh();
+    pots(0, 0, 60, 80, 50, 80, 0, 0, 127);
+    T->p[P_ED_FLT] = 63;
+    trk_note_on(T, 36, 127);                          /* accented, ENV at full: m->cutoff carries both */
+    for (b = 0; b < 120u; b++) {
+        run(0, 1);
+        lo = ac_of()->cutq < lo ? ac_of()->cutq : lo;
+        hi = ac_of()->cutq > hi ? ac_of()->cutq : hi;
+    }
+    check(lo == 50 * 256 && hi == 50 * 256, "cutoff: ENV x ED_FLT and the accent boost never reach the filter's CUT (%d .. %d of %d)", lo, hi, 50 * 256);
+    T->p[P_LD_FLT] = 40;                              /* an LFO on the cutoff does */
+    lo = 1 << 30;
+    hi = -(1 << 30);
+    for (b = 0; b < 600u; b++) {
+        run(0, 1);
+        lo = ac_of()->cutq < lo ? ac_of()->cutq : lo;
+        hi = ac_of()->cutq > hi ? ac_of()->cutq : hi;
+    }
+    check(hi - lo > 3000, "cutoff: the LFO's depth reaches the filter (%d .. %d, 1/256 pot steps)", lo, hi);
+#else
+    check(0, "cutoff: no bass303 state to read (ACID is still the placeholder)");
 #endif
 }
 
@@ -495,7 +536,7 @@ static void test_decay(void)
     double t_fast = tau_of(0, 0.10, 0.12), t_slow = tau_of(127, 0.10, 0.60);
     check(t_fast > 0.0 && t_slow / t_fast >= 5.0, "(e) filter envelope time constant from the audio: DECY 0 %.0f ms, DECY 127 %.0f ms (%.1f x)",
           1000.0 * t_fast, 1000.0 * t_slow, t_fast > 0.0 ? t_slow / t_fast : 0.0);
-#ifdef BASS303_NPARAMS
+#ifdef BASS303_PORT
     {
         double ta, tb;
         acid_fresh();
@@ -521,14 +562,14 @@ static void test_decay(void)
 static void test_envelope_hooks(void)
 {
     const engine_t *e = ENGINES[ENGI_ACID];
-    unsigned b, lo = 0, hi = 0, k, ended = 0;
+    unsigned b, lo = 0, hi = 0, k, ended = 0, raw_over = 0;
     int32_t a;
     check(e->ownenv == 1 && e->amp && e->done && e->poly == 1u && e->mem == ACID_MEM && ACID_MEM != 0, "ACID: ownenv, amp, done, mono, mem hooks set (own state %u bytes)", (unsigned)ACID_MEM);
     if (!(e->ownenv && e->amp && e->done)) {
         check(0, "amp() / done(): ACID has no own-envelope hooks (still the placeholder)");
         return;
     }
-#ifdef BASS303_NPARAMS
+#ifdef BASS303_PORT
     check(ACID_MEM == sizeof(acid_t) && ACID_MEM <= VOID_MEM, "ACID: state %u bytes, the region %u (WAVE's %u, so the pool does not grow)", (unsigned)ACID_MEM, (unsigned)ENG_MEM_PART, (unsigned)VOID_MEM);
 #endif
     /* amp() in [0, 32767] across the corners (accent, drive, resonance, envelope depth, both waves, slide) */
@@ -542,12 +583,18 @@ static void test_envelope_hooks(void)
             a = e->amp(T, &T->v[0]);
             lo += a < 0;
             hi += a > 32767;
+#ifdef BASS303_PORT
+            raw_over += acid_vca(&ac_of()->b) > 1.0f;
+#endif
             if (b == 100u) {
                 T->slide_glide = 1;
                 trk_note_on(T, 60 + (int)k, 127);
             }
         }
     }
+#ifdef BASS303_PORT
+    check(raw_over > 100u, "amp(): the VCA command really does exceed 1.0 here (%u ticks), so the clamp is what keeps it in range", raw_over);
+#endif
     check(!lo && !hi, "amp(): inside [0, 32767] on every tick of 16 extreme settings (%u below, %u above)", lo, hi);
     /* done(): a released note ends (plain 1 ms release, and accented 50 ms) */
     for (k = 0; k < 2u; k++) {
@@ -691,6 +738,7 @@ int main(int argc, char **argv)
     test_accent();
     test_slide();
     test_legato_accent();
+    test_cutoff_path();
     test_decay();
     test_envelope_hooks();
     test_cost();

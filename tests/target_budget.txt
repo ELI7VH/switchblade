@@ -28,3 +28,5 @@ rev_side_mix 9
 track_insert 3
 ins_drive 277
 ins_swept 230
+acid_render 86
+bass303_render 8524

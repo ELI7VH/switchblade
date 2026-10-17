@@ -96,8 +96,13 @@
 #                   4-pole bounded and adding no DC at RES 127; SLOP 0 is inert over different note-ons and SLOP 127
 #                   spreads the voices within +-6 cents; DTN moves the second oscillator by its cents; dspfft.h's two
 #                   refusals (an n it cannot transform, a band below 0 Hz).
-#                   Plus a source check: the ANALOG render copied in eng_obx.c for the ACID / DRIFT placeholders
-#                   fails the suite once no engine binds analog_render_f (Phases 5 and 6 delete it with them).
+#                   Plus a source check: the ANALOG render copied in eng_obx.c for the DRIFT placeholder
+#                   fails the suite once no engine binds analog_render_f (Phase 6 deletes it with the placeholder).
+# ACID (tests/acid_test.c, tests/acid_ref/, tests/acid_meas.h): the 303 voice (bass303.c, eng_acid.c) through the real voice path against
+#                   the donor's own vectors (tests/acid_ref.sh regenerates them from fm1-x0x's bass303.c): the filter's impulse response on
+#                   a 5 x 5 CUT / RES grid within 1 dB, the RES 127 resonance within 3 %, an accented step >= 3 dB louder and brighter, a
+#                   48 -> 60 slide (LEGATO and MONO: no retrigger, pitch rising across 50-70 ms, no dip), DECY 0 vs 127, the cost per
+#                   voice (<= 3 x OB-Z, <= 4600 instructions / sample), amp() in [0, 32767], done() ends released and held notes.
 # WAVE (tests/void_tables_test.py, tests/void_test.c): the VOID WAVE plugin's voice (the WAVE engine, was VOID). Its wavetables against the plugin's
 #                   frames recomputed with numpy (every keyframe and level band-limited, the crossfade within its limit;
 #                   skipped without numpy); the engine: pitch, OSC2's steps, band-limited at C8, bounded and without DC at
@@ -152,7 +157,7 @@ export AC79_SDK="${AC79_SDK:-$HOME/fw-AC79_AIoT_SDK}"
 cd "$(dirname "$0")/.."
 OUT=build/host
 mkdir -p "$OUT"
-CC="${CC:-cc} -O1 -Wall -Wno-unused-function"
+CC="${CC:-cc} -O1 -Wall -Wno-unused-function -ffp-contract=off"   # (-ffp-contract=off: ACID and DRIFT are float; the device has no fused multiply-add, so a golden must not depend on the host having one)
 fail=0
 run() { echo "== $1"; shift; "$@" || fail=1; }
 
@@ -303,13 +308,16 @@ if [ -f build/gen/felucca_tables.h ]; then
     $CC -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/four_test" tests/four_test.c -lm && "$OUT/four_test" || fail=1
     $CC -O1 -w -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/obx_test" tests/obx_test.c -lm
     run "OB-Z: MODE 0 the legacy low-pass bit for bit, the LP / NOTCH / HP / BP morph, the 4-pole, SLOP, DTN" "$OUT/obx_test"
+    $CC -O2 -w -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/acid_test" tests/acid_test.c -lm
+    run "ACID: the 303 voice against the donor's vectors (filter grid, resonance, accent, slide, decay), the cost, amp() / done()" \
+        "$OUT/acid_test" tests/acid_ref
     # The ANALOG render copied into eng_obx.c (analog_tap, analog_ft, ANALOG_K, analog_note_on,
     # analog_osc, analog_render_f) is OB-Z's engine as it stood before Task 4.1's morph. It is kept
-    # only because the ACID and DRIFT placeholders borrow it and their golden hashes are recorded
-    # against it, and the two copies are meant to diverge, so nothing in the sources can tell that
-    # one is dead. Phases 5 and 6 give those machines their own voices: the moment no engine binds
+    # only because the DRIFT placeholder borrows it (ACID has had its own voice since Task 5.2) and its
+    # golden hashes are recorded against it, and the two copies are meant to diverge, so nothing in the
+    # sources can tell that one is dead. Phase 6 gives DRIFT its own voice: the moment no engine binds
     # analog_render_f the copy is orphaned, and this fails until it is deleted.
-    echo "== the ANALOG render copied in eng_obx.c is still borrowed (Phases 5 / 6 delete it)"
+    echo "== the ANALOG render copied in eng_obx.c is still borrowed (Phase 6 deletes it with the DRIFT placeholder)"
     an_users=$(grep -l analog_render_f firmware/src/eng_*.c 2>/dev/null | grep -v eng_obx.c | tr '\n' ' ') || true
     if ! grep -q '^static .*analog_render_f(' firmware/src/eng_obx.c; then
         echo "   ok: the copy is gone from firmware/src/eng_obx.c"

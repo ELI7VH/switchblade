@@ -20,7 +20,7 @@
 - Screen: ST7789V 240×240 RGB565. Largest drawable strip 240×124 (`CV_MAX`).
 - Track N plays on MIDI channel N (1..4) by default, both in and out.
 - The CC map is the same for MIDI in and MIDI out, and it is documented in `docs/MIDI.md`.
-- DSP is fixed point only: no float, no allocation, no libc in engines. Nothing may depend on the second core.
+- DSP is fixed point, **except ACID and DRIFT, which are single-precision float on the FPU (override D10 / `docs/plans/2026-10-16-void-four-continuation.md`; Task 5.1 turned it on, a `double` fails the link)**. No allocation, no libc in engines (`fastmath.h` is the float maths library). Nothing may depend on the second core.
 - The app image must be ≤ `APP_SLOT` = 0x8DFBC (581,564 B). RAM headroom ≥ 4096 B, pool headroom ≥ 8192 B (`tools/build.py check()`).
 - Full four-track pattern load must stay ≤ 80% on one core (`song.cpu_q8`, measured on the FM-1).
 - Licence: GPL-3.0-only with full source. Keep each donor's copyright notice and put its licence text in `LICENSES/`.

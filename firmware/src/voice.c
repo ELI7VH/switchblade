@@ -351,8 +351,8 @@ static void mono_play(track_t *t, uint32_t note, uint32_t vel, int retrig, int g
             v->pitch16 = (int32_t)note * 16;
             v->mvel = t->m_vel;
             v->mrnd = t->m_rnd;
-            if (vel > v->vel && nv == 1u)
-                v->vel = (uint8_t)vel;
+            if (nv == 1u && (vel > v->vel || ENGINES[t->engine]->ownenv))
+                v->vel = (uint8_t)vel;                      /* (an own-envelope engine, ACID: the step's accent, plain as well) */
             glide_set(t, v, glide);
         }
     }
