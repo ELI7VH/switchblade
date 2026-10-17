@@ -1,11 +1,17 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* DRIFT: the Juno voice. A float port of the Ultramaster KR-106 (kayrockscreenprinting/ultramaster_kr106, GPL-3.0; Karl LaRocca):
- * the DCO from Source/DSP/KR106Oscillators.h (one phase accumulator behind a polyBLEP saw, a comparator pulse and the CD4013
- * sub-octave), the voice's drift and component variance from Source/DSP/KR106Voice.h (InitVariance, SetDriftAmount,
+ * the DCO from Source/DSP/KR106Oscillators.h (one phase accumulator behind a LINEAR polyBLEP saw, a comparator pulse, J106-inverted,
+ * and the CD4013 sub-octave, its transitions smoothed by the BLEP and nothing else: no charge curvature, no discharge blip, no sub RC;
+ * the donor's own comment, KR106Oscillators.h:187-196, says the curvature seen in recordings was the interface's AC-coupling), the voice's drift and component variance from Source/DSP/KR106Voice.h (InitVariance, SetDriftAmount,
  * UpdateDriftWalk), the filter and the half-band resampler from dsp_va.c, the 4-position HPF from Source/DSP/KR106_HPF.h. This
  * file is the machine: the EDIT slots, one voice per slot in the part's engine memory, the control rate. Design and the exact
  * mapping: docs/plans/2026-10-17-drift-juno.md. The polyBLEP path only; the donor's wavetable oscillator needs tables built above
  * its DSP layer and does not stand alone.
+ * Departures from the donor's oscillator: the DCO runs at DRIFT_OS (1) x the base rate, the donor's at 4 x; the three gains are
+ * mixed by the MIX law below (the donor has three switches), and the voice's output is levelled by it; the pulse width has no
+ * LFO selector but the track's SHAPE and an auto PWM above PW 64; the DC blockers are the donor's (mPostOscDcG, mPostVcfDcG).
+ * Departures in the voice start: a finished voice resets the filter too (the donor's idle voice keeps ringing, ours is skipped, so
+ * a stale state would burst out of the next note); a retrigger keeps phase and filter, as the donor.
  *
  *   E0 MIX  sub-heavy below 32, saw at 64, pulse at 127     E1 PW   64 = a square, below: narrower, above: auto PWM
  *   E2 DRFT DCO drift                                       E3 VAR  per-voice component variance
@@ -40,21 +46,12 @@ _Static_assert(CTL % DRIFT_CTRL == 0, "DRIFT_CTRL divides a control block");
 #define DRIFT_SAW_AMP 0.6f
 #define DRIFT_PULSE_AMP 0.5f
 #define DRIFT_SUB_AMP 0.75f
-/* the saw's charge curvature pos (1 + c (1 - pos)), and the pulse comparator's compensation for it */
-#define DRIFT_CURVE 0.15f
-#define DRIFT_BLIP 0.1f          /* the discharge blip: the undershoot after a reset, amplitude, */
-#define DRIFT_BLIP_DECAY 0.5f    /* its decay per base-rate sample */
-/* the pulse knob's range: pw 0.5 .. 0.95 (J106). The knob value that makes an exact 50 % duty after the curvature compensation
- * is c(0.5) = 0.5 (1 + 0.15 0.5) = 0.5375: the minimum is that, so PW 64 is a true square (odd harmonics only) */
-#define DRIFT_PW_MIN 0.5375f
+/* the pulse knob's range, KR106Voice.h: pw 0.5 .. 0.95, so PW 64 is a true square (odd harmonics only) */
+#define DRIFT_PW_MIN 0.5f
 #define DRIFT_PW_MAX 0.95f
-/* the sub's passive RC rolloff, coefficient 0.45 per base-rate sample (~4.2 kHz at 44.1 kHz), rescaled to the oversampled rate
- * (1 - (1 - 0.45)^(1 / os)) so the corner stays */
 #if DRIFT_OS == 2
-#define DRIFT_SUB_RC 0.25830f
 #define DRIFT_DC1 5.6631e-5f     /* the DC blockers' g/(1+g), 1.59 Hz at the oversampled rate (the post-DCO one) ... */
 #else
-#define DRIFT_SUB_RC 0.45f
 #define DRIFT_DC1 1.13255e-4f
 #endif
 #define DRIFT_DC2 1.13255e-4f    /* ... and at the base rate (the post-VCF one) */
@@ -79,7 +76,7 @@ typedef struct {                 /* per voice (engine memory) */
 #if DRIFT_OS == 2
     va_hb_t hb;                  /* the decimator */
 #endif
-    float pos, blip, sub_lp;     /* the DCO: phase, the discharge blip, the sub's RC */
+    float pos;                   /* the DCO: phase */
     float dc1, dc2;              /* the post-DCO (oversampled) and post-VCF (base rate) DC blockers */
     float hp[2];                 /* the HPF / bass boost shelves */
     float walk[3];               /* drift: three slow sines' phases, in turns */
@@ -188,11 +185,12 @@ static void drift_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
     float ktr = (float)clamp(p[P_E7], 0, 127) * (1.0f / 127.0f), res = (float)clamp(p[P_E5], 0, 127) * (1.0f / 127.0f);
     float gsaw, gpul, gsub, pw, pwn, effpw, cps, hz, hz0, dhz, cents, drive_g = 1.0f, drive_n = 1.0f;
     float amp, damp, lvl;
-    int ft = p[P_FTYPE] < 0 ? 0 : p[P_FTYPE] > 3 ? 3 : p[P_FTYPE];
+    int ft = p[P_FTYPE] < 0 || p[P_FTYPE] > 3 ? 0 : p[P_FTYPE];   /* (the track-persistent value of another engine's filter, 4 HP24 / 5 NOTCH: flat, not a hidden cut) */
     uint32_t i, seg, o, nseg;
     int32_t ci;
     if (n > CTL)
         n = CTL;
+    n -= n % DRIFT_CTRL;                                 /* whole control segments only (n is CTL in the product; this keeps damp / the tail aligned if not) */
     if (!c->init || n < DRIFT_CTRL)
         return;
     /* ---- the MIX law ---- */
@@ -216,7 +214,7 @@ static void drift_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
         pwn = drift_clamp01(pwn);
         pw = pwmin + pwn * (pwmax - pwmin);
     }
-    effpw = pw / (1.0f + DRIFT_CURVE * (1.0f - pw));      /* the comparator is on the curved ramp: compensate for it */
+    effpw = 1.0f - pw;                                    /* J106: the inverted duty cycle (KR106Oscillators.h mPulseInvert) */
     effpw = effpw < 0.01f ? 0.01f : effpw > 0.99f ? 0.99f : effpw;
     /* ---- the pitch: the note, the drift (a static offset and three slow sines, at most 8 cents at DRFT 127), the variance ---- */
     c->walk[0] += (float)n * (0.07f / DRIFT_FS);
@@ -274,9 +272,9 @@ static void drift_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
          * otherwise reload them after every store */
         va_ladder_t *l = &c->l;
         float xin[DRIFT_CTRL * DRIFT_OS], yout[DRIFT_CTRL * DRIFT_OS];
-        float pos = c->pos, blip = c->blip, sub_lp = c->sub_lp, dc1 = c->dc1, dc2 = c->dc2, hp0 = c->hp[0], hp1 = c->hp[1], peak = c->peak;
+        float pos = c->pos, dc1 = c->dc1, dc2 = c->dc2, hp0 = c->hp[0], hp1 = c->hp[1], peak = c->peak;
         int sub_state = c->sub_state;
-        const float blip_dec = DRIFT_OS == 2 ? 0.70710678f : DRIFT_BLIP_DECAY, dt2 = cps + cps, hi = 1.0f - dt2;
+        const float dt2 = cps + cps, hi = 1.0f - dt2;
         uint32_t k = 0;
         for (seg = 0; seg < nseg; seg++) {
             va_ladder_env(l, peak);
@@ -289,13 +287,11 @@ static void drift_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
                 if (pos >= 1.0f) {
                     pos -= 1.0f;
                     sub_state ^= 1;
-                    blip = DRIFT_BLIP;
                 }
                 if (pos < dt2 || pos > hi)
                     bl = drift_blep(pos, cps);
-                if (gsaw != 0.0f)                        /* saw: the capacitor ramp's curvature, the reset blep and the discharge blip */
-                    s += (2.0f * pos * (1.0f + DRIFT_CURVE * (1.0f - pos)) - 1.0f - bl - blip) * gsaw;
-                blip *= blip_dec;
+                if (gsaw != 0.0f)                        /* saw: the linear ramp and the reset blep */
+                    s += (2.0f * pos - 1.0f - bl) * gsaw;
                 if (gpul != 0.0f) {                      /* pulse: the comparator on the ramp, a blep at each edge */
                     float pw2 = pos - effpw, b2 = 0.0f;
                     pw2 += pw2 < 0.0f ? 1.0f : 0.0f;
@@ -303,11 +299,8 @@ static void drift_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
                         b2 = drift_blep(pw2, cps);
                     s += ((pos < effpw ? -1.0f : 1.0f) + b2 - bl) * gpul;
                 }
-                if (gsub != 0.0f) {                      /* sub: the CD4013's half-rate square, its transitions smoothed, then the RC */
-                    float sub = (sub_state ? -1.0f : 1.0f) * (1.0f - (bl < 0.0f ? -bl : bl));
-                    sub_lp += DRIFT_SUB_RC * (sub - sub_lp);
-                    s += sub_lp * gsub;
-                }
+                if (gsub != 0.0f)                        /* sub: the CD4013's half-rate square, its transitions smoothed by the blep */
+                    s += (sub_state ? -1.0f : 1.0f) * (1.0f - (bl < 0.0f ? -bl : bl)) * gsub;
                 s = DRIFT_IN(s);
                 a = s < 0.0f ? -s : s;
                 peak = a > peak ? a : peak;
@@ -355,8 +348,6 @@ static void drift_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
         }
         c->peak = peak;
         c->pos = pos;
-        c->blip = blip;
-        c->sub_lp = sub_lp;
         c->dc1 = dc1;
         c->dc2 = dc2;
         c->hp[0] = hp0;

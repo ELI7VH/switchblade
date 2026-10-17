@@ -13,7 +13,13 @@
  *   (f) VAR 0: every voice has the same cutoff; VAR 127: measurably different per voice;
  *   (g) MIX: sub at 0, saw at 64, pulse at 127, each by its spectrum;
  *   (h) P_FTYPE moves the HPF corner across its four positions;
- *   (i) CPU: a full four-part mix stays inside the host model of the 80 % target (tests/target_budget.py);
+ *   (h) also: P_FTYPE above DRIFT's four positions is the flat one, never a hidden cut;
+ *   (i) CPU: the DRIFT part inside its pin (+10 % of its measured worst, -O2); the dearest legal four-track mix is measured and
+ *       printed, not asserted (the 80 % claim is Task 8.1's, on the device);
+ *   (j) the donor's linear ramp bandlimited: inharmonic energy at MIDI 72 / 84 / 96 below -50 dB;
+ *   (k) the DCO's spectrum against the ideal waveform of the donor's amplitudes and the PW law (amplitudes, PW, polarity, MIX);
+ *   (l) the auto PWM swings the pulse's 2nd harmonic; (m) KTR: 1 octave per octave at 127, none at 0, C4 the zero point;
+ *   (n) the two 1.59 Hz DC blockers: -6 dB at 1.59 Hz; (o) a new note on a finished voice starts clean, a retrigger keeps the states;
  * plus the halfband pair (gain, image rejection) and a bounded / finite sweep of the corners.
  * The DRIFT_IN seam (eng_drift.c) replaces the oscillator by silence, an impulse, a sine or noise, to measure the filter alone. */
 #include <stdint.h>
@@ -625,6 +631,314 @@ static void test_corners(void)
           cases, (int)peak, nz);
 }
 
+
+/* ------------------------------------------------------------ the DCO (I4, I3) --- */
+/* The DCO is the donor's (KR106Oscillators.h): a linear ramp, the comparator pulse, the CD4013 sub, one polyBLEP at each edge.
+ * Inharmonic energy is what a wrong ramp or an un-bandlimited step shows as: every partial of a bandlimited saw sits on a multiple
+ * of the fundamental. Measured with MIX 64, the filter open, DRFT 0, a 32768-point Hann FFT; a harmonic owns its bin +-5. */
+static double inharmonic_db(unsigned note)
+{
+    const unsigned N = 32768;
+    double f0 = 440.0 * pow(2.0, ((double)note - 69.0) / 12.0), eh = 0.0, ei = 0.0;
+    unsigned k;
+    drift_fresh();
+    pots(64, 64, 0, 0, 127, 0, 0, 0);
+    trk_note_on(T, note, 100);
+    run(0, 16384);
+    run(buf, N);
+    fft_mag(buf, N, mag2_);
+    for (k = (unsigned)(0.5 * f0 * N / FSD); k < N / 2u; k++) {
+        double h = (double)k * FSD / N / f0, d = h - floor(h + 0.5);
+        double e = (double)mag2_[k] * mag2_[k];
+        if (fabs(d) * f0 * N / FSD <= 5.0 && floor(h + 0.5) >= 1.0)
+            eh += e;
+        else
+            ei += e;
+    }
+    return 10.0 * log10(ei / eh + 1e-30);
+}
+static void test_inharmonic(void)
+{
+    static const unsigned NOTES[3] = {72, 84, 96};
+    double d[3], worst = -1e9;
+    unsigned i;
+    for (i = 0; i < 3u; i++) {
+        d[i] = inharmonic_db(NOTES[i]);
+        worst = d[i] > worst ? d[i] : worst;
+    }
+    check(worst < -50.0, "(j) the donor's linear ramp, bandlimited: inharmonic energy at MIDI 72 / 84 / 96 is %.1f / %.1f / %.1f dB (all < -50)",
+          d[0], d[1], d[2]);
+}
+
+/* the Hann-windowed DFT of x[0..n) evaluated exactly at hz, dB: no scalloping (a peak search over FFT bins reads a harmonic up to
+ * 1.4 dB low where it falls between two bins) */
+static double tone_db(const int32_t *x, unsigned n, double hz)
+{
+    double re = 0.0, im = 0.0;
+    unsigned i;
+    for (i = 0; i < n; i++) {
+        double w = 0.5 - 0.5 * cos(2.0 * M_PI * (double)i / (double)n), ph = 2.0 * M_PI * hz * (double)i / FSD;
+        re += (double)x[i] * w * cos(ph);
+        im -= (double)x[i] * w * sin(ph);
+    }
+    return 20.0 * log10(sqrt(re * re + im * im) + 1e-30);
+}
+
+/* the ideal (not bandlimited) waveform gs (2 x - 1) + gp (x < e ? -1 : 1): the magnitude of its harmonics 1..4 */
+static void ideal_h(double gs, double gp, double e, double *h)
+{
+    const int M = 16384;
+    int n, i;
+    for (n = 1; n <= 4; n++) {
+        double re = 0.0, im = 0.0;
+        for (i = 0; i < M; i++) {
+            double x = ((double)i + 0.5) / M, w = gs * (2.0 * x - 1.0) + gp * (x < e ? -1.0 : 1.0);
+            re += w * cos(2.0 * M_PI * n * x);
+            im -= w * sin(2.0 * M_PI * n * x);
+        }
+        h[n] = sqrt(re * re + im * im) / M;
+    }
+}
+/* MIX -> the DCO's gains (the plan's table, the donor's J106 amplitudes saw 0.6 / pulse 0.5), PW -> the duty (the donor's pw range
+ * 0.5 .. 0.95, J106 inverts it: the low part is 1 - pw of the cycle). The spectrum of 220 Hz at the filter open must follow it:
+ * this pins the amplitudes, the PW law, the PW polarity against the saw and the MIX law, from the output. */
+static void test_dco_spectrum(void)
+{
+    static const struct { int mix, pw; } C[] = {{64, 64}, {127, 64}, {127, 0}, {127, 40}, {96, 64}, {80, 64}, {96, 40}, {112, 20}};
+    unsigned c, ok = 1;
+    char msg[600] = "";
+    for (c = 0; c < NELEM(C); c++) {
+        double e = (double)C[c].mix, gs = (e <= 64.0 ? 1.0 : (127.0 - e) / 63.0) * 0.6, gp = (e <= 64.0 ? 0.0 : (e - 64.0) / 63.0) * 0.5;
+        double pwn = C[c].pw < 64 ? (64.0 - C[c].pw) / 64.0 : 0.0, pw = 0.5 + pwn * 0.45, h[5], f[5], worst = 0.0;
+        unsigned n;
+        ideal_h(gs, gp, 1.0 - pw, h);
+        drift_fresh();
+        pots(C[c].mix, C[c].pw, 0, 0, 127, 0, 0, 0);
+        trk_note_on(T, 57, 100);
+        run(0, 16384);
+        run(buf, NFFT * 2u);
+        for (n = 1; n <= 4; n++)
+            f[n] = tone_db(buf, NFFT * 2u, 220.0 * n);
+        for (n = 2; n <= 4; n++) {
+            double want = 20.0 * log10(h[n] / h[1] + 1e-30), got = f[n] - f[1];
+            if (want > -30.0) {
+                double d = fabs(got - want);
+                worst = d > worst ? d : worst;
+                ok &= d < 0.3;
+            } else {
+                ok &= got < -25.0;
+            }
+        }
+        snprintf(msg + strlen(msg), sizeof msg - strlen(msg), " [MIX %d PW %d: 2nd %+.1f (%+.1f) 3rd %+.1f (%+.1f) 4th %+.1f (%+.1f)]", C[c].mix, C[c].pw,
+                 f[2] - f[1], 20.0 * log10(h[2] / h[1] + 1e-30), f[3] - f[1], 20.0 * log10(h[3] / h[1] + 1e-30), f[4] - f[1],
+                 20.0 * log10(h[4] / h[1] + 1e-30));
+    }
+    check(ok, "(k) the DCO's spectrum at 220 Hz against the ideal waveform of the donor's amplitudes / PW law (harmonics 2 3 4 re the 1st, ideal in brackets, within 0.3 dB):%s", msg);
+}
+
+/* The waveform itself, not its magnitude spectrum: the saw's charge curvature is in quadrature with its harmonics and the pulse's
+ * polarity against the saw is a sign on the real part, so neither moves a harmonic's magnitude; both move the shape. The output of a
+ * held 659 Hz note (filter open) folded onto one cycle (512 bins, over 32768 samples), against the ideal waveform of the donor's
+ * amplitudes (gs (2 x - 1) + gp (x < e ? -1 : 1), e = 1 - pw): best circular shift and a positive gain / offset by least squares,
+ * the 10 % of the cycle around each edge left out (the blep, the filter's ringing). The relative rms error of the rest. */
+static double wave_err(int mix, int pw, double *gain)
+{
+    enum { B = 512 };
+    const unsigned N = NFFT * 2u;
+    const double f0 = 440.0 * pow(2.0, 7.0 / 12.0);        /* MIDI 76 = 659.255 Hz */
+    double fold[B], cnt[B], ideal[B], e = (double)mix, gs = (e <= 64.0 ? 1.0 : (127.0 - e) / 63.0) * 0.6, gp = (e <= 64.0 ? 0.0 : (e - 64.0) / 63.0) * 0.5;
+    double pwn = pw < 64 ? (64.0 - pw) / 64.0 : 0.0, ed = 1.0 - (0.5 + pwn * 0.45), best = 1e9;
+    unsigned i, sh, b;
+    drift_fresh();
+    pots(mix, pw, 0, 0, 127, 0, 0, 0);
+    trk_note_on(T, 76, 100);
+    run(0, 16384);
+    run(buf, N);
+    memset(fold, 0, sizeof fold);
+    memset(cnt, 0, sizeof cnt);
+    for (i = 0; i < N; i++) {
+        double x = fmod(f0 * (double)i / FSD, 1.0);
+        b = (unsigned)(x * B) % B;
+        fold[b] += (double)buf[i];
+        cnt[b] += 1.0;
+    }
+    for (b = 0; b < B; b++) {
+        double x = ((double)b + 0.5) / B;
+        fold[b] /= cnt[b] > 0.0 ? cnt[b] : 1.0;
+        ideal[b] = gs * (2.0 * x - 1.0) + gp * (x < ed ? -1.0 : 1.0);
+    }
+    for (sh = 0; sh < B; sh++) {
+        double sx = 0, sy = 0, sxx = 0, sxy = 0, syy = 0, n = 0, a, c, err;
+        for (b = 0; b < B; b++) {
+            double x = ((double)b + 0.5) / B, y = fold[(b + sh) % B], v = ideal[b];
+            if (x < 0.05 || x > 0.95 || fabs(x - ed) < 0.05)
+                continue;
+            sx += v, sy += y, sxx += v * v, sxy += v * y, syy += y * y, n += 1.0;
+        }
+        a = (n * sxy - sx * sy) / (n * sxx - sx * sx);
+        c = (sy - a * sx) / n;
+        err = (syy - 2.0 * a * sxy - 2.0 * c * sy + a * a * sxx + 2.0 * a * c * sx + n * c * c) / n;
+        err = sqrt(err > 0.0 ? err : 0.0) / sqrt(syy / n - (sy / n) * (sy / n));
+        if (a > 0.0 && err < best) {
+            best = err;
+            *gain = a;
+        }
+    }
+    return best;
+}
+static void test_waveform(void)
+{
+    static const struct { int mix, pw; } C[] = {{64, 64}, {96, 20}, {96, 40}, {80, 0}};
+    double g, w[4];
+    unsigned c, ok = 1;
+    char msg[300] = "";
+    for (c = 0; c < NELEM(C); c++) {
+        w[c] = wave_err(C[c].mix, C[c].pw, &g);
+        ok &= w[c] < 0.012;
+        snprintf(msg + strlen(msg), sizeof msg - strlen(msg), " [MIX %d PW %d: %.2f %%]", C[c].mix, C[c].pw, 100.0 * w[c]);
+    }
+    check(ok, "(p) the DCO's waveform at 659 Hz against the ideal (a linear ramp, the J106-inverted pulse): relative rms error, edges left out (< 1.2 %%):%s", msg);
+}
+
+/* the auto PWM: PW >= 64 sweeps the duty by a triangle (0.8 Hz), so the 2nd harmonic of a pulse (nil at a square) swings; at PW 64 it does not */
+static double h2_series(int pw, double *lo, double *hi)
+{
+    unsigned i;
+    drift_fresh();
+    pots(127, pw, 0, 0, 127, 0, 0, 0);
+    trk_note_on(T, 57, 100);
+    run(0, 4096);
+    *lo = 1e9;
+    *hi = -1e9;
+    for (i = 0; i < 8u; i++) {                     /* eight windows of 0.19 s, 0.37 s apart: the triangle's 1.25 s period is covered */
+        double d;
+        run(buf, 8192);
+        run(0, 8192);
+        fft_mag(buf, 8192, mag2_);
+        d = peak_db(mag2_, 8192, 440.0) - peak_db(mag2_, 8192, 220.0);
+        d = d < -60.0 ? -60.0 : d;                 /* (a true square has no 2nd harmonic: the floor is numerical noise, not a swing) */
+        *lo = d < *lo ? d : *lo;
+        *hi = d > *hi ? d : *hi;
+    }
+    return *hi - *lo;
+}
+static void test_pwm(void)
+{
+    double lo0, hi0, lo1, hi1, s0 = h2_series(64, &lo0, &hi0), s1 = h2_series(127, &lo1, &hi1);
+    check(s0 < 1.0 && s1 > 10.0, "(l) PWM: the pulse's 2nd harmonic over 3 s swings %.1f dB at PW 64 (< 1, a fixed square) and %.1f dB at PW 127 (> 10, %.1f .. %.1f dB)",
+          s0, s1, lo1, hi1);
+}
+
+/* ------------------------------------------------------------ KTR (I3) --- */
+static double ktr_hz(unsigned note, int ktr)
+{
+    drift_fresh();
+    pots(64, 64, 0, 0, (int)cut_for_hz(1000), 127, 0, ktr);
+    inj_mode = INJ_SILENCE;
+    trk_note_on(T, note, 100);
+    run(0, 16384);
+    run(buf, NFFT);
+    fft_mag(buf, NFFT, mag_);
+    return pk_hz(mag_, NFFT, 80.0, 9000.0);
+}
+static void test_ktr(void)
+{
+    double a127 = ktr_hz(60, 127), b127 = ktr_hz(72, 127), c127 = ktr_hz(48, 127);
+    double a0 = ktr_hz(60, 0), b0 = ktr_hz(72, 0), a64 = ktr_hz(60, 64), b64 = ktr_hz(72, 64);
+    int ok = fabs(b127 / a127 - 2.0) < 0.06 && fabs(a127 / c127 - 2.0) < 0.06 &&      /* KTR 127: one octave per octave */
+             fabs(b0 / a0 - 1.0) < 0.03 &&                                            /* KTR 0: none */
+             fabs(b64 / a64 - 1.418) < 0.05 &&                                        /* KTR 64: 64/127 of an octave per octave */
+             fabs(a127 / a0 - 1.0) < 0.03;                                            /* C4 (60) is the zero point */
+    check(ok, "(m) KTR: the self-oscillation of RES 127 at CUT 1 kHz: C5/C4 %.3f at KTR 127 (2), %.3f at KTR 64 (1.418), %.3f at KTR 0 (1); C4/C3 %.3f at 127 (2); "
+              "C4 at 127 / at 0 %.3f (1: C4 is the zero point)", b127 / a127, b64 / a64, b0 / a0, a127 / c127, a127 / a0);
+}
+
+/* ------------------------------------------------------------ the DC blockers (I3) --- */
+/* The coupling caps: a 1.59 Hz TPT high-pass after the DCO and another after the VCF (KR106Voice.h mPostOscDcG / mPostVcfDcG), so
+ * -6 dB at 1.59 Hz in series (-3 dB each) against the passband. Measured by correlation over whole periods of a seam sine. */
+static double lf_gain(double f)
+{
+    const unsigned P = (unsigned)(FSD / f + 0.5);        /* the period in samples: a multiple of CTL, so f is 44100 / P */
+    const unsigned N = P * (f < 5.0 ? 3u : 30u);
+    double re = 0.0, im = 0.0, fr = FSD / P;
+    unsigned i;
+    drift_fresh();
+    pots(64, 64, 0, 0, 127, 0, 0, 0);
+    inj_mode = INJ_SINE;
+    inj_amp = 0.05f;
+    inj_step = (float)(2.0 * M_PI * fr / FSD / DRIFT_OS);
+    trk_note_on(T, 60, 100);
+    run(0, 44160);
+    run(buf, N);
+    for (i = 0; i < N; i++) {
+        re += (double)buf[i] * cos(2.0 * M_PI * fr * i / FSD);
+        im += (double)buf[i] * sin(2.0 * M_PI * fr * i / FSD);
+    }
+    return 2.0 * sqrt(re * re + im * im) / N;
+}
+static void test_dc(void)
+{
+    double lo = lf_gain(44100.0 / 27648.0), ref = lf_gain(44100.0 / 2208.0), db = 20.0 * log10(lo / ref);
+    check(fabs(db + 6.0) < 0.8, "(n) the two 1.59 Hz DC blockers in series: %.2f Hz is %.2f dB against %.2f Hz (-6 +- 0.8; one blocker alone would read -3)",
+          44100.0 / 27648.0, db, 44100.0 / 2208.0);
+}
+
+/* ------------------------------------------------------------ the voice start (I3) --- */
+/* The donor's contract (KR106Voice.h Trigger): a retrigger of a sounding voice keeps the oscillator phase and the filter (no click);
+ * a voice that has finished starts from the reset. Ours: a fresh voice (voice.c leaves env 0 only then) zeroes the whole state and
+ * seeds s[0]; a sounding one is not touched. (The donor never resets its filter, since its idle voice is not skipped; ours is, so
+ * a stale resonance would otherwise burst out of the next note.) */
+static void test_voice_start(void)
+{
+    drift_vc_t ref, before;
+    unsigned i;
+    int ok_fresh, ok_keep, live;
+    drift_fresh();
+    pots(127, 64, 127, 127, 100, 127, 40, 64);
+    T->p[P_REL] = 20;
+    trk_note_on(T, 60, 100);
+    ref = *vc_of(0);
+    run(0, 22050);                                           /* loud, resonant, the filter ringing */
+    live = vc_of(0)->l.s[1] != 0.0f && vc_of(0)->pos != 0.0f;
+    trk_note_off(T, 60);
+    for (i = 0; i < 400u && T->v[0].active; i++)
+        run(0, CTL);
+    live &= !T->v[0].active;
+    trk_note_on(T, 60, 100);
+    ok_fresh = live && !memcmp(vc_of(0), &ref, sizeof ref);
+    check(ok_fresh, "(o) a new note on a finished voice starts from the reset: the state equals a never-played voice's (after %u blocks of release, state was dirty: %d)", i, live);
+    run(0, 8192);
+    before = *vc_of(0);
+    trk_note_on(T, 64, 100);                                 /* a retrigger / steal of the sounding voice (DRIFT has one voice) */
+    ok_keep = before.pos != 0.0f && before.l.s[1] != 0.0f && !memcmp(vc_of(0), &before, sizeof before);
+    check(ok_keep, "(o) a retrigger of a sounding voice keeps the phase (%.3f) and the filter states (s1 %.3g): untouched", (double)before.pos, (double)before.l.s[1]);
+}
+
+/* ------------------------------------------------------------ P_FTYPE beyond DRIFT's four positions (I2) --- */
+/* The track-persistent P_FTYPE takes the values other engines' filters use (4 HP24, 5 NOTCH ..): on DRIFT, whose HPF has four
+ * positions and no page of its own, every value above them is the flat position, never the 754 Hz bass cut */
+static void test_ftype_fallback(void)
+{
+    static int32_t ref[CTL * 64u], got[CTL * 64u];
+    static const int V[5] = {4, 5, 7, 127, -3};
+    unsigned i;
+    int ok = 1;
+    drift_fresh();
+    pots(96, 64, 0, 0, 100, 40, 0, 64);
+    T->p[P_FTYPE] = 0;
+    trk_note_on(T, 40, 100);
+    run(ref, CTL * 64u);
+    for (i = 0; i < 5u; i++) {
+        drift_fresh();
+        pots(96, 64, 0, 0, 100, 40, 0, 64);
+        T->p[P_FTYPE] = (int16_t)V[i];
+        trk_note_on(T, 40, 100);
+        run(got, CTL * 64u);
+        ok &= !memcmp(ref, got, sizeof ref);
+    }
+    check(ok, "(h) P_FTYPE 4, 5, 7, 127 and -3 render exactly as P_FTYPE 0 (flat): no hidden bass cut from another engine's setting");
+}
+
 /* ------------------------------------------------------------ (i) --- */
 static uint64_t instr_now(void)
 {
@@ -684,22 +998,49 @@ static double mix_cost(const uint8_t (*parts)[3])
     return i0 ? (double)(instr_now() - i0) / (nb * CTL) : 0.0;
 }
 
-/* The bounds. The target is a full four-track pattern at <= 80 % of one core on the device; the host figure is the only
- * instrument here (target_budget.py counts integer loops and cannot see FPU opcodes), so the bound is the heaviest
- * configuration this firmware already ships: DRIFT_MIX_MAX = cpu/WAVE/27_CYBER_BASS, six WAVE voices with the mix, 2137 in
- * tests/cpu_baseline.txt (VOID_POLY 6 was sized to cost what 8 PHASE WIRE voices did in the original firmware, whose four-track
- * default fitted inside 80 %). No machine's worst case, and no full mix, may cost more. DRIFT_COST_MAX pins the DRIFT part
- * itself (its dearest preset at the voice cap, the mix included) at +10 % of the measured worst, at -O2 (the units of
- * regress.c and acid_test.c; another compiler or -O level moves it: re-measure and move the bound with a stated reason, never
- * to hide a regression). The device's PERF meter (Task 8.1) is the real gate: FPU divides are one instruction here. */
-#define DRIFT_MIX_MAX 2137.0
-#define DRIFT_COST_MAX 950.0   /* the measured worst (HOOVER, 862 at DRIFT_POLY 1, DRIFT_OS 1) + 10 % */
+/* What is asserted, and what is only measured. The target is a full four-track pattern at <= 80 % of one core on the device. The host
+ * figure is the only instrument here (target_budget.py counts integer loops and cannot see FPU opcodes, and a divide is one
+ * instruction here and several on the device), so this file cannot establish that claim and does not assert it: Task 8.1's PERF run
+ * on the FM-1 is the gate. Two things it can do:
+ *  - DRIFT_COST_MAX pins the DRIFT part itself (its dearest preset at the voice cap, the mix included) at +10 % of the measured worst,
+ *    at -O2 (the units of regress.c and acid_test.c; another compiler or -O level moves it: re-measure and move the pin with a stated
+ *    reason, never to hide a regression), as ACID's (f) does for its voice;
+ *  - it MEASURES and prints the dearest legal four-track mix it can construct (the figure Task 8.1 must check on the device,
+ *    recorded in docs/BASELINE.md): the engines' dearest presets, every split of the shared 8-voice budget over one part per engine
+ *    (each engine within its own voice cap), the dearest total. 4parts_light and 4parts_full are printed for reference. */
+#define DRIFT_COST_MAX 950.0   /* the measured worst (HOOVER, 860 at DRIFT_POLY 1, DRIFT_OS 1, -O2) + 10 % */
+
+static uint32_t engine_cap(uint32_t e)
+{
+    uint32_t c = ENGINES[e]->poly;
+    return c && c < NVOICE ? c : NVOICE;
+}
+/* the dearest preset of engine e playing v notes alone (the mix included) */
+static uint32_t dearest_preset(uint32_t e, uint32_t v, double *cost)
+{
+    uint8_t parts[NPART][3];
+    uint32_t k, best = 0;
+    double worst = 0.0;
+    for (k = 0; k < ENGINES[e]->npresets; k++) {
+        double c;
+        memset(parts, 0, sizeof parts);
+        parts[0][0] = (uint8_t)e, parts[0][1] = (uint8_t)k, parts[0][2] = (uint8_t)v;
+        c = mix_cost((const uint8_t(*)[3])parts);
+        if (c > worst) {
+            worst = c;
+            best = k;
+        }
+    }
+    *cost = worst;
+    return best;
+}
 
 static void test_cost(void)
 {
     uint8_t parts[NPART][3];
-    double idle, full, light, worst = 0.0;
-    uint32_t k, worst_k = 0;
+    double idle, full, light, worst, wmix = 0.0;
+    uint32_t pre[4], k, drift_k, v[4], w[4] = {0, 0, 0, 0};
+    static const uint8_t ENG[4] = {ENGI_OBX, ENGI_WAVE, ENGI_ACID, ENGI_DRIFT};
     if (!instr_now()) {
         printf("drift: SKIP (i) cost: NOT CHECKED, there is no instruction counter on this host (macOS proc_pid_rusage only); "
                "run it on a Mac, and Task 8.1 PERF is the gate on the device\n");
@@ -714,22 +1055,38 @@ static void test_cost(void)
     full = mix_cost((const uint8_t(*)[3])parts);
     parts[0][2] = 3, parts[1][2] = 3, parts[2][2] = 2, parts[3][2] = 1;
     light = mix_cost((const uint8_t(*)[3])parts);
-    for (k = 0; k < ENGINES[ENGI_DRIFT]->npresets; k++) {
+    drift_k = dearest_preset(ENGI_DRIFT, DRIFT_POLY, &worst);
+    printf("drift: (i) DRIFT_POLY %d, DRIFT_OS %d: the mix alone %.0f; the DRIFT part alone, worst preset %s %.0f (%.0f per voice)\n", (int)DRIFT_POLY,
+           (int)DRIFT_OS, idle, ENGINES[ENGI_DRIFT]->presets[drift_k].name, worst, (worst - idle) / DRIFT_POLY);
+    check(worst <= DRIFT_COST_MAX, "(i) the DRIFT part %.0f (%s, %d voice) is within its pin %.0f (the measured worst + 10 %%, -O2)", worst,
+          ENGINES[ENGI_DRIFT]->presets[drift_k].name, (int)DRIFT_POLY, DRIFT_COST_MAX);
+    /* the dearest legal mix: each engine's dearest preset at its cap (for the ranking), every split of the 8 voices */
+    for (k = 0; k < 4u; k++) {
         double c;
-        memset(parts, 0, sizeof parts);
-        parts[0][0] = ENGI_DRIFT, parts[0][1] = (uint8_t)k, parts[0][2] = 8;
-        c = mix_cost((const uint8_t(*)[3])parts);
-        if (c > worst) {
-            worst = c;
-            worst_k = k;
-        }
+        pre[k] = dearest_preset(ENG[k], engine_cap(ENG[k]), &c);
     }
-    printf("drift: (i) DRIFT_POLY %d, DRIFT_OS %d: the mix alone %.0f; 4parts_light %.0f, 4parts_full %.0f; the DRIFT part alone, worst preset %s %.0f (%.0f per voice)\n",
-           (int)DRIFT_POLY, (int)DRIFT_OS, idle, light, full, ENGINES[ENGI_DRIFT]->presets[worst_k].name, worst,
-           (worst - idle) / DRIFT_POLY);
-    check(full <= DRIFT_MIX_MAX && worst <= DRIFT_MIX_MAX && worst <= DRIFT_COST_MAX,
-          "(i) 4parts_full %.0f and the DRIFT part %.0f both <= %.0f (the heaviest part shipped), and the part <= its pin %.0f", full, worst,
-          DRIFT_MIX_MAX, DRIFT_COST_MAX);
+    for (v[0] = 0; v[0] <= engine_cap(ENG[0]); v[0]++)
+        for (v[1] = 0; v[1] <= engine_cap(ENG[1]); v[1]++)
+            for (v[2] = 0; v[2] <= engine_cap(ENG[2]); v[2]++)
+                for (v[3] = 0; v[3] <= engine_cap(ENG[3]); v[3]++) {
+                    double c;
+                    uint32_t i, tot = v[0] + v[1] + v[2] + v[3];
+                    if (tot != NVOICE)               /* the dearest has the whole budget in play (more voices never cost less) */
+                        continue;
+                    memset(parts, 0, sizeof parts);
+                    for (i = 0; i < 4u; i++)
+                        parts[i][0] = ENG[i], parts[i][1] = (uint8_t)pre[i], parts[i][2] = (uint8_t)v[i];
+                    c = mix_cost((const uint8_t(*)[3])parts);
+                    if (c > wmix) {
+                        wmix = c;
+                        for (i = 0; i < 4u; i++)
+                            w[i] = v[i];
+                    }
+                }
+    printf("drift: (i) measured, not asserted (Task 8.1 checks the device): 4parts_light %.0f, 4parts_full %.0f; the dearest legal mix (8 voices) %.0f = "
+           "OB-Z %s x%u + WAVE %s x%u + ACID %s x%u + DRIFT %s x%u, one part each (idle mix %.0f)\n", light, full, wmix,
+           ENGINES[ENGI_OBX]->presets[pre[0]].name, w[0], ENGINES[ENGI_WAVE]->presets[pre[1]].name, w[1], ENGINES[ENGI_ACID]->presets[pre[2]].name, w[2],
+           ENGINES[ENGI_DRIFT]->presets[pre[3]].name, w[3], idle);
 }
 
 int main(int argc, char **argv)
@@ -747,6 +1104,14 @@ int main(int argc, char **argv)
     test_mix();
     test_hpf();
     test_corners();
+    test_inharmonic();
+    test_dco_spectrum();
+    test_waveform();
+    test_pwm();
+    test_ktr();
+    test_dc();
+    test_voice_start();
+    test_ftype_fallback();
     test_cost();
     printf("drift_test: %s\n", bad ? "FAIL" : "ok");
     return bad ? 1 : 0;

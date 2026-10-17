@@ -104,11 +104,13 @@
 #                   harmonics, E7 SQL's RES / accent decay on an accented step only), the cost per voice (<= 3 x OB-Z, <= 1080 instructions /
 #                   sample: macOS only, a loud SKIP elsewhere), amp() in [0, 32767], done() ends released and held notes.
 # DRIFT (tests/drift_test.c, tests/drift_ref.cpp, tests/drift_ref_cfg.h): the Juno voice (eng_drift.c, dsp_va.c; the Ultramaster KR-106, GPL-3.0). Tier 1: the
-#                   lifted ladder against the donor's own kr106::VCF on 34 cases (a 5 x 5 cutoff x resonance grid at OS 2, OS 1 and 4, loud inputs),
+#                   lifted ladder against the donor's own kr106::VCF on 40 cases (a 5 x 5 cutoff x resonance grid at OS 2, a spread at OS 1 (the shipped one) and OS 4, loud inputs),
 #                   within 1e-4 of the peak; the half-band pair (unity gain, image rejection). Tier 2, through the real voice path: 24 dB/oct, the THD
 #                   of DRV 0 / 127, RES 127 self-oscillating within 3 % of the cutoff, DRFT (0: two renders identical; 127: within +-8 cents), VAR (0: one
-#                   cutoff; 127: spread), the MIX spectrum (sub / saw / pulse), P_FTYPE's HPF corners, a bounded sweep of the corners, and the cost:
-#                   4parts_full and the DRIFT part inside the heaviest part shipped (macOS only, a loud SKIP elsewhere).
+#                   cutoff; 127: spread), the MIX spectrum (sub / saw / pulse), P_FTYPE's HPF corners (and values above 3 = flat), a bounded sweep of the
+#                   corners, the donor's DCO (inharmonic energy < -50 dB, the spectrum and the waveform against the ideal, PW, the auto PWM), KTR, the two DC
+#                   blockers, the voice start (reset when finished, kept on a retrigger), and the cost: the DRIFT part inside its pin, the dearest legal
+#                   four-track mix measured and printed (macOS only, a loud SKIP elsewhere).
 # WAVE (tests/void_tables_test.py, tests/void_test.c): the VOID WAVE plugin's voice (the WAVE engine, was VOID). Its wavetables against the plugin's
 #                   frames recomputed with numpy (every keyframe and level band-limited, the crossfade within its limit;
 #                   skipped without numpy); the engine: pitch, OSC2's steps, band-limited at C8, bounded and without DC at
@@ -321,14 +323,18 @@ if [ -f build/gen/felucca_tables.h ]; then
     # kr106::VCF (tests/drift_ref.cpp, built from ../ultramaster_kr106-main or KR106_DIR; without it (a) says NOT CHECKED), tier 2 the voice.
     KR=${KR106_DIR:-../ultramaster_kr106-main}
     mkdir -p build/drift_ref
-    if [ -f "$KR/Source/DSP/KR106VCF_OPTIMIZED.h" ] && ${CXX:-c++} -std=c++17 -O2 -ffp-contract=off -w -I"$KR/Source/DSP" -Itests \
-            -o "$OUT/drift_ref" tests/drift_ref.cpp 2>/dev/null; then
-        "$OUT/drift_ref" build/drift_ref >/dev/null
-    else
-        rm -f build/drift_ref/*.f32
+    rm -f build/drift_ref/*.f32
+    if [ -f "$KR/Source/DSP/KR106VCF_OPTIMIZED.h" ]; then
+        # the donor is here, so (a) must run: a build failure fails the suite (it used to turn (a) into a silent "NOT CHECKED")
+        if ${CXX:-c++} -std=c++17 -O2 -ffp-contract=off -w -I"$KR/Source/DSP" -Itests -o "$OUT/drift_ref" tests/drift_ref.cpp; then
+            "$OUT/drift_ref" build/drift_ref >/dev/null || fail=1
+        else
+            echo "DRIFT: tests/drift_ref.cpp does not build against the donor in $KR: FAIL"
+            fail=1
+        fi
     fi
     $CC -O2 -w -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/drift_test" tests/drift_test.c -lm
-    run "DRIFT: the filter against the donor's kr106::VCF (34 cases), the halfband, 24 dB/oct, DRV's THD, self-oscillation, DRFT, VAR, the MIX spectrum, the HPF, the corners, the cost" \
+    run "DRIFT: the filter against the donor's kr106::VCF (40 cases), the halfband, 24 dB/oct, DRV's THD, self-oscillation, DRFT, VAR, the MIX spectrum, the HPF (and its flat fallback), the corners, the donor's DCO (bandlimiting, spectrum, waveform, PW, PWM), KTR, the DC blockers, the voice start, the cost pin and the dearest legal mix" \
         "$OUT/drift_test" build/drift_ref
     $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/slicer_test" tests/slicer_test.c -lm
     mkdir -p build/slicer_demo

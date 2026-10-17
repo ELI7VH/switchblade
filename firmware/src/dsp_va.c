@@ -8,7 +8,7 @@
  * comments explaining the circuit are kept: they are the reason the constants are what they are. See LICENSES/GPL-3-KR106.txt.
  *
  * What differs from the donor, all of it in how it is written and none in what it computes (tests/drift_test.c (a) holds
- * the output to the donor's own kr106::VCF within 1e-4 of the peak, 34 cases):
+ * the output to the donor's own kr106::VCF within 1e-4 of the peak, 40 cases):
  *   - tan / exp / 1/sqrt come from fastmath.h (rel 1e-6 / 6e-7 / 5e-6), not libm;
  *   - the OTA tanh, its derivative and the Newton step share one divide per stage (the Pade denominator d is common);
  *   - the donor's mJ106Res is always true (DRIFT is a Juno-106): the J6 resonance curve is not carried;

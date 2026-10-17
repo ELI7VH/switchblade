@@ -27,7 +27,7 @@ Confirms the handover's figures before the Phase 4-6 DSP work starts.
 Measured on this Mac. Plan and derivation: `docs/plans/2026-10-17-drift-juno.md`.
 
 - **`ENG_MEM_PART`: 800 B before, 800 B after** (WAVE's `VOID_MEM`, 8 x 100 B, is still the largest; ACID 764 B;
-  DRIFT `sizeof(drift_vc_t)` 196 B x `DRIFT_POLY` 1 = 196 B; even OS 2 x POLY 2 would be 584 B). So the four-part
+  DRIFT `sizeof(drift_vc_t)` 188 B (196 before fix round 1) x `DRIFT_POLY` 1 = 188 B; even OS 2 x POLY 2 would be 584 B). So the four-part
   engine pool is **3,200 B before and after**, and the brief's expected growth (768 B -> 7 KB) did not happen: DRIFT
   fits inside the region WAVE already sizes.
 - **Image 361,616 B -> 366,128 B** of APP_SLOT 581,564 (+4,512 B, net of the deleted ANALOG copy); **RAM `.data+.bss`
@@ -51,6 +51,18 @@ Measured on this Mac. Plan and derivation: `docs/plans/2026-10-17-drift-juno.md`
   to try raising (`DRIFT_POLY`, then `DRIFT_OS`) if it shows room.**
 - `regress`: 141 goldens, 34 moved (all the 32 DRIFT presets, `song/4track_mix_four`, `slicer/song_gate_stut_four`;
   no OB-Z, WAVE or ACID engine hash moved), `union_golden.txt` 168 of 168 (every sequence plays DRIFT on part 3).
+- **Fix round 1 (2026-10-17): the cost bound restated, and the number Task 8.1 must check.** The "<= 2137" bound above
+  compared whole mixes with one part (the heaviest part shipped) and did not establish the 80 % target; see the plan's "CPU".
+  What the host can say, `-O2`, `tests/drift_test.c` (i), after the DCO went back to the donor's code:
+  - DRIFT part alone (HOOVER, 1 voice, mix included): **863** (pinned at 950, +10 %).
+  - `4parts_light` 2324, `4parts_full` 2001 (WAVE gets 1 voice there; not a worst case).
+  - **Dearest legal four-track mix (8 voices, one part per engine, each engine's dearest preset): 3283 =
+    OB-Z TAPE STR x0 + WAVE CYBER BASS x6 + ACID OVERDRIVE x1 + DRIFT HOOVER x1** (idle mix 359). A reviewer's hand-built
+    ACID 1 + DRIFT 1 + WAVE CYBER BASS 6 read 3049. WAVE CYBER BASS 6 + ACID OVERDRIVE 1 without any DRIFT
+    voice already reads 2797, so that arrangement was over 2137 before DRIFT existed: the old bound was not a property of the firmware.
+    **Task 8.1 must run this arrangement on the device and read PERF**; no host figure here maps to it, and the six
+    divides a sample (one instruction here) are dearer on the FPU.
+  - `cpu/DRIFT/*` re-recorded (HOOVER 784 in regress units, was 806); `cpu/mix/4parts_light` untouched (the user's 55c58e2).
 
 ## Host tests (`sh tests/run_tests.sh`, ~6 min) failures that exist before any FM1-Four change
 These are environment failures on this Mac, not regressions. Later tasks may not add to this list.
