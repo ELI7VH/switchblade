@@ -90,15 +90,15 @@ sh tests/run_tests.sh                            # ~5-6 min; only allowed failur
 Focused tests (after `./build.sh`, which generates `build/gen/`):
 ```bash
 mkdir -p build/host
-cc -O1 -w -Ibuild/gen -Ifirmware/src -Itests -o build/host/four_test tests/four_test.c -lm && build/host/four_test
-cc -O2 -w -Ibuild/gen -Ifirmware/src -o build/host/regress tests/regress.c -lm && build/host/regress tests/golden.txt tests/cpu_baseline.txt
-cc -w -Ibuild/gen -Ifirmware/src -o build/host/ui_test tests/ui_test.c -lm && build/host/ui_test
+cc -O1 -w -ffp-contract=off -Ibuild/gen -Ifirmware/src -Itests -o build/host/four_test tests/four_test.c -lm && build/host/four_test
+cc -O2 -w -ffp-contract=off -Ibuild/gen -Ifirmware/src -o build/host/regress tests/regress.c -lm && build/host/regress tests/golden.txt tests/cpu_baseline.txt
+cc -w -ffp-contract=off -Ibuild/gen -Ifirmware/src -o build/host/ui_test tests/ui_test.c -lm && build/host/ui_test
 # UI screenshots + lint:
 FV=$(sed -n 's/^#define FELUCCA_VERSION "\([^"]*\)".*/\1/p' firmware/src/felucca.c)
-cc -O1 -w "-DFELUCCA_VERSION=\"$FV\"" -Ibuild/gen -Ifirmware/src -Itests -o build/host/ui_render tests/ui_render.c -lm
+cc -O1 -w -ffp-contract=off "-DFELUCCA_VERSION=\"$FV\"" -Ibuild/gen -Ifirmware/src -Itests -o build/host/ui_render tests/ui_render.c -lm
 mkdir -p build/ui_new/ppm build/ui_slot && build/host/ui_render build/ui_new build/ui_slot && python3 tests/ui_render.py build/ui_new build/ui_slot
 ```
-The midi_control, project and other tests compile the same way. Take the exact lines from `tests/run_tests.sh`.
+**Always pass `-ffp-contract=off`** (as run_tests.sh does): ACID and DRIFT are float, the device has no fused multiply-add, and without the flag the host fuses FMAs and every ACID golden reads as changed. The midi_control, project and other tests compile the same way. Take the exact lines from `tests/run_tests.sh`.
 
 ### Environment quirks
 
