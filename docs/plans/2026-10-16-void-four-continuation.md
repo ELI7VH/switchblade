@@ -251,7 +251,7 @@ change from "Diva-like, hand-rolled" to "KR-106 Juno". The decisions taken with 
 ## Order of work, and why
 
 ```
-R0 baseline  →  R1 review 3.3+3.4  →  4.1 OB-Z  →  4.2 WAVE DC  →  5.0 env hooks
+R0 baseline  →  R1 review 3.3+3.4  →  4.1 OB-Z  →  4.2 WAVE DC  →  4.3 harness  →  5.0 env hooks
     →  5.1 FPU spike (D10 gate)  →  5.2 ACID  →  5.3 accent/slide  →  6.1 DRIFT
     →  7.1 audition  →  7.2 presets (user gate)  →  8.1 hardware (user gate)  →  9 release
 ```
@@ -387,6 +387,95 @@ Backlog item 1. Small, self-contained, and it unblocks a preset fix.
 - [ ] **Step 3: GREEN.** Then restore `REV 25` on BRASS LEAD in `presets/four/wave.py` and rebuild.
 - [ ] **Step 4:** WAVE golden hashes change. Regenerate, state the reason.
 - [ ] **Step 5: Commit** `fix(wave): DC blocker; restore REV 25 on BRASS LEAD`
+
+---
+
+## Task 4.3: Host harness fidelity — apply `WAVE_PX`
+
+**Found by Task 4.2, 2026-10-17. This is a prerequisite for Task 7.1, not optional polish.**
+
+`tests/hostsim.c host_preset_values` sets only `p->e[]`, env, fenv, voice and fx. It never calls
+`void_track_loaded` (`firmware/src/eng_wave.c:514`), which is what applies `void_px_t` / `WAVE_PX`:
+the filter TYPE, voice mode, detune, spread, glide, LFO routing, filter envelope and mod matrix.
+In the firmware that runs from `ui.c:1186`.
+
+So **every WAVE golden hash and CPU baseline is measured on a configuration the device never
+plays.** Task 4.2 hit this concretely: BRASS LEAD ships `ftype = 2` (high-pass), which removes DC
+by itself, so the preset the firmware loads had a DC ratio of 0.00003 while the harness — rendering
+it as LP24 — measured 0.146.
+
+Why it must land before Task 7.1: the audition renderer is built on `hostsim.c`. Left unfixed, the
+WAVs the user signs off on by ear in Task 7.2 would have the wrong filter type, voice mode and LFO
+routing for all 32 WAVE presets. A preset gate on wrong audio is worse than no gate.
+
+**Files:** modify `tests/hostsim.c`; regenerate `tests/golden.txt`, `tests/union_golden.txt` and
+the WAVE lines of `tests/cpu_baseline.txt`.
+
+- [ ] **Step 1: Failing test.** Assert that a host-loaded WAVE preset has the `P_FTYPE`, `P_VOICE`,
+      `P_DETUNE` and filter-envelope values its `WAVE_PX` row specifies. Expect RED: the harness
+      applies none of them.
+- [ ] **Step 2:** Make `host_preset` call the same path the firmware does rather than duplicating
+      the field copying — `void_track_loaded` is the single source of truth, so route through it.
+      Duplicating its field list is how the two drift apart again.
+- [ ] **Step 3: GREEN.** Then face the consequence honestly: **WAVE's golden hashes and CPU
+      baselines will all move**, because they were wrong before and are right now. This is the one
+      place in the project where a `cpu_baseline.txt` line may be rewritten rather than appended —
+      the old WAVE figures measured the wrong configuration. Record in the commit message that the
+      WAVE baselines were re-recorded for this reason, and leave every other engine's line alone.
+- [ ] **Step 4:** Check whether the corrected configuration changes WAVE's CPU materially. The real
+      filter types differ per preset, so some presets may get cheaper and some dearer; if any
+      exceeds its budget, that is a real finding to report, not a budget to widen.
+- [ ] **Step 5:** Two Important findings from Task 4.2's review are folded in here, because 4.3
+      changes the very harness that caused them and re-records the goldens they need. Doing them in
+      4.2 would mean doing them twice.
+  - **The DC test's coverage claim does not match what the harness renders.** `tests/void_test.c:686-687,747-759`
+    documents "BRASS LEAD ... the engine's own output", but the firmware ships that preset
+    `ftype=2` (`VF_HP`) and the harness renders `VF_LP24`. Once `WAVE_PX` is applied this test
+    changes meaning, so rewrite it then: **loop `test_dc` over all 32 presets** and assert the
+    ratio on each. The implementer already measured all 32 (worst `GLASS SHIMR` 0.0054, 8 over
+    0.01 before the fix), so this encodes data the report only printed, and pins the real
+    8-preset defect instead of one preset that turned out to be an artefact.
+  - **The preset lookup fails open.** `tests/void_test.c:749-754` leaves `pi` at 0 with no "found"
+    flag, so renaming the preset silently retargets the test at `AMBIENT SINE` and it still
+    passes. Fix while you are in there: fail loudly when the name is not found.
+- [ ] **Step 6: Commit** `fix(tests): apply WAVE_PX in the host harness`
+
+### DECIDED 2026-10-17: the DC blocker's corner moves to ~10 Hz
+
+Task 4.2's reviewer verified analytically that `R = 0.995` puts the corner at **35.1 Hz, costing
+−3.33 dB at C1 (32.7 Hz)** — audible thinning of the lowest octave's fundamental, paid by
+`CYBER BASS`, `REESE BASS`, `PLUCK BASS` and `LOW STAB`. WAVE's BASS category is 10 of its 32
+presets.
+
+`R ≈ 0.995` is the brief's verbatim value, inherited from the master plan, so this is the plan's
+choice rather than an implementer error. **It is the human's decision.** The alternative the
+reviewer checked and confirmed sound: `R = 0.9985` (1−R = 49, corner ~10 Hz) costs about
+**−0.4 dB** at 32.7 Hz, needs `SH >= 10` for the truncation equilibrium (0.33 Q15 units, still
+negligible), and keeps `|w| <= ~6.4e7`, comfortably inside int32.
+
+**The user decided on `R = 0.9985` (2026-10-17), to be made as part of this task** so WAVE's
+goldens are re-recorded only once. A DC blocker exists to remove DC, which sits at 0 Hz, so a
+10 Hz corner does the job just as completely while costing a tenth of the bass response.
+
+Implementation requirements for the change:
+- `VOID_DC_R` becomes `round(0.9985 * 32768) = 32719`, so `1 - R = 49`.
+- **Raise `SH` to at least 10.** At `SH = 8` the floored `R·y[n-1]` truncation equilibrates at
+  `0.5 * 256 / 49` ≈ 2.6 Q15 units, which is no longer negligible; at `SH = 10` it is
+  `0.5 * 32 / 49` ≈ 0.33. The whole reason the state is held at Q(15+SH) is to keep that error
+  far below one Q15 unit — do not weaken it while widening the time constant.
+- Re-check the headroom: `|w| <= ~6.4e7` at `SH = 10`, comfortably inside int32. State the new
+  bound in the comment, and confirm the `VOID_CLIP_MAX` static assert still holds — the ℓ1 norm
+  of a one-pole DC blocker is 2 for any `R`, so the clamp bound itself does not move.
+- Expect WAVE's DC ratios to rise slightly (a gentler corner removes DC more slowly). The
+  all-32-preset assertion added in Step 5 must still pass at `< 0.01`; if any preset now fails,
+  that is a real finding to report, not a threshold to widen.
+- Also fix `tests/void_test.c:762`, which still says the old clamp "kept `|y|` at 62216" where the
+  correct figure is 62224 (the test prints the right number at runtime).
+
+**Knock-on:** Task 4.2's `REV 25` restore and its DC assertions were justified against the
+LP24-rendered preset. Re-check both once the harness is right — the DC blocker is still correct on
+its own merits (the defect it fixed reached 8 of 32 presets), but the specific BRASS LEAD evidence
+for it was an artefact.
 
 ---
 
