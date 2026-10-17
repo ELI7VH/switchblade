@@ -1,4 +1,5 @@
 /* four_test.c: the four-machine contract */
+#define ENGINES_QUAL
 #define main hostsim_main
 #include "hostsim.c"
 #undef main
@@ -41,10 +42,62 @@ static void test_presets(void)
           (unsigned)VOID_OSC2_N);
 }
 
+/* an engine that runs its own envelope (ACID): amp is constant, the voice ends when done says so, not when the ADSR would */
+static int own_done, own_renders;
+static int32_t own_amp0, own_amp1;
+static int32_t own_amp(const track_t *t, const voice_t *v) { (void)t; (void)v; return 0x4000; }
+static int own_isdone(const track_t *t, const voice_t *v) { (void)t; (void)v; return own_done; }
+static void own_note_on(track_t *t, voice_t *v) { (void)t; (void)v; }
+static void own_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
+{
+    (void)t; (void)v; (void)out; (void)n;
+    own_renders++;
+    own_amp0 = m->amp0;
+    own_amp1 = m->amp1;
+}
+
+static void test_ownenv(void)
+{
+    static engine_t stub;
+    const engine_t *saved = ENGINES[ENGI_ACID];
+    track_t *t = &trk[0];
+    int32_t o[CTL];
+    uint32_t b, r0;
+    stub = *ENGINES[ENGI_OBX];
+    stub.ownenv = 1;
+    stub.amp = own_amp;
+    stub.done = own_isdone;
+    stub.note_on = own_note_on;
+    stub.render = own_render;
+    stub.mem = 0;
+    ENGINES[ENGI_ACID] = &stub;
+    host_tracks_init();
+    host_preset(t, ENGI_OBX, 5);
+    t->engine = t->eng_req = ENGI_ACID;
+    t->p[P_ATK] = 0;
+    t->p[P_REL] = 0;                                    /* the fastest release: the ADSR would end it in a few blocks */
+    t->p[P_LD_AMP] = 0;
+    own_done = own_renders = 0;
+    trk_note_on(t, 60, 100);
+    for (b = 0; b < 8; b++)
+        track_render(t, o, CTL);
+    CHECK(own_renders == 8 && own_amp1 == 0x4000 && own_amp0 == 0x4000, "ownenv: amp %d/%d renders %d", (int)own_amp0, (int)own_amp1, own_renders);
+    trk_note_off(t, 60);
+    for (b = 0; b < 2000; b++)                          /* ~1.4 s past the note-off */
+        track_render(t, o, CTL);
+    CHECK(t->v[0].active && own_amp1 == 0x4000, "ownenv: ended with the track ADSR (active %d amp %d)", t->v[0].active, (int)own_amp1);
+    own_done = 1;
+    r0 = (uint32_t)own_renders;
+    track_render(t, o, CTL);
+    CHECK(!t->v[0].active && (uint32_t)own_renders == r0, "ownenv: not freed when done said so");
+    ENGINES[ENGI_ACID] = saved;
+}
+
 int main(void)
 {
     test_engine_table();
     test_presets();
+    test_ownenv();
     printf(fails ? "four_test: %d FAIL\n" : "four_test: ok\n", fails);
     return fails != 0;
 }

@@ -651,7 +651,23 @@ static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
         int32_t env, pitch;
         if (!v->active)
             continue;
-        {
+        if (e->ownenv) {                                /* the engine's own envelope: no ADSR gain, it says when the voice ends */
+            if (v->stage == 4u || e->done(t, v)) {
+                v->env = v->env_out = 0;
+                v->stage = 0;
+                v->active = 0;
+                continue;
+            }
+            env = e->amp(t, v);
+            m.envq15 = env;
+            m.amp1 = env;
+            if (p[P_LD_AMP])
+                m.amp1 = mulq15(m.amp1, 32767 - mulq15(p[P_LPOL] ? lfo : (lfo + 32768) >> 1, p[P_LD_AMP] * 258));
+            if (fade)
+                m.amp1 = m.amp1 * (int32_t)(t->xf - 1u) / (int32_t)XF_BLOCKS;
+            m.amp0 = v->env_out;
+            v->env_out = m.amp1;
+        } else {
             env = env_tick(t, v);
             m.envq15 = env;
             m.amp1 = mulq15(env, v->vel * 258);

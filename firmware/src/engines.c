@@ -35,7 +35,10 @@ static uint8_t eng_mem_owner[NPART];       /* engine index + 1 whose state is in
 static inline void *eng_mem_of(uint32_t p) { return (void *)eng_mem[p].b; }
 
 /* the editor protocol, user presets and projects store these indices */
-static const engine_t *const ENGINES[NENGINES] = {
+#ifndef ENGINES_QUAL
+#define ENGINES_QUAL const      /* (a host test defines it empty before the include, to swap in a stub engine) */
+#endif
+static const engine_t *ENGINES_QUAL ENGINES[NENGINES] = {
     &ENG_OBX,                    /* 0 (ENGI_OBX) */
     &ENG_WAVE,                   /* 1 (ENGI_WAVE) */
     &ENG_ACID,                   /* 2 (ENGI_ACID) */

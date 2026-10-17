@@ -177,6 +177,11 @@ typedef struct {                 /* an engine (engines.c ENGINES[]; the eng_*.c 
      * in, 0 = none: a part plays one engine at a time, so they share one region; on a switch to the engine
      * (after the old one's fade) the region is zeroed when another engine had it (eng_mem_claim) */
     uint16_t mem;
+    /* own envelope (a 303's MEG/VEG is the instrument): 1 = the engine runs its own amp envelope; voice.c applies no
+     * ADSR gain (no velocity scaling either: amp is the whole level) and does not decide when the voice ends */
+    uint8_t ownenv;
+    int32_t (*amp)(const struct track *t, const voice_t *v);    /* Q15, control rate (ownenv engines only) */
+    int (*done)(const struct track *t, const voice_t *v);       /* 1 = the voice may be freed (ownenv engines only) */
 } engine_t;
 
 /* ------------------------------------------------- tracks, the song --- */
