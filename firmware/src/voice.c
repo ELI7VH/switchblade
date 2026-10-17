@@ -151,6 +151,35 @@ static void voice_kill(voice_t *v)                      /* fade out over the nex
     voice_kills++;
 }
 
+/* the voice to shed on overload (audio.c shed_voice): the quietest released one (v->env: the ADSR's level, or
+ * the own-envelope engine's last amp), else the oldest extra voice of a held part. 0 = none */
+static voice_t *shed_pick(void)
+{
+    uint32_t p, i;
+    voice_t *best = 0;
+    for (p = 0; p < NPART; p++)
+        for (i = 0; i < NVOICE; i++) {
+            voice_t *v = &trk[p].v[i];
+            if (v->active && !v->gate && v->stage != 4u && (!best || v->env < best->env))
+                best = v;
+        }
+    if (best)
+        return best;
+    for (p = 0; p < NPART; p++) {
+        const track_t *t = &trk[p];
+        uint32_t mode = trk_vmode(t), low = mode == V_POLY ? lowest_held(t) : 0u;
+        for (i = 0; i < NVOICE; i++) {
+            voice_t *v = &trk[p].v[i];
+            if (v->active && v->gate && v->stage != 4u &&
+                ((mode == V_POLY && i != low) || (mode != V_POLY && i > 0u))) {
+                if (!best || v->age < best->age)
+                    best = v;
+            }
+        }
+    }
+    return best;
+}
+
 /* the budget is full: free a voice for part t. 0 = nothing to take (soft) */
 static int voice_room(track_t *t, int soft)
 {
@@ -649,35 +678,31 @@ static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
         voice_t *v = &t->v[i];
         vmod_t m;
         int32_t env, pitch;
+        int ending;
         if (!v->active)
             continue;
         if (e->ownenv) {                                /* the engine's own envelope: no ADSR gain, it says when the voice ends */
-            if (v->stage == 4u || e->done(t, v)) {
+            ending = v->stage == 4u || e->done(t, v);   /* killed, or finished: one last block ramps it to 0 */
+            env = ending ? 0 : e->amp(t, v);
+            v->env = env << 9;                          /* the real level (Q24, as env_tick's): shed_pick ranks by it */
+            if (ending && !v->env_out) {                /* already silent: nothing to ramp */
                 v->env = v->env_out = 0;
                 v->stage = 0;
                 v->active = 0;
                 continue;
             }
-            env = e->amp(t, v);
-            m.envq15 = env;
-            m.amp1 = env;
-            if (p[P_LD_AMP])
-                m.amp1 = mulq15(m.amp1, 32767 - mulq15(p[P_LPOL] ? lfo : (lfo + 32768) >> 1, p[P_LD_AMP] * 258));
-            if (fade)
-                m.amp1 = m.amp1 * (int32_t)(t->xf - 1u) / (int32_t)XF_BLOCKS;
-            m.amp0 = v->env_out;
-            v->env_out = m.amp1;
         } else {
+            ending = 0;
             env = env_tick(t, v);
-            m.envq15 = env;
-            m.amp1 = mulq15(env, v->vel * 258);
-            if (p[P_LD_AMP])
-                m.amp1 = mulq15(m.amp1, 32767 - mulq15(p[P_LPOL] ? lfo : (lfo + 32768) >> 1, p[P_LD_AMP] * 258));
-            if (fade)                                   /* linear to 0 over the fade */
-                m.amp1 = m.amp1 * (int32_t)(t->xf - 1u) / (int32_t)XF_BLOCKS;
-            m.amp0 = v->env_out;
-            v->env_out = m.amp1;
         }
+        m.envq15 = env;
+        m.amp1 = e->ownenv ? env : mulq15(env, v->vel * 258);
+        if (p[P_LD_AMP])
+            m.amp1 = mulq15(m.amp1, 32767 - mulq15(p[P_LPOL] ? lfo : (lfo + 32768) >> 1, p[P_LD_AMP] * 258));
+        if (fade)                                       /* linear to 0 over the fade */
+            m.amp1 = m.amp1 * (int32_t)(t->xf - 1u) / (int32_t)XF_BLOCKS;
+        m.amp0 = v->env_out;
+        v->env_out = m.amp1;
         if (v->pitch_cur != v->pitch16) {               /* glide */
             int32_t d = v->pitch16 - v->pitch_cur;
             int32_t st = v->gstep ? v->gstep : (int32_t)(ENV_LIN[(p[P_GLIDE] ? p[P_GLIDE] : 40) & 127] >> 14);   /* slide: ~45 ms */
@@ -701,6 +726,11 @@ static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
             mod_voice(t, v, &m, v->fine + tune_fine + bend_fine);
         e->render(t, v, spread_on > v->side ? spread_buf : out, n, &m);   /* (SPREAD: the left ones) */
         nr++;
+        if (ending) {                                   /* its last block (amp1 = 0) is out: free it */
+            v->env = v->env_out = 0;
+            v->stage = 0;
+            v->active = 0;
+        }
     }
     if (spread_on)
         spread_sum(out);                                /* out: every voice; spread_buf: the left ones */

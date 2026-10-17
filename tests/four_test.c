@@ -48,12 +48,19 @@ static int32_t own_amp0, own_amp1;
 static int32_t own_amp(const track_t *t, const voice_t *v) { (void)t; (void)v; return 0x4000; }
 static int own_isdone(const track_t *t, const voice_t *v) { (void)t; (void)v; return own_done; }
 static void own_note_on(track_t *t, voice_t *v) { (void)t; (void)v; }
+static int32_t own_stream[4096];                        /* what the stub rendered: a DC level ramped amp0 -> amp1 per block */
+static uint32_t own_nstream;
+static int32_t own_level = 0x4000;
+static int32_t own_amp_level(const track_t *t, const voice_t *v) { (void)t; (void)v; return own_level; }
 static void own_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
 {
-    (void)t; (void)v; (void)out; (void)n;
+    uint32_t i;
+    (void)t; (void)v;
     own_renders++;
     own_amp0 = m->amp0;
     own_amp1 = m->amp1;
+    for (i = 0; i < n; i++)
+        out[i] += m->amp0 + (m->amp1 - m->amp0) * (int32_t)(i + 1u) / (int32_t)n;
 }
 
 static void test_ownenv(void)
@@ -89,15 +96,147 @@ static void test_ownenv(void)
     own_done = 1;
     r0 = (uint32_t)own_renders;
     track_render(t, o, CTL);
-    CHECK(!t->v[0].active && (uint32_t)own_renders == r0, "ownenv: not freed when done said so");
+    CHECK(!t->v[0].active && (uint32_t)own_renders == r0 + 1u, "ownenv: still active when done said so");
     ENGINES[ENGI_ACID] = saved;
 }
+
+/* render one block and append it to the stream (the stub's DC level: a cut from full amplitude is a step of 0x4000) */
+static void own_block(track_t *t)
+{
+    int32_t o[CTL];
+    uint32_t i;
+    track_render(t, o, CTL);
+    for (i = 0; i < CTL && own_nstream < NELEM(own_stream); i++)
+        own_stream[own_nstream++] = o[i];
+}
+
+static int32_t own_max_step(void)
+{
+    uint32_t i;
+    int32_t m = 0;
+    for (i = 1; i < own_nstream; i++) {
+        int32_t d = own_stream[i] - own_stream[i - 1];
+        m = d < 0 ? (d < -m ? -d : m) : (d > m ? d : m);
+    }
+    return m;
+}
+
+static void own_setup(track_t *t, engine_t *stub)
+{
+    *stub = *ENGINES[ENGI_OBX];
+    stub->ownenv = 1;
+    stub->amp = own_amp_level;
+    stub->done = own_isdone;
+    stub->note_on = own_note_on;
+    stub->render = own_render;
+    stub->mem = 0;
+    ENGINES[ENGI_ACID] = stub;
+    host_tracks_init();
+    host_preset(t, ENGI_OBX, 5);
+    t->engine = t->eng_req = ENGI_ACID;
+    t->p[P_ATK] = 0;
+    t->p[P_REL] = 0;
+    t->p[P_LD_AMP] = 0;
+    own_done = own_renders = 0;
+    own_nstream = 0;
+    own_level = 0x4000;
+}
+
+/* a voice killed (steal, shed, all-off: voice_kill) or finished (done) gets one last block that ramps to 0 */
+static void test_ownenv_ramp_out(void)
+{
+    static engine_t stub;
+    const engine_t *saved = ENGINES[ENGI_ACID];
+    track_t *t = &trk[0];
+    uint32_t b;
+    int32_t ramp = 0x4000 / (int32_t)CTL * 2;          /* a ramp over one block is 0x4000 / CTL per sample */
+
+    own_setup(t, &stub);                               /* (a) kill mid-note */
+    trk_note_on(t, 60, 100);
+    for (b = 0; b < 8; b++)
+        own_block(t);
+    voice_kill(&t->v[0]);
+    own_block(t);
+    CHECK(own_amp0 == 0x4000 && own_amp1 == 0, "ownenv kill: last block %d -> %d", (int)own_amp0, (int)own_amp1);
+    CHECK(!t->v[0].active, "ownenv kill: not freed after its last block");
+    own_block(t);
+    own_block(t);
+    CHECK(own_max_step() <= ramp, "ownenv kill: max step %d (cut from full amplitude)", (int)own_max_step());
+
+    own_setup(t, &stub);                               /* (b) done turns 1 on the tick the engine's amp reaches 0 */
+    trk_note_on(t, 60, 100);
+    for (b = 0; b < 8; b++)
+        own_block(t);
+    trk_note_off(t, 60);
+    own_done = 1;                                      /* amp() would still say 0x4000 */
+    own_block(t);
+    CHECK(own_amp0 == 0x4000 && own_amp1 == 0, "ownenv done: last block %d -> %d", (int)own_amp0, (int)own_amp1);
+    CHECK(!t->v[0].active, "ownenv done: not freed after its last block");
+    own_block(t);
+    own_block(t);
+    CHECK(own_max_step() <= ramp, "ownenv done: max step %d (cut from full amplitude)", (int)own_max_step());
+
+    own_setup(t, &stub);                               /* (c) done on an already silent voice: freed, nothing rendered */
+    own_level = 0;
+    trk_note_on(t, 60, 100);
+    for (b = 0; b < 4; b++)
+        own_block(t);
+    own_done = 1;
+    b = (uint32_t)own_renders;
+    own_block(t);
+    CHECK(!t->v[0].active && (uint32_t)own_renders == b, "ownenv silent done: active %d renders +%d", t->v[0].active,
+          own_renders - (int)b);
+    ENGINES[ENGI_ACID] = saved;
+}
+
+#ifndef NO_SHED_TEST
+/* shed_pick ranks an own-envelope voice by its real level, not by a v->env nothing updates */
+static void test_ownenv_shed(void)
+{
+    static engine_t stub;
+    const engine_t *saved = ENGINES[ENGI_ACID];
+    track_t *t = &trk[0], *t1 = &trk[1];
+    voice_t *adsr;
+    uint32_t b;
+
+    own_setup(t, &stub);
+    host_preset(t1, ENGI_OBX, 5);
+    t1->engine = t1->eng_req = ENGI_OBX;
+    t1->p[P_ATK] = 0;
+    t1->p[P_SUS] = 32767;
+    t1->p[P_REL] = 100;                                /* a long release: a loud tail */
+    own_level = 0x6000;                                /* loud 303 tail */
+    trk_note_on(t, 60, 100);
+    trk_note_on(t1, 64, 100);
+    for (b = 0; b < 40; b++) {
+        own_block(t);
+        own_block(t1);
+    }
+    adsr = &t1->v[0];
+    trk_note_off(t, 60);                               /* both released */
+    trk_note_off(t1, 64);
+    own_block(t);
+    own_block(t1);
+    adsr->env = 1 << 20;                               /* the ADSR tail is quieter than the loud 303 */
+    CHECK(shed_pick() == adsr, "shed: loud ownenv voice shed before a quieter ADSR tail (env %d)", (int)t->v[0].env);
+    own_level = 0x0100;                                /* the 303 tail dies away */
+    own_block(t);
+    adsr->env = 1 << 22;
+    CHECK(shed_pick() == &t->v[0], "shed: quiet ownenv tail not shed first (env %d)", (int)t->v[0].env);
+    ENGINES[ENGI_ACID] = saved;
+}
+
+#endif
 
 int main(void)
 {
     test_engine_table();
     test_presets();
     test_ownenv();
+    test_ownenv_ramp_out();
+#ifndef NO_SHED_TEST
+    test_ownenv_shed();
+#endif
     printf(fails ? "four_test: %d FAIL\n" : "four_test: ok\n", fails);
     return fails != 0;
 }
