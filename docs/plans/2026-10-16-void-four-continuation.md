@@ -460,8 +460,10 @@ goldens are re-recorded only once. A DC blocker exists to remove DC, which sits 
 Implementation requirements for the change:
 - `VOID_DC_R` becomes `round(0.9985 * 32768) = 32719`, so `1 - R = 49`.
 - **Raise `SH` to at least 10.** At `SH = 8` the floored `R·y[n-1]` truncation equilibrates at
-  `0.5 * 256 / 49` ≈ 2.6 Q15 units, which is no longer negligible; at `SH = 10` it is
-  `0.5 * 32 / 49` ≈ 0.33. The whole reason the state is held at Q(15+SH) is to keep that error
+  about **1.3** Q15 units, which is no longer negligible; at `SH = 10` it is about 0.33.
+  (This plan first quoted 2.6 for `SH = 8`. That was 2x too high — corrected 2026-10-17 from
+  Task 4.3's measurement: settled `|y|` is 1-2 at `SH = 8` and 0 at `SH = 10`. The conclusion
+  is unchanged; `SH = 10` is still the right choice.) The whole reason the state is held at Q(15+SH) is to keep that error
   far below one Q15 unit — do not weaken it while widening the time constant.
 - Re-check the headroom: `|w| <= ~6.4e7` at `SH = 10`, comfortably inside int32. State the new
   bound in the comment, and confirm the `VOID_CLIP_MAX` static assert still holds — the ℓ1 norm
@@ -765,9 +767,54 @@ fallback was used in the commit message and here.
 
 ACID's and DRIFT's 32 presets each were **written blind against placeholder DSP** and must be re-voiced from scratch now that the engines are real. OB-Z's need revisiting for the new MODE and SLOP params.
 
-- Category quotas are fixed: OB-Z BRASS 8 / STRINGS 8 / KEYS 8 / LEAD 8; WAVE ATMOS 12 / LEAD 10 / BASS 10; ACID ACID 32; DRIFT BASS 12 / LEAD 10 / KEYS 10.
+### Preset counts and categories — REVISED 2026-10-17 by user decision
+
+The per-machine count is **no longer a uniform 32.** All three non-ACID machines turned out to have
+more source material than slots, and ACID needs very few, so the slots were redistributed toward
+the machines that have real patches to put in them.
+
+| Machine | Slots | Source | Categories |
+|---|---|---|---|
+| OB-Z | **41** | `Obxd-master/Lukas OBXd Presets.fxb`, 41 usable | BASS 9, LEAD 7, KEYS 12, BRASS 2, STRINGS 11 |
+| WAVE | **32** | the 69 converted VOID WAVE originals | ATMOS 12, LEAD 10, BASS 10 (unchanged) |
+| ACID | **12** | none needed — a 303 is played from its pots | ACID 12 |
+| DRIFT | **43** | `ultramaster_kr106-main/KR106_Presets.h`, 211 available | BASS, LEAD, KEYS — set from what converts best |
+| **Total** | **128** | | |
+
+**BASS is now allowed on OB-Z** (the category already exists; only the quota table forbade it).
+`ACID` remains exclusive to the ACID machine.
+
+**Consequence to accept deliberately: BRASS drops to 2 across the whole instrument**, because the
+bank only has two horn patches and OB-Z was the brass machine. If that is too thin, the fix is to
+hand-write two or three more rather than to distort the other categories.
+
+**Structural changes this requires** (small, and `engine_t.npresets` is already a `uint8_t` set
+from `NELEM()`, so variable counts are supported today):
+- `firmware/src/engines.c:7-11` — the five `_Static_assert`s hard-code 32. Make them per-machine.
+- `tools/four_presets.py` — `N = 32` and the per-machine category quota table.
+- The `"NN / 32"` sound-panel string must read `npresets` rather than the literal.
+- Re-check the MIDI Program Change range and the user-preset sentinel against the new counts.
 - ACID's 32 split by style in naming only: CLASSIC 8, SQUELCH 8, DISTORTED 8, DEEP 8.
-- **DRIFT's 32 are derived from the donor's bank, not written blind.**
+- **Two importers must be written, under `tools/`, rather than transcribing by hand.**
+  - `tools/obxd_fxb_import.py` — reads the `FBCh` VST2 bank (it wraps discoDSP XML:
+    `<program programName="..." Val_0..Val_79>`; no VST host needed) and maps via
+    `Obxd-master/Source/Engine/ParamsEnum.h`: `CUTOFF`→E4, `RESONANCE`→E5,
+    `MULTIMODE`+`BANDPASS`+`FOURPOLE`→E6 MODE, `PW`→E3, `OSC2_DET`→E1,
+    `OSC1MIX`/`OSC2MIX`→E2, `OSC1Saw`/`OSC1Pul`/`OSC2HS`→E0, `LATK/LDEC/LSUS/LREL`→env,
+    `ENVELOPE_AMT`→fenv.
+    **`NOISEMIX` and `FLT_KF` have nowhere to go** — Task 4.1 removed OB-Z's NOIS and KTR — so
+    the importer must report which presets depended on them instead of silently dropping the
+    value.
+  - `tools/kr106_import.py` — reads `KR106_Presets.h`'s `MakePreset("name", <44 params>)` rows
+    and `preset_categories.csv`.
+- **Neither importer's output is finished work.** Converting OB-Xd or Juno values into these
+  engines does not reproduce those instruments: different oscillators, different filters, two
+  dropped parameters. Treat the output as informed starting points that still go through the
+  Task 7.1 audition and the user's ear.
+- **Licence, unresolved:** "Lukas OBXd Presets" is a third-party pack of unknown provenance.
+  Settle who holds it and under what terms, and add the notice to `LICENSES/` and `CREDITS.md`,
+  **before** any converted values ship. Same question does not arise for KR-106 (GPL-3, in-repo).
+- **DRIFT's presets are derived from the donor's bank, not written blind.**
   `../ultramaster_kr106-main/KR106_Presets.h` holds 240 factory patches and
   `preset_categories.csv` labels them (Bass 31, Piano/Keys 33, Pad/Strings 24, Brass 13,
   Lead 11). Convert the best fits into DRIFT's BASS 12 / KEYS 10 / LEAD 10 and fill the gaps
