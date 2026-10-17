@@ -31,7 +31,6 @@
  * Every instance is self-contained (no mutable static state): two can run side by side. */
 #pragma once
 #include <stdint.h>
-#define BASS303_PORT 1                  /* (tests/acid_test.c: the real voice is here, not the placeholder) */
 
 /* Lifted into FM1-Four (Felucca) from fm1-x0x's dsp/bass303.{c,h} for the ACID machine (Task 5.2; docs/plans/2026-10-17-acid-303.md).
  * Changed from the donor, and nothing else:

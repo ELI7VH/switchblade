@@ -26,7 +26,7 @@ static inline void *eng_mem_of(uint32_t p);
 #include "eng_acid.c"           /* ACID: the TB-303 voice (bass303.c, after Open303) */
 #include "eng_drift.c"          /* DRIFT (placeholder: OB-Z's render) */
 #include "eng_wave.c"           /* WAVE: the VOID WAVE plugin's voice (wavetables: tools/gen_void_tables.py) */
-_Static_assert(ACID_MEM <= VOID_MEM, "ACID fits WAVE's region: the pool did not grow with the 303 voice");
+ENG_MEM_FITS("ACID", ACID_MEM);    /* (against the region, not against WAVE: ACID owes the pool nothing but its own size; the test pins that the pool did not grow) */
 
 static union {
     uint64_t align;

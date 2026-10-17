@@ -50,9 +50,7 @@ static void check(int ok, const char *fmt, ...)
 
 /* ------------------------------------------------------------ harness --- */
 static track_t *T;
-#ifdef BASS303_PORT
 static acid_t *ac_of(void) { return (acid_t *)ENG_MEM(0); }
-#endif
 
 static void acid_fresh(void)                      /* part 0: ACID, LEGATO, no sends, the engine's state zero */
 {
@@ -252,6 +250,8 @@ static void test_grid(void)
 static void test_selfosc(void)
 {
     unsigned c;
+    double prev = 0.0;
+    int track = 1;
     if (!ref_so_ok) {
         check(0, "(b) the reference selfosc.txt is missing or short");
         return;
@@ -261,10 +261,17 @@ static void test_selfosc(void)
         impulse_response(AM_SO_CUT[c], 127);
         hz = am_peak(imag, AM_N, 60.0, 8000.0, &prom);
         dec = am_decay(ibuf);
+        {   /* independent of the donor: the ring sits just under the cutoff the pot maps to (314 Hz * 2^(2.93 CUT / 127), the 303's
+             * 314 Hz .. 2.4 kHz) and rises with CUT. Measured 0.83 .. 0.91 x the cutoff */
+            double fc = 314.0 * pow(2.0, 2.930586688 * AM_SO_CUT[c] / 127.0);
+            track &= hz > prev && hz > 0.7 * fc && hz < 1.05 * fc;
+            prev = hz;
+        }
         check(fabs(hz / ref_so[c][0] - 1.0) <= 0.03 && prom >= 15.0 && fabs(dec / ref_so[c][2] - 1.0) <= 0.25,
               "(b) RES 127, CUT %u: resonance %.1f Hz (reference %.1f, %+.2f %%), prominence %.1f dB, ring decay %.0f dB/s (reference %.0f)",
               AM_SO_CUT[c], hz, ref_so[c][0], 100.0 * (hz / ref_so[c][0] - 1.0), prom, dec, ref_so[c][2]);
     }
+    check(track, "(b) the resonance rises with CUT and stays within 0.7 .. 1.05 x the cutoff the pot maps to (independent of the donor)");
 }
 
 /* ------------------------------------------------------------------ (c) --- */
@@ -299,9 +306,7 @@ static void test_accent(void)
 /* ------------------------------------------------------------------ (d) --- */
 #define SL_N (AM_SLIDE_END * CTL)
 static int32_t slb[SL_N];
-#ifdef BASS303_PORT
 static float sl_slew[AM_SLIDE_END], sl_env[AM_SLIDE_END];
-#endif
 
 /* the 48 -> 60 pair as the sequencer plays it: the new note on first, the old one off after (seq.c), slide_glide set.
  * retrig: the old one off first and no slide (the control: the detector must see that) */
@@ -329,10 +334,8 @@ static void slide_phrase(unsigned mode, int retrig)
         if (b == AM_SLIDE_OFF)
             trk_note_off(T, 60);
         run(slb + b * CTL, 1);
-#ifdef BASS303_PORT
         sl_slew[b] = ac_of()->b.slew_y;
         sl_env[b] = ac_of()->b.env_y;
-#endif
     }
 }
 
@@ -409,7 +412,6 @@ static void test_slide_mode(unsigned mode, const char *name)
     /* the pitch climbs across 50-70 ms: the audio's zero crossings, and the engine's own slew */
     slope = f0_slope(slb, s0 + (unsigned)(0.050 * AM_FS), s0 + (unsigned)(0.070 * AM_FS), &f0, &f1);
     check(slope > 0.0 && f0 < f1 + 3.0, "(d) %s: pitch rising across 50-70 ms (audio: %.1f -> %.1f Hz, slope %+.0f Hz/s)", name, f0, f1, slope);
-#ifdef BASS303_PORT
     {
         unsigned b0 = AM_SLIDE_AT + (unsigned)(0.050 * AM_FS / CTL), b1 = AM_SLIDE_AT + (unsigned)(0.070 * AM_FS / CTL), mono = 1, ok_env = 1;
         float fa = 440.0f * powf(2.0f, (48 - 69) / 12.0f), fb = 440.0f * powf(2.0f, (60 - 69) / 12.0f);
@@ -428,9 +430,6 @@ static void test_slide_mode(unsigned mode, const char *name)
             jumped |= sl_env[b] > sl_env[b - 1u] * 1.05f;
         check(jumped, "(d) %s: control, the same pair retriggered, does show the envelope restarting", name);
     }
-#else
-    check(0, "(d) %s: no bass303 state to read (ACID is still the placeholder)", name);
-#endif
 }
 
 static void test_slide(void)
@@ -442,7 +441,6 @@ static void test_slide(void)
 /* an unaccented slide target after an accented step is unaccented (the legato branch of mono_play must hand the new velocity on) */
 static void test_legato_accent(void)
 {
-#ifdef BASS303_PORT
     acid_fresh();
     pots(0, 0, 0, 100, 50, 80, 0, 0, 81);
     trk_note_on(T, 36, 127);
@@ -468,16 +466,12 @@ static void test_legato_accent(void)
         run(0, 1);
         check(fabsf(ac_of()->b.slew_y / f52 - 1.0f) < 0.0005f && ac_of()->b.env_y < e0, "legato: overlapped notes with no slide jump to the pitch (%.2f Hz of %.2f) without a retrigger", ac_of()->b.slew_y, f52);
     }
-#else
-    check(0, "legato: no bass303 state to read (ACID is still the placeholder)");
-#endif
 }
 
 /* the cutoff the voice gets is CUT plus the LFO and the matrix only: ENV x ED_FLT and the accent's boost (voice.c m->cutoff) are
  * taken out, the 303's own filter envelope being ENVMOD */
 static void test_cutoff_path(void)
 {
-#ifdef BASS303_PORT
     unsigned b;
     int32_t lo = 1 << 30, hi = -(1 << 30);
     acid_fresh();
@@ -499,9 +493,6 @@ static void test_cutoff_path(void)
         hi = ac_of()->cutq > hi ? ac_of()->cutq : hi;
     }
     check(hi - lo > 3000, "cutoff: the LFO's depth reaches the filter (%d .. %d, 1/256 pot steps)", lo, hi);
-#else
-    check(0, "cutoff: no bass303 state to read (ACID is still the placeholder)");
-#endif
 }
 
 /* ------------------------------------------------------------------ (e) --- */
@@ -536,7 +527,6 @@ static void test_decay(void)
     double t_fast = tau_of(0, 0.10, 0.12), t_slow = tau_of(127, 0.10, 0.60);
     check(t_fast > 0.0 && t_slow / t_fast >= 5.0, "(e) filter envelope time constant from the audio: DECY 0 %.0f ms, DECY 127 %.0f ms (%.1f x)",
           1000.0 * t_fast, 1000.0 * t_slow, t_fast > 0.0 ? t_slow / t_fast : 0.0);
-#ifdef BASS303_PORT
     {
         double ta, tb;
         acid_fresh();
@@ -553,9 +543,6 @@ static void test_decay(void)
         tb = -1.0 / (44100.0 * log(ac_of()->b.env_c));
         check(fabs(ta - 0.2) < 0.01 && fabs(tb - 2.5) < 0.12 && tb / ta >= 5.0, "(e) the engine's own time constants: DECY 0 %.0f ms, DECY 127 %.0f ms (200 ms .. 2.5 s)", ta * 1000, tb * 1000);
     }
-#else
-    check(0, "(e) no bass303 state to read (ACID is still the placeholder)");
-#endif
 }
 
 /* ------------------------------------------------------------------ (g) --- */
@@ -569,9 +556,7 @@ static void test_envelope_hooks(void)
         check(0, "amp() / done(): ACID has no own-envelope hooks (still the placeholder)");
         return;
     }
-#ifdef BASS303_PORT
-    check(ACID_MEM == sizeof(acid_t) && ACID_MEM <= VOID_MEM, "ACID: state %u bytes, the region %u (WAVE's %u, so the pool does not grow)", (unsigned)ACID_MEM, (unsigned)ENG_MEM_PART, (unsigned)VOID_MEM);
-#endif
+    check(ACID_MEM == sizeof(acid_t) && ACID_MEM <= ENG_MEM_PART && ENG_MEM_PART <= 800u, "ACID: state %u bytes in the region of %u (the pool did not grow past its 800)", (unsigned)ACID_MEM, (unsigned)ENG_MEM_PART);
     /* amp() in [0, 32767] across the corners (accent, drive, resonance, envelope depth, both waves, slide) */
     for (k = 0; k < 16u; k++) {
         acid_fresh();
@@ -583,18 +568,14 @@ static void test_envelope_hooks(void)
             a = e->amp(T, &T->v[0]);
             lo += a < 0;
             hi += a > 32767;
-#ifdef BASS303_PORT
             raw_over += acid_vca(&ac_of()->b) > 1.0f;
-#endif
             if (b == 100u) {
                 T->slide_glide = 1;
                 trk_note_on(T, 60 + (int)k, 127);
             }
         }
     }
-#ifdef BASS303_PORT
     check(raw_over > 100u, "amp(): the VCA command really does exceed 1.0 here (%u ticks), so the clamp is what keeps it in range", raw_over);
-#endif
     check(!lo && !hi, "amp(): inside [0, 32767] on every tick of 16 extreme settings (%u below, %u above)", lo, hi);
     /* done(): a released note ends (plain 1 ms release, and accented 50 ms) */
     for (k = 0; k < 2u; k++) {
@@ -615,6 +596,107 @@ static void test_envelope_hooks(void)
     for (b = 0; b < 40000u && T->v[0].active; b++)
         run(0, 1);
     check(!T->v[0].active, "done(): a held note ends by itself once its VCA reaches 0 (after %.1f s)", b * (double)CTL / AM_FS);
+}
+
+
+/* ------------------------------------------------- the edit slots (I1) --- */
+/* E0 WAVE, E1 TUNE, E6 DRV (the soft drive) and E7 SQL: the four pots the donor vectors do not reach. Each is measured on the
+ * rendered audio of a held note through the real voice path (the 303's own pot store is read as well where the audio cannot tell). */
+static int32_t slot_buf[4096];
+static float slot_mag[2048];
+
+/* a held note, `skip` blocks settled, 4096 samples kept and its magnitude spectrum in slot_mag */
+static void slot_note(int note, int vel, unsigned skip)
+{
+    trk_note_on(T, note, vel);
+    run(0, skip);
+    run(slot_buf, 4096u / CTL);
+    fft_mag(slot_buf, 4096u, slot_mag);
+}
+
+/* the level (dB, relative) of the harmonic h of f0 Hz: the strongest bin within +-3 % of h * f0 */
+static double slot_harm(double f0, unsigned h)
+{
+    unsigned k, a = (unsigned)(h * f0 * 0.97 * 4096.0 / AM_FS), b = (unsigned)(h * f0 * 1.03 * 4096.0 / AM_FS) + 1u, best = a;
+    for (k = a; k <= b; k++)
+        if (slot_mag[k] > slot_mag[best])
+            best = k;
+    return 20.0 * log10((double)slot_mag[best] + 1e-9);
+}
+
+static double slot_rms(const int32_t *x, unsigned n) { return am_rms_db(x, n); }
+
+/* the fundamental (Hz) of the held note in slot_mag: the strongest bin around the nominal, parabolic */
+static double slot_f0(double nominal)
+{
+    double prom;
+    return am_peak(slot_mag, 4096u, nominal * 0.8, nominal * 1.3, &prom);
+}
+
+static void test_slots(void)
+{
+    static int32_t sb[4][AM_GATE_BLK * CTL];
+    double h2s, h3s, h2q, h3q, fm64, f0, fp63, e_lo, e_hi, lv[2], h4[2], ce[4], tail[4];
+    int rs[2] = {0, 0}, ad[2] = {0, 0};
+    unsigned k;
+    int plain_same;
+    /* E0 WAVE: SAW against SQR (A3, filter open, no resonance). The 303's saw keeps its 2nd harmonic above its 3rd; its square is
+     * the odd-harmonic wave, whose 2nd is below its 3rd. Measured +6.7 / -7.1 dB */
+    acid_fresh();
+    pots(0, 0, 60, 0, 127, 0, 0, 0, 0);
+    slot_note(57, 96, 40);
+    h2s = slot_harm(220.0, 2);
+    h3s = slot_harm(220.0, 3);
+    acid_fresh();
+    pots(1, 0, 60, 0, 127, 0, 0, 0, 0);
+    slot_note(57, 96, 40);
+    h2q = slot_harm(220.0, 2);
+    h3q = slot_harm(220.0, 3);
+    check(h2s - h3s > 0.0 && h2q - h3q < -3.0 && (h2s - h3s) - (h2q - h3q) >= 10.0,
+          "E0 WAVE: the 2nd harmonic against the 3rd is %+.1f dB for SAW and %+.1f dB for SQR (SAW > 0, SQR < -3, apart by >= 10)", h2s - h3s, h2q - h3q);
+    /* E1 TUNE: the measured fundamental. pot = E1 + 64, 0.625 Hz of A4 per step (b3_set): E1 -64 / 0 / +63 is 400 / 440 / 479.4 Hz,
+     * +-1.6 semitones. The FFT's bin is 10.8 Hz wide, so the ratios (parabolic peak) are compared: within 1 % */
+    for (k = 0; k < 3u; k++) {
+        acid_fresh();
+        pots(0, k == 0u ? -64 : k == 1u ? 0 : 63, 60, 0, 127, 0, 0, 0, 0);
+        slot_note(57, 96, 40);
+        (k == 0u ? &fm64 : k == 1u ? &f0 : &fp63)[0] = slot_f0(220.0);
+    }
+    e_lo = 400.0 / 440.0;
+    e_hi = (440.0 + 63.0 * 0.625) / 440.0;
+    check(fabs(fm64 / f0 / e_lo - 1.0) < 0.01 && fabs(fp63 / f0 / e_hi - 1.0) < 0.01,
+          "E1 TUNE: A3 measures %.1f / %.1f / %.1f Hz at -64 / 0 / +63, ratios %.4f / %.4f (expected %.4f / %.4f, +-1.6 semitones)", fm64, f0, fp63, fm64 / f0, fp63 / f0, e_lo, e_hi);
+    /* E6 DRV, with the soft drive selected: a held A2 through a half-open filter at DRV 0 and 127. The level falls (the drive's
+     * make-up is below its gain) by 14 dB and the 4th harmonic comes up by 11 dB against the fundamental */
+    for (k = 0; k < 2u; k++) {
+        acid_fresh();
+        pots(0, 0, 60, 0, 70, 0, k ? 127 : 0, 0, 0);
+        slot_note(45, 96, 40);
+        lv[k] = am_rms_db(slot_buf, 4096u);
+        h4[k] = slot_harm(110.0, 4) - slot_harm(110.0, 1);
+    }
+    check(ac_of()->b.drv_type == BASS303_DRV_SOFT && ac_of()->b.pot[BASS303_DRIVE] == 127 && fabs(lv[1] - lv[0]) >= 6.0 && fabs(h4[1] - h4[0]) >= 6.0,
+          "E6 DRV (soft): DRV 127 against 0 moves the level %+.1f dB and the 4th harmonic %+.1f dB against the fundamental (>= 6 each)", lv[1] - lv[0], h4[1] - h4[0]);
+    /* E7 SQL, on a plain and on an accented step (CUT 50 RES 80, ACC 100, ENV): on an accented one RES gains up to 24 pots and the accent
+     * decay runs 7 -> 25 pots; a plain one is untouched. Measured: centroid 319 -> 566 Hz, the tail of the step +2.6 dB against its start */
+    for (k = 0; k < 4u; k++) {
+        acid_fresh();
+        pots(0, 0, 60, 100, 50, 80, 0, (k & 1u) ? 127 : 0, 81);
+        trk_note_on(T, 36, (k & 2u) ? 127 : 96);
+        run(sb[k], AM_GATE_BLK);
+        ce[k] = am_centroid(sb[k] + 1024);
+        tail[k] = am_rms_db(sb[k] + 4096, 1024) - am_rms_db(sb[k], 1024);
+        if (k >= 2u) {
+            rs[k - 2u] = ac_of()->b.pot[BASS303_RESO];
+            ad[k - 2u] = ac_of()->b.pot[BASS303_ACCDEC];
+        }
+    }
+    plain_same = !memcmp(sb[0], sb[1], sizeof sb[0]);
+    check(plain_same, "E7 SQL: a plain step is unchanged by SQL (bit for bit)");
+    check(rs[0] == 80 && rs[1] == 104 && ad[0] == 7 && ad[1] == 25,
+          "E7 SQL: an accented step gets RES pot %d -> %d and ACCDEC pot %d -> %d (SQL 0 -> 127)", rs[0], rs[1], ad[0], ad[1]);
+    check(ce[3] > 1.3 * ce[2] && tail[3] - tail[2] >= 1.5,
+          "E7 SQL: an accented step is brighter (centroid %.0f -> %.0f Hz) and rings on (tail against start %+.1f -> %+.1f dB) at SQL 127", ce[2], ce[3], tail[2], tail[3]);
 }
 
 /* ------------------------------------------------------------------ (f) --- */
@@ -682,13 +764,20 @@ static double mix_cost(void)                       /* instructions / sample over
     return best;
 }
 
+/* The bound: the host figure (worst of the 32 seeds and the stress setting) is 972 .. 983 run to run; 1080 is 10 % above the worst. The
+ * brief's first bound (4600, three times OB-Z's 1524 of the old baseline) was a tripwire at 3.5 x: it passed -DBASS303_OS=4 (1171)
+ * and -DBASS303_CTRL=1 (1113). 1080 fails both (and OS 4 + CTRL 1: 1310). A host-instruction count: a different compiler or
+ * -O level moves it, so on such a change re-measure and move the bound with a stated reason (never to hide a regression). */
+#define ACID_COST_MAX 1080.0
+
 static void test_cost(void)
 {
     static const uint8_t NOTES[8] = {48, 52, 55, 59, 60, 64, 67, 71};
     double idle, obz, worst = 0.0, stress;
     uint32_t k, i, worst_k = 0, ob = 0;
     if (!instr_now()) {
-        printf("acid: (f) cost: no instruction counter on this host, skipped\n");
+        printf("acid: SKIP (f) cost: NOT CHECKED, there is no instruction counter on this host (macOS proc_pid_rusage only); "
+               "run it on a Mac, and Task 8.1 PERF is the gate on the device\n");
         return;
     }
     mix_fresh(ENGI_ACID, 0);
@@ -724,7 +813,7 @@ static void test_cost(void)
            "OB-Z SAW LEAD (8 voices) %.0f; the mix alone %.0f (so the voice itself: %.0f / %.0f)\n",
            ENGINES[ENGI_ACID]->presets[worst_k].name, worst, stress, obz, idle, worst - idle, stress - idle);
     worst = worst > stress ? worst : stress;
-    check(worst <= 3.0 * obz && worst <= 4600.0, "(f) ACID per voice %.0f <= 3 x OB-Z %.0f (= %.0f) and <= 4600 (%.1f %% of the bound)", worst, obz, 3.0 * obz, 100.0 * worst / 4600.0);
+    check(worst <= 3.0 * obz && worst <= ACID_COST_MAX, "(f) ACID per voice %.0f <= 3 x OB-Z %.0f (= %.0f) and <= %.0f (%.1f %% of the bound)", worst, obz, 3.0 * obz, ACID_COST_MAX, 100.0 * worst / ACID_COST_MAX);
 }
 
 int main(int argc, char **argv)
@@ -741,6 +830,7 @@ int main(int argc, char **argv)
     test_cutoff_path();
     test_decay();
     test_envelope_hooks();
+    test_slots();
     test_cost();
     printf("acid_test: %s\n", bad ? "FAIL" : "ok");
     return bad ? 1 : 0;

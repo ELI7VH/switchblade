@@ -28,12 +28,10 @@ static acid_t *acid_of(const track_t *t)
     return (acid_t *)ENG_MEM((uint32_t)(t - trk) % NPART);
 }
 
-static inline int acid_clampi(int32_t v, int32_t lo, int32_t hi) { return v < lo ? lo : v > hi ? hi : (int)v; }
-
 /* a pot to the voice, only when it changed (bass303_set recomputes what depends on it) */
 static void acid_pot(bass303_t *b, int i, int v)
 {
-    v = acid_clampi(v, 0, b3_max[i]);
+    v = clamp(v, 0, b3_max[i]);
     if (b->pot[i] != v)
         bass303_set(b, i, v);
 }
@@ -43,7 +41,7 @@ static void acid_pots(const track_t *t, acid_t *a, int accent)
 {
     const int16_t *p = t->p;
     bass303_t *b = &a->b;
-    int sql = acid_clampi(p[P_E7], 0, 127), ed = p[P_ED_FLT];
+    int sql = clamp(p[P_E7], 0, 127), ed = p[P_ED_FLT];
     acid_pot(b, BASS303_WAVE, p[P_E0]);
     acid_pot(b, BASS303_TUNE, p[P_E1] + 64);
     acid_pot(b, BASS303_DECAY, p[P_E2]);
@@ -148,7 +146,7 @@ static void acid_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
     /* the cutoff: CUT plus what the LFO and the matrix added. voice.c's m->cutoff also holds ENV x ED_FLT and the accent's
      * boost, from the envq15 amp() reported; the 303's own filter envelope is ENVMOD, so those two are taken out again */
     mc = m->cutoff - ((m->envq15 * p[P_ED_FLT]) >> 7) - (acc ? (m->envq15 * 24) >> 7 : 0);
-    cq = acid_clampi((int32_t)p[P_E4] * 256 + mc, 0, 127 * 256);
+    cq = clamp((int32_t)p[P_E4] * 256 + mc, 0, 127 * 256);
     if (cq != a->cutq) {
         if (!(cq & 255))
             acid_pot(b, BASS303_CUTOFF, cq >> 8);

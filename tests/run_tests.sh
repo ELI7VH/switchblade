@@ -100,9 +100,11 @@
 #                   fails the suite once no engine binds analog_render_f (Phase 6 deletes it with the placeholder).
 # ACID (tests/acid_test.c, tests/acid_ref/, tests/acid_meas.h): the 303 voice (bass303.c, eng_acid.c) through the real voice path against
 #                   the donor's own vectors (tests/acid_ref.sh regenerates them from fm1-x0x's bass303.c): the filter's impulse response on
-#                   a 5 x 5 CUT / RES grid within 1 dB, the RES 127 resonance within 3 %, an accented step >= 3 dB louder and brighter, a
-#                   48 -> 60 slide (LEGATO and MONO: no retrigger, pitch rising across 50-70 ms, no dip), DECY 0 vs 127, the cost per
-#                   voice (<= 3 x OB-Z, <= 4600 instructions / sample), amp() in [0, 32767], done() ends released and held notes.
+#                   a 5 x 5 CUT / RES grid within 1 dB, the RES 127 resonance within 3 % of the donor's and tracking CUT, an accented step >= 3 dB
+#                   louder and brighter, a 48 -> 60 slide (LEGATO and MONO: no retrigger, pitch rising across 50-70 ms, no dip), DECY 0 vs 127,
+#                   the edit slots the vectors do not reach (E0 WAVE saw / square harmonics, E1 TUNE the measured pitch, E6 DRV level and
+#                   harmonics, E7 SQL's RES / accent decay on an accented step only), the cost per voice (<= 3 x OB-Z, <= 1080 instructions /
+#                   sample: macOS only, a loud SKIP elsewhere), amp() in [0, 32767], done() ends released and held notes.
 # WAVE (tests/void_tables_test.py, tests/void_test.c): the VOID WAVE plugin's voice (the WAVE engine, was VOID). Its wavetables against the plugin's
 #                   frames recomputed with numpy (every keyframe and level band-limited, the crossfade within its limit;
 #                   skipped without numpy); the engine: pitch, OSC2's steps, band-limited at C8, bounded and without DC at
