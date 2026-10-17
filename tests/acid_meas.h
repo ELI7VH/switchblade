@@ -20,7 +20,10 @@ static const uint8_t AM_SO_CUT[4] = {30, 60, 90, 120};
 /* the impulse measurements (tests/acid_ref.c IMPULSE build, tests/acid_test.c): the oscillator replaced by silence
  * and one impulse of AM_IMP (the B3_IN seam in bass303.c), 1.2 s into a note of C2 (the filter envelope has settled by then),
  * AM_N samples of the response kept. ENVMOD 0, DECAY 0, ACCENT 0, DRIVE 0 */
-#define AM_IMP 500.0f
+/* the machine's output trim after the voice (eng_acid.c ACID_TRIM_DB; acid_test.c checks they agree): the donor side applies it to
+ * its float output before the integer conversion, as the engine does, so both sides see the same quantisation */
+#define AM_TRIM_DB 3.0
+#define AM_IMP 100.0f                    /* (500 while the voice ran at VOLUME 96: 14.6 dB more output must not reach eng_acid.c's clamp) */
 #define AM_IMP_AT 1650u                  /* blocks into the note (1.2 s) */
 
 /* band k's level in dB (10 log10 of the energy; relative: the Hann window scales every band alike) */
@@ -103,8 +106,8 @@ static double am_rms_db(const int32_t *x, unsigned n)        /* rms, dB re full 
 #define AM_SLIDE_END 512u                /* blocks rendered (0.37 s) */
 #define AM_RMS_WIN 220u                  /* 5 ms */
 
-static int32_t am_f2i(float y)           /* the engine's float -> Q15 (acid_render does the same) */
+static int32_t am_f2i(float y)           /* the engine's float -> Q15 (acid_render does the same: clamp +-8, NaN 0) */
 {
-    return !(y > -4.0f && y < 4.0f) ? 0 : (int32_t)(y * 32768.0f);
+    return !(y > -8.0f && y < 8.0f) ? (y >= 8.0f ? 8 * 32768 : y <= -8.0f ? -8 * 32768 : 0) : (int32_t)(y * 32768.0f);
 }
 #endif

@@ -22,7 +22,7 @@ static float imp_in(float s)
     float r;
     if (!imp_mode)
         return s;
-    r = imp_pending ? 500.0f : 0.0f;               /* acid_meas.h AM_IMP */
+    r = imp_pending ? 100.0f : 0.0f;               /* acid_meas.h AM_IMP */
     imp_pending = 0;
     return r;
 }
@@ -816,6 +816,62 @@ static void test_cost(void)
     check(worst <= 3.0 * obz && worst <= ACID_COST_MAX, "(f) ACID per voice %.0f <= 3 x OB-Z %.0f (= %.0f) and <= %.0f (%.1f %% of the bound)", worst, obz, 3.0 * obz, ACID_COST_MAX, 100.0 * worst / ACID_COST_MAX);
 }
 
+#define ACID_LEVEL_DB (-18.3)                /* ACID TRAX */
+#define ACID_LEVEL_DRV_DB (-17.9)            /* DIRTY 303 */
+#define OTHERS_MEDIAN_DB (-17.3)             /* the median of OB-Z, WAVE and DRIFT in the audition (build/audition/summary.json) */
+/* ------------------------------------------------------------ level --- */
+/* Task 7.2a: ACID sat 14 dB under the other machines (VOLUME 96 in bass303.c). The same two-bar phrase on ACID preset 1, a drive
+ * preset (DIRTY 303) and OB-Z SAW LEAD, through mix_block (the part, its sends, the master and its limiter: the path the audition
+ * renders): the rms of the blocks above -60 dBFS. The pinned figures are the ones after the fix, +-1.5 dB; before it they were
+ * -27.2 and -30.3 dBFS. The phrase is shorter than the audition's but the same shape: accents, slides, rests. */
+static double phrase_rms(uint32_t eng, uint32_t pi)
+{
+    static const uint8_t NOTE[16] = {36, 36, 48, 36, 39, 36, 43, 36, 36, 36, 48, 36, 39, 36, 46, 36};
+    static const uint8_t VEL[16] = {127, 96, 96, 96, 127, 96, 96, 96, 96, 96, 127, 96, 96, 96, 96, 127};
+    static const uint8_t SLD[16] = {0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0};
+    double ss = 0.0;
+    unsigned st, n = 0, b, i;
+    mix_fresh(eng, pi);
+    T->p[P_DIST] = T->p[P_CHOR] = T->p[P_DLY] = T->p[P_REV] = 0;
+    for (st = 0; st < 16u; st++) {
+        T->slide_glide = SLD[st];
+        trk_note_on(T, NOTE[st], VEL[st]);
+        for (b = 0; b < 24u * 5u; b++) {              /* 24 blocks of 5 ms ... */
+            double e = 0.0;
+            if (b == 14u * 5u)
+                trk_note_off(T, NOTE[st]);
+            mix_block(mix_out, CTL);
+            for (i = 0; i < 2u * CTL; i++)
+                e += (double)mix_out[i] * mix_out[i];
+            if (10.0 * log10(e / (2u * CTL) / (32768.0 * 32768.0) + 1e-20) > -60.0) {
+                ss += e;
+                n += 2u * CTL;
+            }
+        }
+    }
+    return 10.0 * log10(ss / (n ? n : 1u) / (32768.0 * 32768.0) + 1e-20);
+}
+static void test_level(void)
+{
+    double a1, ad, ob;
+    uint32_t k, ob_k = 0, dirty = 0;
+    for (k = 0; k < ENGINES[ENGI_OBX]->npresets; k++)
+        if (!strcmp(ENGINES[ENGI_OBX]->presets[k].name, "SAW LEAD"))
+            ob_k = k;
+    for (k = 0; k < ENGINES[ENGI_ACID]->npresets; k++)
+        if (!strcmp(ENGINES[ENGI_ACID]->presets[k].name, "DIRTY 303"))
+            dirty = k;
+    a1 = phrase_rms(ENGI_ACID, 0);
+    ad = phrase_rms(ENGI_ACID, dirty);
+    ob = phrase_rms(ENGI_OBX, ob_k);
+    printf("acid: level phrase rms: ACID TRAX %.1f dB, DIRTY 303 %.1f dB, OB-Z SAW LEAD %.1f dB\n", a1, ad, ob);
+    check(fabs(a1 - ACID_LEVEL_DB) <= 1.5, "level: ACID TRAX phrase rms %.1f dBFS within 1.5 dB of %.1f", a1, ACID_LEVEL_DB);
+    check(fabs(ad - ACID_LEVEL_DRV_DB) <= 1.5, "level: DIRTY 303 (DRV 75) phrase rms %.1f dBFS within 1.5 dB of %.1f", ad, ACID_LEVEL_DRV_DB);
+    check(fabs(a1 - OTHERS_MEDIAN_DB) <= 3.0 && fabs(ad - OTHERS_MEDIAN_DB) <= 3.0,
+          "level: ACID %.1f / %.1f dB within 3 dB of the other machines' median %.1f dB (OB-Z SAW LEAD on this phrase: %.1f)", a1, ad, OTHERS_MEDIAN_DB, ob);
+    check(fabs(AM_TRIM_DB - (double)ACID_TRIM_DB) < 1e-9, "level: acid_meas.h AM_TRIM_DB %.1f is eng_acid.c's ACID_TRIM_DB %.1f", AM_TRIM_DB, (double)ACID_TRIM_DB);
+}
+
 int main(int argc, char **argv)
 {
     setvbuf(stdout, 0, _IONBF, 0);
@@ -831,6 +887,7 @@ int main(int argc, char **argv)
     test_decay();
     test_envelope_hooks();
     test_slots();
+    test_level();
     test_cost();
     printf("acid_test: %s\n", bad ? "FAIL" : "ok");
     return bad ? 1 : 0;

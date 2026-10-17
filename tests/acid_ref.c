@@ -23,7 +23,7 @@ static float imp_in(float s) { float r = imp_pending ? AM_IMP : 0.0f; (void)s; i
 
 static bass303_t B;
 
-/* the pots ACID's mapping sets, and the ones it fixes (VOLUME 96, SLIDE 21) */
+/* the pots ACID's mapping sets, and the ones it fixes (VOLUME 127: ACID runs the pot at the top, bass303.c b3_def; SLIDE 21) */
 static void setup(int wave, int cut, int res, int envmod, int decay, int accent, int drive)
 {
     bass303_init(&B);
@@ -34,7 +34,7 @@ static void setup(int wave, int cut, int res, int envmod, int decay, int accent,
     bass303_set(&B, BASS303_DECAY, decay);
     bass303_set(&B, BASS303_ACCENT, accent);
     bass303_set(&B, BASS303_TUNE, 64);
-    bass303_set(&B, BASS303_VOLUME, 96);
+    bass303_set(&B, BASS303_VOLUME, 127);
     bass303_set(&B, BASS303_DRIVE, drive);
     bass303_set(&B, BASS303_DRVTYPE, BASS303_DRV_SOFT);
     bass303_set(&B, BASS303_SLIDE, 21);
@@ -44,11 +44,12 @@ static void setup(int wave, int cut, int res, int envmod, int decay, int accent,
 static void blocks(int32_t *out, unsigned nblk)
 {
     float f[AM_BLK];
+    const float g = (float)pow(10.0, AM_TRIM_DB / 20.0);
     unsigned b, i;
     for (b = 0; b < nblk; b++) {
         bass303_render(&B, f, (int)AM_BLK);
         for (i = 0; i < AM_BLK; i++)
-            out[b * AM_BLK + i] = am_f2i(f[i]);
+            out[b * AM_BLK + i] = am_f2i(f[i] * g);
     }
 }
 

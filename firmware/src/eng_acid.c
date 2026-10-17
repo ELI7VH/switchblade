@@ -20,7 +20,17 @@ typedef struct {                 /* the part's engine memory */
     uint8_t acc;
     uint8_t fresh;               /* the first render of a note: the voice's amp0 = 0 is not a fade-in */
     uint8_t pend;                /* a note_on has not yet had its modulated pitch applied */
+    uint8_t og_drv;              /* the DRV pot og was worked out for */
+    float og;                    /* the output gain (ACID_TRIM_DB and the drive's make-up), linear; 0 = not worked out yet */
 } acid_t;
+
+/* The level of the machine (Task 7.2a). The voice runs with VOLUME at the top of its pot (bass303.c b3_def: it was 96, the donor's
+ * -14.6 dB, which left ACID about 14 dB under the other machines). Two trims follow it. ACID_TRIM_DB brings the plain presets'
+ * median to -18 dBFS in the audition (the other machines' -17.3) with their peaks still under -2.7. DRIVE is a tanh that hands
+ * back tanh(g x) / g, so it only ever takes level away (6 .. 10 dB for DRV 80 .. 127): ACID_DRV_MAKEUP_DB is given back at DRV
+ * 127, in proportion, which brings the DISTORTED presets in with the rest. Applied to the voice's output, after the whole chain. */
+#define ACID_TRIM_DB 3.0f
+#define ACID_DRV_MAKEUP_DB 9.5f
 #define ACID_MEM (sizeof(acid_t))
 
 static acid_t *acid_of(const track_t *t)
@@ -50,6 +60,10 @@ static void acid_pots(const track_t *t, acid_t *a, int accent)
     acid_pot(b, BASS303_DRIVE, p[P_E6]);
     acid_pot(b, BASS303_ACCDEC, 7 + (sql * 18 + 63) / 127);
     acid_pot(b, BASS303_ENVMOD, ed <= 0 ? 0 : (ed * 127 + 31) / 63);
+    if (a->og == 0.0f || a->og_drv != (uint8_t)clamp(p[P_E6], 0, 127)) {
+        a->og_drv = (uint8_t)clamp(p[P_E6], 0, 127);
+        a->og = fm_db2lin(ACID_TRIM_DB + ACID_DRV_MAKEUP_DB * (float)a->og_drv * (1.0f / 127.0f));
+    }
 }
 
 /* the voice's pitch in Hz: the TARGET (voice.c's own linear glide is undone: the slide is bass303's slew), with the engine-wide
@@ -161,13 +175,14 @@ static void acid_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
     g1 = g1 > 1.0f ? 1.0f : g1 < 0.0f ? 0.0f : g1;
     g0 = a->fresh ? g1 : a->ref > 0 ? (float)m->amp0 / (float)a->ref : 0.0f;
     g0 = g0 > 1.0f ? 1.0f : g0 < 0.0f ? 0.0f : g0;
-    gs = (g1 - g0) * (1.0f / (float)n);
+    g0 *= a->og;
+    gs = (g1 * a->og - g0) * (1.0f / (float)n);
     for (i = 0; i < n; i++) {
         float s;
         g0 += gs;
         s = buf[i] * g0;
-        if (!(s > -2.0f && s < 2.0f))                    /* a runaway or a NaN never reaches the integer conversion */
-            s = s >= 2.0f ? 2.0f : s <= -2.0f ? -2.0f : 0.0f;
+        if (!(s > -8.0f && s < 8.0f))                    /* a runaway or a NaN never reaches the integer conversion */
+            s = s >= 8.0f ? 8.0f : s <= -8.0f ? -8.0f : 0.0f;
         out[i] += (int32_t)(s * 32768.0f);
     }
     a->ref = a->lvl;

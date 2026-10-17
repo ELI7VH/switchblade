@@ -1,5 +1,5 @@
 # acid_ref.c IMPULSE: RES 127, the impulse response's peak in 60 Hz .. 8 kHz (hz), its prominence over the rest (dB), the ring's decay (dB/s)
-selfosc 30 461.28 24.49 667.8
-selfosc 60 722.19 25.04 659.3
-selfosc 90 1128.07 25.07 706.9
-selfosc 120 1778.14 25.15 697.7
+selfosc 30 465.46 24.66 643.4
+selfosc 60 721.05 25.02 652.4
+selfosc 90 1129.56 25.15 677.6
+selfosc 120 1778.92 25.13 712.8

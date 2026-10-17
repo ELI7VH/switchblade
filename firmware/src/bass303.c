@@ -22,9 +22,10 @@
 /* ---- parameters ------------------------------------------------------------------------ */
 
 /* each pot's top value and power-on value: the donor's table, less its descriptors (the engine's param_desc_t slots carry those).
- * Defaults are schwung-303's (every knob at 0.5, Devilfish values stock), except Volume, lowered from 0.8 so the nominal peak is ~0.5 */
+ * Defaults are schwung-303's (every knob at 0.5, Devilfish values stock), except Volume: 127 here (the donor lowered it to 0.8, ~96, so
+ * its nominal peak was ~0.5; in VOID FOUR that left ACID 14 dB under the other machines: Task 7.2a, eng_acid.c ACID_TRIM_DB) */
 static const uint8_t b3_max[BASS303_NPARAMS] = { 127, 127, 127, 127, 127, 1, 127, 127, 127, 2, 127, 127 };
-static const uint8_t b3_def[BASS303_NPARAMS] = { 64, 64, 64, 64, 64, 0, 64, 96, 0, 1, 21, 7 };
+static const uint8_t b3_def[BASS303_NPARAMS] = { 64, 64, 64, 64, 64, 0, 64, 127, 0, 1, 21, 7 };
 
 /* exp(-1/(tau_ms * fs / 1000)): one-pole / RC coefficient */
 static float b3_rc_coeff(float tau_ms, float fs)
