@@ -1,0 +1,6 @@
+# acid_ref.c: note 36 saw, CUT 50, RES 80, ENVMOD 81, DECAY 0, ACCENT 100; steps 0 and 2 plain, 1 and 3 accented;
+# peak = sample peak over the step (dBFS), centroid = of the 4096 samples after the onset
+step 0 -13.955 294.5
+step 1 -3.613 349.3
+step 2 -13.773 294.6
+step 3 -3.842 349.3
