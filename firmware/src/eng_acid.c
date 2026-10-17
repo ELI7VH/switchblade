@@ -31,6 +31,18 @@ typedef struct {                 /* the part's engine memory */
  * 127, in proportion, which brings the DISTORTED presets in with the rest. Applied to the voice's output, after the whole chain. */
 #define ACID_TRIM_DB 3.0f
 #define ACID_DRV_MAKEUP_DB 9.5f
+/* The guard clamp (whole full scales, strict: |s| < ACID_GUARD_FS). It exists so that a runaway or a NaN never reaches the integer
+ * conversion, and it is sized to the mixer's int32 headroom, which this engine's output must not exceed. Accents reach 3.5 .. 4.9 FS
+ * on the shipped presets and about 6.8 FS on a hand-edited worst case, so it is not a limiter: the master limiter and softclip
+ * do the levelling.
+ *   mix_part (fx.c) takes b = s * 32768, then x = ((b >> 2) * LEVEL_Q12[127]) >> 10, with LEVEL_Q12[127] = 9713, so
+ *   x = 77,704 per full scale; it then forms x * gl with gl <= 4096 (pan 0), which has to stay below 2^31: x <= 524,287 (6.747 FS).
+ *   The master forms ((mix_l + wet) >> 2) * mg with mg <= 4096 (MASTER_FULL): mix_l + wet < 2^21 = 2,097,152. Four ACID parts
+ *   sum to 4 x, so x <= 524,287 holds there too, with the wet bus (sends are clamped well under the tracks) in what is left.
+ *   At 6 FS: b <= 196,607, x <= 466,224 (margin 1.125 on x * gl, 12.5 %), four parts 1.865 M against 2.097 M (margin 1.124, 11 %
+ *   left for the wet bus). At 8 FS (the previous value) x = 621 k: x * gl wrapped above 6.75 FS, and four parts overflowed. 7 FS
+ *   would give 543,9xx, still over (x <= 543,911). tests/acid_test.c test_headroom pins both products through the real mix path. */
+#define ACID_GUARD_FS 6
 #define ACID_MEM (sizeof(acid_t))
 
 static acid_t *acid_of(const track_t *t)
@@ -181,8 +193,8 @@ static void acid_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
         float s;
         g0 += gs;
         s = buf[i] * g0;
-        if (!(s > -8.0f && s < 8.0f))                    /* a runaway or a NaN never reaches the integer conversion */
-            s = s >= 8.0f ? 8.0f : s <= -8.0f ? -8.0f : 0.0f;
+        if (!(s > -(float)ACID_GUARD_FS && s < (float)ACID_GUARD_FS))   /* a runaway or a NaN never reaches the integer conversion */
+            s = s >= (float)ACID_GUARD_FS ? (float)ACID_GUARD_FS : s <= -(float)ACID_GUARD_FS ? -(float)ACID_GUARD_FS : 0.0f;
         out[i] += (int32_t)(s * 32768.0f);
     }
     a->ref = a->lvl;

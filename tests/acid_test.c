@@ -872,6 +872,85 @@ static void test_level(void)
     check(fabs(AM_TRIM_DB - (double)ACID_TRIM_DB) < 1e-9, "level: acid_meas.h AM_TRIM_DB %.1f is eng_acid.c's ACID_TRIM_DB %.1f", AM_TRIM_DB, (double)ACID_TRIM_DB);
 }
 
+/* ------------------------------------------------------- int headroom --- */
+/* Task 7.2a fix 1: the integer headroom of mix_part (fx.c) that the ACID guard clamp (eng_acid.c ACID_GUARD_FS) has to respect.
+ * mix_part computes x = ((b >> 2) * LEVEL_Q12[127]) >> 10 and then x * gl, with gl <= 4096: x must stay <= 524287 or the product
+ * wraps int32 (a polarity-flipped crackle burst). The master takes ((mix_l + wet) >> 2) * mg with mg <= 4096, so the four-track sum
+ * has to stay under 2^21 as well. The worst ACID settings (the reviewer's reproducer, then a sweep of WAVE, RES, SQL, ENV, DRV, CUT
+ * and DECY with accent and slides, LEVEL 127) go through the real mix_block; t->peak is mix_part's own x. */
+#define HR_X_LIMIT 524287
+#define HR_SUM_LIMIT 2097151
+typedef struct { int p[9]; } hr_cfg_t;
+static int32_t hr_x, hr_sum, hr_prod_ok = 1;
+static void hr_run(const hr_cfg_t *c, unsigned ntr)
+{
+    unsigned k, s, b, i;
+    hr_x = hr_sum = 0;
+    mix_fresh(ENGI_ACID, 27);
+    for (k = 0; k < ntr; k++) {
+        if (k)
+            host_preset(&trk[k], ENGI_ACID, 27);
+        T = &trk[k];
+        T->p[P_MUTE] = 0;
+        T->p[P_PAN] = 0;
+        T->p[P_DIST] = T->p[P_CHOR] = T->p[P_DLY] = T->p[P_REV] = 0;
+        pots(c->p[0], c->p[1], c->p[2], c->p[3], c->p[4], c->p[5], c->p[6], c->p[7], c->p[8]);
+        T->p[P_LEVEL] = 127;
+    }
+    T = &trk[0];
+    song.master_q12 = 4096;
+    for (s = 0; s < 4u; s++) {
+        for (k = 0; k < ntr; k++) {
+            trk[k].slide_glide = s & 1u;
+            trk_note_on(&trk[k], 26, 127);
+        }
+        for (b = 0; b < 40u * 5u; b++) {
+            if (b == 100u)
+                for (k = 0; k < ntr; k++)
+                    trk_note_off(&trk[k], 26);
+            mix_block(mix_out, CTL);
+            for (k = 0; k < ntr; k++)
+                if (trk[k].peak > hr_x)
+                    hr_x = trk[k].peak;
+            for (i = 0; i < CTL; i++) {
+                int64_t sm = (int64_t)mix_l[i] + wet[i], a = sm < 0 ? -sm : sm;
+                if (a > hr_sum)
+                    hr_sum = (int32_t)(a > 0x7FFFFFFF ? 0x7FFFFFFF : a);
+            }
+        }
+    }
+}
+static void test_headroom(void)
+{
+    static const int WAVE[] = {0, 1}, RES[] = {100, 127}, SQL[] = {64, 127}, ENV[] = {90, 119, 127}, DRV[] = {0, 40}, CUT[] = {40, 51, 64},
+                     DECY[] = {8, 60};
+    hr_cfg_t repro = {{0, 58, 8, 127, 51, 127, 0, 127, 119}}, worst = repro, c;
+    int32_t wx = 0, rx, rsum, n = 0;
+    unsigned a, b, d, e, f, g, h;
+    hr_run(&repro, 1);
+    rx = hr_x;
+    hr_run(&repro, 4);
+    rsum = hr_sum;
+    printf("acid: headroom reproducer (RES 127 SQL 127 ENV 119 accent DRV 0 LEVEL 127): x %d (limit %d), 4 tracks mix_l+wet %d (limit %d)\n", rx, HR_X_LIMIT, rsum, HR_SUM_LIMIT);
+    check(rx <= HR_X_LIMIT, "headroom: reproducer, one track: mix_part x %d <= %d (x * 4096 stays in int32)", rx, HR_X_LIMIT);
+    check(rsum <= HR_SUM_LIMIT && 4 * (int64_t)hr_x <= HR_SUM_LIMIT, "headroom: reproducer, four tracks: |mix_l + wet| %d and 4 x %d <= %d ((sum >> 2) * master stays in int32)", rsum, 4 * (int)hr_x, HR_SUM_LIMIT);
+    for (a = 0; a < 2u; a++) for (b = 0; b < 2u; b++) for (d = 0; d < 2u; d++) for (e = 0; e < 3u; e++)
+    for (f = 0; f < 2u; f++) for (g = 0; g < 3u; g++) for (h = 0; h < 2u; h++) {
+        c.p[0] = WAVE[a]; c.p[1] = 58; c.p[2] = DECY[h]; c.p[3] = 127; c.p[4] = CUT[g]; c.p[5] = RES[b]; c.p[6] = DRV[f];
+        c.p[7] = SQL[d]; c.p[8] = ENV[e];
+        hr_run(&c, 1);
+        n++;
+        if (hr_x > wx) { wx = hr_x; worst = c; }
+    }
+    hr_run(&worst, 4);
+    printf("acid: headroom sweep of %d settings: worst x %d (limit %d) = %.3f FS, its four-track sum %d (limit %d)\n", n, wx, HR_X_LIMIT, wx / 77704.0, hr_sum, HR_SUM_LIMIT);
+    check(wx <= HR_X_LIMIT, "headroom: sweep, one track: worst mix_part x %d <= %d", wx, HR_X_LIMIT);
+    check(hr_sum <= HR_SUM_LIMIT && 4 * (int64_t)hr_x <= HR_SUM_LIMIT, "headroom: sweep worst setting, four tracks: |mix_l + wet| %d and 4 x %d <= %d", hr_sum, 4 * (int)hr_x, HR_SUM_LIMIT);
+    /* the clamp itself, whatever the voice does: 4 tracks at the guard's own full scale must fit */
+    check(4 * (int64_t)((((ACID_GUARD_FS * 32768 - 1) >> 2) * 9713) >> 10) <= HR_SUM_LIMIT && (int64_t)((((ACID_GUARD_FS * 32768 - 1) >> 2) * 9713) >> 10) <= HR_X_LIMIT,
+          "headroom: the guard clamp +-%d FS by itself: x %d, four tracks %d", ACID_GUARD_FS, (int)((((ACID_GUARD_FS * 32768 - 1) >> 2) * 9713) >> 10), 4 * (int)((((ACID_GUARD_FS * 32768 - 1) >> 2) * 9713) >> 10));
+}
+
 int main(int argc, char **argv)
 {
     setvbuf(stdout, 0, _IONBF, 0);
@@ -888,6 +967,7 @@ int main(int argc, char **argv)
     test_envelope_hooks();
     test_slots();
     test_level();
+    test_headroom();
     test_cost();
     printf("acid_test: %s\n", bad ? "FAIL" : "ok");
     return bad ? 1 : 0;
