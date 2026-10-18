@@ -982,6 +982,7 @@ static double mix_cost(const uint8_t (*parts)[3])
     song.g[G_BPM] = 120;
     for (p = 0; p < NPART; p++) {
         host_preset(&trk[p], parts[p][0], parts[p][1]);
+        trk[p].p[P_RSV_LN] = 0;                    /* CHOR OFF: this is the voice's cost and its pin (the chorus' is tests/chorus_test.c) */
         trk[p].p[P_VOICE] = V_POLY;
         trk[p].p[P_SUS] = 127;
         trk[p].p[P_AMODE] = 0;

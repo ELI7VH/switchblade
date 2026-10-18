@@ -2675,6 +2675,14 @@ static uint32_t leds_at(uint32_t ms)
     return m | (((ms / 250u) & 1u) ? 0u : br);
 }
 
+/* the channel messages (not the clock's F8 / FA / FC, MIDI OUT's CLOCK OUT while a test has the transport running) put out since word `from` */
+static uint32_t mo_msgs(uint32_t from)
+{
+    uint32_t q, n = 0;
+    for (q = from; q != mo_w; q++)
+        n += (midi_out_q[q % MQ] & 0x0Fu) != 0x0Fu;
+    return n;
+}
 static int test_layer(void)
 {
     int bad = 0, ok, flash;
@@ -2778,13 +2786,13 @@ static int test_layer(void)
         uint32_t cur = ui.cursor;
         memcpy(before, TSEL->step, sizeof before);
         btn_down(B_FX); key_down(white(2)); frame();
-        ok = ui.layer == LAYER_FX && !gates() && mo_w == mo && (kb_layer >> white(2)) & 1u &&
+        ok = ui.layer == LAYER_FX && !gates() && !mo_msgs(mo) && (kb_layer >> white(2)) & 1u &&
              (perf_held & PF_BIT(PF_R32));                    /* white key 3 (A3): REPEAT 1/32 */
         for (i = 0; i < 40u; i++) events_block(CTL);
         ok &= !memcmp(before, TSEL->step, sizeof before) && ui.cursor == cur;
         bad += check("FX + a key: the map at once; no voice, no MIDI, no recording, no step written", ok);
         key_up(white(2)); frame();
-        bad += check("  the key let go: its effect off, no note-off sent", !perf_held && !kb_layer && mo_w == mo);
+        bad += check("  the key let go: its effect off, no note-off sent", !perf_held && !kb_layer && !mo_msgs(mo));
         btn_up(B_FX); frame();
         bad += check("  FX let go after a combo: no tap, the map gone", !ui.layer && cur_page()->graph == GR_ROLL);
     }
@@ -2848,7 +2856,7 @@ static int test_layer(void)
     mo = mo_w;
     key_down(white(4)); frame(); btn_down(B_FX); frame(); key_up(white(4)); frame(); btn_up(B_FX); frame();
     for (i = 0; i < 4u; i++) events_block(CTL);
-    bad += check("a key held before FX stays a note: note-on, note-off, nothing left held", mo_w == mo + 2u && !gates() &&
+    bad += check("a key held before FX stays a note: note-on, note-off, nothing left held", mo_msgs(mo) == 2u && !gates() &&
                  !kb_layer);
     /* knob macros: not the page's, not recorded, back to 0 when FX is let go */
     ui_power_on();

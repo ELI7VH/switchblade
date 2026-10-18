@@ -71,6 +71,8 @@ Switching a track to EXT or BOTH sends nothing until you change something.
 | DELAY send | 94 |
 | Preset | Program Change 0..31 |
 
+DRIFT's Juno chorus (CHOR: OFF, I, II, I+II; EDIT > JUNO) has no CC: 91, 93 and 94 are the sends, and the CHORUS send is the shared chorus bus, not this one. It can be mapped with MIDI LEARN (GLO + D4).
+
 EDIT knob 4 is each machine's own control: DTN (detune) on OB-Z, POS (wavetable position) on WAVE, DECY (decay) on ACID and DRV (drive) on DRIFT.
 
 CC values 0..127 span the parameter's whole range. For a bipolar value such as PAN, 64 is the middle.

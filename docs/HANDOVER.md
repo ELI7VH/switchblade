@@ -53,6 +53,7 @@ VOID FOUR is a fork of the Felucca 1.6 firmware for the M-VAVE FM-1 (a JieLi AC7
 | 5.2 ACID: float 303 (bass303 / Open303 port) | done, reviewed | 3cd1204..3138e9d, e2e47ec |
 | 5.3 Accent and slide editable on ACID (test only) | done, reviewed | e65bb4e |
 | 6.1 DRIFT: the Juno voice (KR-106 port) plus `dsp_va.c` | done, reviewed (mono until 8.1) | 89d4a18..bd9721a |
+| 6.2 DRIFT: the Juno chorus (OFF / I / II / I+II, KR-106 port; `engine_t.part_fx`, `dsp_chorus.c`) | implemented, NOT yet reviewed | 2ffa143.. (see `.superpowers/sdd/task-6.2-report.md`) |
 | 7.1 Audition renderer (WAV + rating page) | to do | |
 | 7.2 Final 128 presets, with user sign-off by ear | to do | |
 | 8.1 Hardware: release build, install (**ask first**), PERF, MIDI check | to do | |

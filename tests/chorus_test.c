@@ -20,6 +20,7 @@
 #include <string.h>
 #include "dsp_chorus.c"
 #include "chorus_ref_cfg.h"
+#include "dspfft.h"
 #define main hostsim_main
 #include "hostsim.c"
 #undef main
@@ -140,7 +141,9 @@ static double dft_db(const float *x, uint32_t n, double hz)   /* Hann-windowed s
 }
 
 /* ------------------------------------------------------------ (a)-(e) against the donor --- */
-#define ERR_TOL_DB (-50.0)         /* the time-domain error of the port against the donor, re the donor's rms: see the report */
+#define EW0 2205u
+#define EW1 4410u
+#define ERR_TOL_DB (-55.0)         /* the time-domain error of the port against the donor in 50 .. 100 ms, re the donor's rms: see the report */
 static void test_donor(void)
 {
     int c, have = 1, mode;
@@ -202,20 +205,73 @@ static void test_donor(void)
         if (!r)
             continue;
         g = run_case(k, 32);
-        for (i = 11025u; i < k->n; i++)
+        for (i = EW0; i < EW1; i++)
             for (ch = 0; ch < 2u; ch++) {
-                double dlt = (double)g[2u * i + ch] - (double)r[2u * i + ch];
+                double rr = (double)r[2u * i + ch] * (double)CHORUS_TRIM, dlt = (double)g[2u * i + ch] - rr;
                 e[ch] += dlt * dlt;
-                s[ch] += (double)r[2u * i + ch] * (double)r[2u * i + ch];
+                s[ch] += rr * rr;
             }
         for (ch = 0; ch < 2u; ch++)
             db[ch] = 10.0 * log10(e[ch] / (s[ch] + 1e-30) + 1e-30);
-        check(db[0] < ERR_TOL_DB && db[1] < ERR_TOL_DB, "(e) case %02d (mode %d, kind %d, f0 %.0f): error vs the donor %.1f dB (L) %.1f dB (R) re the donor's rms (limit %.0f dB)", c, k->mode,
+        check(db[0] < ERR_TOL_DB && db[1] < ERR_TOL_DB, "(e) case %02d (mode %d, kind %d, f0 %.0f): error vs the donor x CHORUS_TRIM %.1f dB (L) %.1f dB (R) re its rms (limit %.0f dB)", c, k->mode,
               k->kind, k->f0, db[0], db[1], ERR_TOL_DB);
         free(g), free(r);
     }
     if (!have)
         printf("chorus: NOT CHECKED against the donor: %s/NN.f32 are not there (tests/chorus_ref.cpp needs ../ultramaster_kr106-main or KR106_DIR)\n", refdir);
+}
+
+
+/* the long-term spectrum, immune to the donor's float phase drift (its LFO phase is a float sum of 1e-5: 0.1 % off its constant after seconds, where the
+ * port's integer phase is exact, so the waveforms part slowly): a Welch mean of 6 x 16384 samples of the left channel, six bands, noise in, 0.5 dB */
+static void band_db6(const float *x, double scale, double *out)
+{
+    static const double E[7] = {100, 300, 1000, 3000, 6000, 10000, 16000};
+    static int32_t seg[16384];
+    static float mag[8192];
+    double acc[8192];
+    uint32_t s, i, k, b;
+    for (k = 0; k < 8192u; k++)
+        acc[k] = 0.0;
+    for (s = 0; s < 6u; s++) {
+        for (i = 0; i < 16384u; i++)
+            seg[i] = (int32_t)((double)x[2u * (4410u + s * 16384u + i)] * scale * 1048576.0);
+        fft_mag(seg, 16384, mag);
+        for (k = 0; k < 8192u; k++)
+            acc[k] += (double)mag[k] * mag[k];
+    }
+    for (b = 0; b < 6u; b++) {
+        double e = 0.0;
+        for (k = (uint32_t)ceil(E[b] * 16384.0 / FSD); k < (uint32_t)floor(E[b + 1u] * 16384.0 / FSD); k++)
+            e += acc[k];
+        out[b] = 10.0 * log10(e + 1e-30);
+    }
+}
+static void test_spectrum(void)
+{
+    int mode, ok = 1, have = 1;
+    double worst = 0.0;
+    for (mode = 1; mode <= 3; mode++) {
+        const int c = (mode - 1) * 5 + 3;
+        float *g = run_case(&CHORUS_REF_CFG[c], 32), *r = load_ref(c, CHORUS_REF_CFG[c].n);
+        double a[6], b[6];
+        uint32_t k;
+        if (!r) {
+            have = 0;
+            free(g);
+            continue;
+        }
+        band_db6(g, 1.0, a);
+        band_db6(r, (double)CHORUS_TRIM, b);
+        for (k = 0; k < 6u; k++) {
+            double d = fabs(a[k] - b[k]);
+            worst = d > worst ? d : worst;
+            ok &= d < 0.5;
+        }
+        free(g), free(r);
+    }
+    if (have)
+        check(ok, "(e) the long-term spectrum of noise through each mode, six bands 100 Hz .. 16 kHz, against the donor x CHORUS_TRIM: worst band %.3f dB (limit 0.5)", worst);
 }
 
 /* ------------------------------------------------------------ (f) the DSP's own behaviour --- */
@@ -293,14 +349,14 @@ static void test_part(void)
         chorus_block(&D, (uint32_t)mode, in, l, r, N);
         for (i = 1024; i < N; i++) {
             /* L = mid + side, R = mid - side (the int path quantises the input: 1 LSB of 1/32768 through a gain of < 2.2) */
-            int32_t el = (int32_t)(l[i] * 32768.0f * CHORUS_TRIM), er = (int32_t)(r[i] * 32768.0f * CHORUS_TRIM);
+            int32_t el = (int32_t)(l[i] * 32768.0f), er = (int32_t)(r[i] * 32768.0f);
             int32_t dl = (b[i] + z[i]) - el, dr = (b[i] - z[i]) - er;
             dl = dl < 0 ? -dl : dl, dr = dr < 0 ? -dr : dr;
             worst = dl > worst ? dl : worst;
             worst = dr > worst ? dr : worst;
         }
     }
-    check(act && worst <= 8, "(g) chorus_part: mid + side = the DSP's L, mid - side = R, times CHORUS_TRIM (%.4f), within %d LSB; active", CHORUS_TRIM, (int)worst);
+    check(act && worst <= 8, "(g) chorus_part: mid + side = the DSP's L, mid - side = R (the trim %.4f folded into the DSP's gains), within %d LSB; active", CHORUS_TRIM, (int)worst);
     /* the guard: a huge square (100 FS) is held to CHORUS_GUARD_FS per channel, so |mid| + |side| <= guard */
     memset(&C, 0, sizeof C);
     for (i = 0; i < N; i++)
@@ -311,7 +367,7 @@ static void test_part(void)
         int32_t m = (b[i] < 0 ? -b[i] : b[i]) + (z[i] < 0 ? -z[i] : z[i]);
         mx = m > mx ? m : mx;
     }
-    check(mx <= CHORUS_GUARD_FS * 32768 && mx > CHORUS_GUARD_FS * 32768 / 2, "(h) the guard: 100 FS in, max(|L|, |R|) = |mid| + |side| = %d <= %d (%d FS), and reached", (int)mx,
+    check(mx <= CHORUS_GUARD_FS * 32768 + 1 && mx > CHORUS_GUARD_FS * 32768 / 2, "(h) the guard: 100 FS in, max(|L|, |R|) = |mid| + |side| = %d <= %d (%d FS; +1: the floor shifts of mid / side), and reached", (int)mx,
           CHORUS_GUARD_FS * 32768, CHORUS_GUARD_FS);
     /* an out-of-range mode is OFF: inactive and the block untouched (a stored 127 of the old reserved lane level, -1, 4) */
     ok = 1;
@@ -474,6 +530,39 @@ static void test_headroom(void)
     check(worst_x <= 524287 && worst_sum < 2097151, "(l) worst case (4 parts, LEVEL 127, RES / DRV 127, chords, sends 127, DIST 0 / 127, I / II / I+II): x %d <= 524287, four-track sum %d < 2097151", (int)worst_x, (int)worst_sum);
 }
 
+
+/* the stage's extreme output (|L| or |R| at the guard, 6 FS) straight through mix_stereo, four parts at LEVEL 127, PAN centre, every send full: no product wraps
+ * (the int64 sums equal the int32 ones) and each channel stays under 4 x 466,224 */
+static void test_stereo_limits(void)
+{
+    static const int32_t MS[5][2] = {{196608, 0}, {0, 196608}, {98304, 98304}, {-196608, 0}, {-98304, 98304}};
+    int ok = 1;
+    int32_t worst = 0, wpk = 0;
+    uint32_t cse, p, i;
+    mix_reset();
+    for (cse = 0; cse < 5u; cse++) {
+        static int32_t b[CTL], z[CTL];
+        int64_t el = 0, er = 0;
+        for (i = 0; i < CTL; i++)
+            send_c[i] = send_d[i] = send_r[i] = mix_l[i] = mix_r[i] = 0;
+        for (p = 0; p < 4u; p++) {
+            int32_t x, w;
+            trk[p].p[P_LEVEL] = 127, trk[p].p[P_PAN] = 0, trk[p].p[P_CHOR] = trk[p].p[P_DLY] = trk[p].p[P_REV] = 127;
+            trk[p].peak = 0;
+            for (i = 0; i < CTL; i++)
+                b[i] = MS[cse][0], z[i] = MS[cse][1];
+            mix_stereo(&trk[p], b, 0, z, CTL);
+            x = ((MS[cse][0] >> 2) * LEVEL_Q12[127]) >> 10, w = ((MS[cse][1] >> 2) * LEVEL_Q12[127]) >> 10;
+            el += (int64_t)(((int64_t)(x + w) * 4096) >> 12), er += (int64_t)(((int64_t)(x - w) * 4096) >> 12);
+            wpk = trk[p].peak > wpk ? trk[p].peak : wpk;
+        }
+        ok &= (int64_t)mix_l[5] == el && (int64_t)mix_r[5] == er && el < 2097151 && er < 2097151 && -el < 2097151 && -er < 2097151;
+        worst = (int32_t)(el > worst ? el : er > worst ? er : worst);
+        ok &= send_c[5] <= 4 * 65538 && send_c[5] >= -4 * 65538;
+    }
+    check(ok && wpk <= 466230, "(l) mix_stereo at the guard (|L| or |R| = 6 FS), four parts, LEVEL 127, sends full: no wrap, one channel at most %d < 2097151, a part's x at most %d (<= 524287)", (int)worst, (int)wpk);
+}
+
 /* ------------------------------------------------------------ the parameter --- */
 static void test_param(void)
 {
@@ -498,7 +587,7 @@ static uint64_t instr_now(void)
 /* The pin: chorus_part per sample per part (the int32 block in, mid / side out), the whole stage, in regress.c's units (kernel-counted instructions
  * on the Mac, cc -O2); +10 % of the measured worst of the three modes. Another compiler or -O level moves it: re-measure and say why, never to hide a
  * regression. The device's cost is what Task 8.1's PERF run measures. */
-#define CHORUS_COST_MAX 0.0
+#define CHORUS_COST_MAX 200.0   /* the measured worst (I+II, 182) + 10 %, -O2, cc on the Mac */
 static void test_cost(void)
 {
     enum { NB = 4096 };
@@ -548,10 +637,12 @@ int main(int argc, char **argv)
     test_dsp();
     test_part();
     test_donor();
+    test_spectrum();
     test_mix_off();
     test_mix_on();
     test_mix_pan();
     test_headroom();
+    test_stereo_limits();
     test_cost();
     printf("chorus_test: %s\n", bad ? "FAIL" : "ok");
     return bad ? 1 : 0;

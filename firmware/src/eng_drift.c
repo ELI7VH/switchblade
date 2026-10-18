@@ -20,6 +20,7 @@
  *   ENV (P_ED_FLT) -> cutoff through voice.c, as OB-Z and WAVE (ownenv = 0).   P_FTYPE (0..3): HPF flat / bass boost / 236 Hz / 754 Hz.
  * Cost: the filter is most of it (a Newton step per stage, six divides a sample at DRIFT_OS times the base rate). */
 #include "dsp_va.c"
+#include "dsp_chorus.c"       /* the Juno chorus: one instance per part, after the voices (drift_part_fx) */
 
 /* DRIFT_OS and DRIFT_POLY are the plan's measured choice (docs/plans/2026-10-17-drift-juno.md "Measured result", tests/drift_test.c (i)):
  * the brief's fallback ladder ran OS 2 -> 1 (not enough: 4parts_full 2299 against the 2137 bound with two voices), then POLY 2 -> 1
@@ -88,12 +89,18 @@ typedef struct {                 /* per voice (engine memory) */
     float fc;                    /* the cutoff the last block ended on, Hz (the tests read it) */
     uint8_t sub_state, init, pad[2];
 } drift_vc_t;
-#define DRIFT_MEM (sizeof(drift_vc_t) * DRIFT_POLY)
+#define DRIFT_MEM (sizeof(drift_vc_t) * DRIFT_POLY + sizeof(chorus_t))   /* the voices, then the part's chorus */
 /* (ENG_MEM_FITS("DRIFT", DRIFT_MEM) is in engines.c, once eng_wave.c has defined VOID_MEM that ENG_MEM_PART needs) */
 
 static drift_vc_t *drift_vc(const track_t *t, const voice_t *v)
 {
     return (drift_vc_t *)ENG_MEM((uint32_t)(t - trk) % NPART) + (uint32_t)(v - t->v) % DRIFT_POLY;
+}
+
+/* the part's chorus (Task 6.2): the state after the voices in the same region, zero (OFF) when the engine claims it */
+static chorus_t *drift_chorus(const track_t *t)
+{
+    return (chorus_t *)((drift_vc_t *)ENG_MEM((uint32_t)(t - trk) % NPART) + DRIFT_POLY);
 }
 
 /* 2^x for the pitch and the key tracking, once a block each, as e^(x ln 2): fastmath.h's fm_expf (rel 6e-7). Not fm_exp2f, though it is the
@@ -356,6 +363,21 @@ static void drift_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
     }
 }
 
+/* The chorus: the part's stereo stage (engine_t.part_fx, fx.c mix_part), on the sum of the voices. P_RSV_LN is its mode (CHOR: OFF I II I+II;
+ * the first of the reserved ids, params.c). A value outside 0..3, such as the 127 an older project stores there, is OFF. */
+static int drift_part_fx(track_t *t, int32_t *b, int32_t *z, uint32_t n)
+{
+    return chorus_part(drift_chorus(t), t->p[P_RSV_LN], b, z, n);
+}
+
+/* a preset just loaded on track t (ui.c apply_preset_to, after the defaults and the preset's own values; tests/hostsim.c): its chorus */
+_Static_assert(NELEM(DRIFT_PX) == NELEM(DRIFT_PRESETS), "DRIFT_PX: one per preset");
+static void drift_track_loaded(track_t *t)
+{
+    if (t->eng_req % NENGINES == ENGI_DRIFT && t->preset < NELEM(DRIFT_PX))
+        t->p[P_RSV_LN] = DRIFT_PX[t->preset];
+}
+
 static const engine_t ENG_DRIFT = {
     .name = "DRIFT", .page_title = {"OSC", "FLT"},
     .edit = {
@@ -368,4 +390,5 @@ static const engine_t ENG_DRIFT = {
     .knob = {P_E4, P_E5, P_ED_FLT, P_E6}, .poly = DRIFT_POLY, .keep = 0,
     .note_on = drift_note_on, .render = drift_render,
     .mem = DRIFT_MEM,
+    .part_fx = drift_part_fx,
 };

@@ -416,11 +416,13 @@ static int layer_locked(void);
 static uint32_t layer_leds(uint32_t *br);
 static uint32_t layer_btn(void);
 
-/* FLT ENV: a WAVE track's (its filter envelope, eng_wave.c); FILTER: an OB-Z or WAVE track's */
+/* FLT ENV: a WAVE track's (its filter envelope, eng_wave.c); FILTER: an OB-Z or WAVE track's; JUNO: a DRIFT track's */
 static int page_visible(uint32_t i)
 {
     if (PAGES[i].id[0] == P_FM1_ATK)                  /* FLT ENV: WAVE's filter envelope (its only page of those ids) */
         return TSEL->eng_req % NENGINES == ENGI_WAVE;
+    if (PAGES[i].id[0] == P_RSV_LN)                   /* JUNO (Task 6.2): DRIFT's chorus */
+        return TSEL->eng_req % NENGINES == ENGI_DRIFT;
     if (PAGES[i].id[0] == P_FTYPE)                    /* FILTER (1.5, #104): OB-Z's, WAVE's */
         return TSEL->eng_req % NENGINES == ENGI_OBX || TSEL->eng_req % NENGINES == ENGI_WAVE;
     return 1;
@@ -1172,6 +1174,7 @@ static void apply_preset_to(track_t *t, uint32_t pi)
             t->p[P_DIST + i] = (int16_t)(pr->fx[i] ? pr->fx[i] - 1 : FX_DEF[i]);
     }
     void_track_loaded(t);                             /* WAVE: its filter TYPE and LFO routing */
+    drift_track_loaded(t);                            /* DRIFT: its chorus */
     load_end(t);
 }
 

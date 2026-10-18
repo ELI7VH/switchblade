@@ -164,6 +164,7 @@ enum { J_PRESET, J_MODE, J_SENDS, J_SONG, J_CPU, J_CHECK, J_SLICER };
 typedef struct {
     char name[64];
     uint8_t kind, e, pi, arg, cpu_notes;
+    uint8_t chor;                              /* J_CPU: 0 = the DRIFT presets as they load; m + 1 = CHOR forced to m (Task 6.2) */
     const uint8_t (*parts)[3];                 /* J_CPU mixes */
     int (*check)(char *msg, uint32_t n);       /* J_CHECK */
     res_t r;
@@ -300,6 +301,8 @@ static void job_cpu(const job_t *j)
     host_tracks_init();
     for (p = 0; p < NPART; p++) {
         host_preset(&trk[p], parts[p][0], parts[p][1]);
+        if (j->chor && parts[p][0] == ENGI_DRIFT)       /* the Juno chorus forced: OFF for the cpu/DRIFT/* lines (the OFF path's cost, as before it) */
+            trk[p].p[P_RSV_LN] = (int16_t)(j->chor - 1u);
         trk[p].p[P_VOICE] = V_POLY;
         trk[p].p[P_SUS] = 127;
         trk[p].p[P_AMODE] = 0;
@@ -931,7 +934,7 @@ int main(int argc, char **argv)
     static const uint8_t SEND_E[1][2] = {{ENGI_OBX, 3}};
     static uint8_t cpu_parts[MAXJ][NPART][3];
     static kv_t gold[MAXJ], cpu[MAXJ];
-    uint32_t ng, nc, e, pi, i, g0, g1, c0, c1, k0, ncpu = 0;
+    uint32_t ng, nc, e, pi, i, g0, g1, c0, c1, k0, cm, ncpu = 0;
     uint32_t g_changed = 0, g_new = 0, g_gone = 0, h_fail = 0, c_fail = 0, c_warn = 0, k_fail = 0, crash = 0;
     double heavy[NENGINES] = {0}, heavy_ns[NENGINES] = {0}, idle_now, idle_base;
     uint32_t heavy_p[NENGINES] = {0};
@@ -1012,7 +1015,22 @@ int main(int argc, char **argv)
             j->parts = (const uint8_t (*)[3])cpu_parts[ncpu++];
             j->e = (uint8_t)e;
             j->pi = (uint8_t)pi;
+            j->chor = e == ENGI_DRIFT ? 1u : 0u;        /* (CHOR OFF: DRIFT's lines are the OFF path's, unchanged by the chorus) */
         }
+    for (cm = 1; cm <= 3u; cm++) {   /* DRIFT KEYS with the Juno chorus on (Task 6.2): the chorus' cost per part is these less cpu/DRIFT/22_DRIFT_KEYS */
+        static const char *const CN[4] = {"", "I", "II", "I+II"};
+        job_t *j;
+        snprintf(name, sizeof name, "cpu/DRIFT_CHOR/%s_22_DRIFT_KEYS", CN[cm]);
+        j = add(J_CPU, name);
+        memset(cpu_parts[ncpu], 0, sizeof cpu_parts[ncpu]);
+        cpu_parts[ncpu][0][0] = ENGI_DRIFT;
+        cpu_parts[ncpu][0][1] = 22;
+        cpu_parts[ncpu][0][2] = 8;
+        j->parts = (const uint8_t (*)[3])cpu_parts[ncpu++];
+        j->e = ENGI_DRIFT;
+        j->pi = 22;
+        j->chor = (uint8_t)(cm + 1u);
+    }
     {   /* mixes: idle (subtracted from the presets' counts), the four machines a light (3 + 3 + 2 + 1 notes) and a full
          * load (WAVE 8 + OB-Z 8 + DRIFT 4 + ACID 1 asked for: the budget keeps 8) */
         job_t *j = add(J_CPU, "cpu/mix/idle");

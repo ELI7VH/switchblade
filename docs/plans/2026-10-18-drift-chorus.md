@@ -105,3 +105,14 @@ OFF path unchanged.
 1. This plan (commit). 2. Tests + reference, RED (commit). 3. `dsp_chorus.c`, the hook, `drift_part_fx` -> GREEN.
 4. Param + page + help + `param_fit`, presets + generator + `drift_track_loaded`. 5. Goldens (only DRIFT presets with CHOR != 0 and the
 mixes / union sequences containing them), `cpu/` lines, docs (MIDI.md, HANDOVER). 6. `./build.sh` (no soft-double), full suite.
+
+## 9. Measured result (filled in after the build)
+
+- Cost: `chorus_part` alone 177 (I), 177 (II), 182 (I+II) instructions per sample per part (tests/chorus_test.c, -O2, regress.c's units); in the
+  mix (`cpu/DRIFT_CHOR/*`, DRIFT KEYS, over the OFF line 728): +199 / +202 / +195. The investigation's prototype measured 176 / 214: the 8-sample ramps make
+  the sine mode as cheap as the triangle. The OFF path is the old code (mix_part: one NULL test per part).
+- Memory: `chorus_t` 1,124 B in the part's engine memory (ring 1,024 B); `ENG_MEM_PART` 800 -> 1,312 B (+2,048 B of pool for the four parts); `.data+.bss`
+  +128 B (`chor_z[CTL]`). Image 369,980 B; RAM 43,508 B of 73,728; pool 277,672 B of 368,640.
+- Donor: rate and sweep inside 0.1 % of the constants, centre within 0.02 samples, sidebands within 0.1 dB, waveform error -63 .. -100 dB in 50 .. 100 ms,
+  the long-term spectrum of noise within 0.01 dB. After 100 ms the waveforms part slowly: the donor's float LFO phase runs 0.1 % off its constant (0.5146 Hz
+  for mode I), where the port's integer phase is exact. See the report.

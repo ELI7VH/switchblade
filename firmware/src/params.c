@@ -51,6 +51,7 @@ static const char *const N_CLOCK[] = {"INT", "USB", "TRS"};
 static const char *const N_MIDI_INPUT[] = {"USB", "TRS"};
 /* MIDI IN (seq.c midi_base): 1..4 -> parts, 5..16 ignored / all -> selected / (1.2, append-only) 5..8, 9..12, 13..16 -> parts
  * / (1.5.5, #202) TRACK: each track its own channel (song.mch, MENU > MIDI > T1..T4 CHANNEL) */
+static const char *const N_CHOR[] = {"OFF", "I", "II", "I+II"};   /* P_RSV_LN, DRIFT's Juno chorus: the Juno-106's modes (dsp_chorus.c) */
 static const char *const N_MOUT[] = {"INT", "EXT", "BOTH"};   /* P_MOUT (MOUT_*) */
 static const char *const N_ROUTE[] = {"CH1-4", "SEL", "CH5-8", "CH9-12", "CH13-16", "TRACK"};
 static const char *const N_NOTE[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
@@ -144,9 +145,11 @@ static const param_desc_t TP[P_COUNT] = {
     [P_CHRD] = PE("CHRD", N_CHRD, 0),
     [P_VOIC] = PE("VOIC", N_VOIC, 0),
 /* reserved: the retired DRUM engine's lane levels (ids kept until the storage format of Task 1.2; nothing reads
- * them, on no page) */
+ * them, on no page). The first of them is DRIFT's CHORUS mode since Task 6.2 (CHOR: OFF I II I+II, eng_drift.c drift_part_fx; the JUNO page);
+ * every project and user preset saved before it holds the lane's old default 127 there (param_fit) */
 #define LANE(k) [P_RSV_LN + (k)] = PD("-", F_PCT, 0, 127, 127)
-    LANE(0), LANE(1), LANE(2), LANE(3), LANE(4), LANE(5), LANE(6), LANE(7),
+    [P_RSV_LN] = PE("CHOR", N_CHOR, 0),
+    LANE(1), LANE(2), LANE(3), LANE(4), LANE(5), LANE(6), LANE(7),
 #undef LANE
     [P_LSYNC] = PE("SYNC", N_LSYNC, 0),
     [P_LTRIG] = PE("TRIG", N_LTRIG, 0),
@@ -243,7 +246,12 @@ static const param_desc_t *param_desc_of(uint32_t e, uint32_t id)
 }
 
 /* a stored value as the parameter takes it (projects, user presets, motion): inside d's range */
-static int32_t param_fit(const param_desc_t *d, int32_t v) { return clamp(v, d->min, d->max); }
+static int32_t param_fit(const param_desc_t *d, int32_t v)
+{
+    if (d == &TP[P_RSV_LN] && (v < d->min || v > d->max))
+        return d->def;          /* CHOR: the 127 every project and user preset saved before it holds in that reserved id means OFF, not "I+II" */
+    return clamp(v, d->min, d->max);
+}
 
 /* #48: the note divisions in the order of their length, longest first (triplets between their neighbours), on the
  * knobs and the gauges; the stored values (N_DIV, N_SLDIV indices: projects, presets, the editor protocol) stay.
@@ -430,6 +438,7 @@ static const page_t PAGES[] = {
     {"VOICE", FAM_EDIT, SC_TRACK, GR_NONE, {P_VOICE, P_GLIDE, P_GLMODE, P_PRIO}},
     {"VOICE 2", FAM_EDIT, SC_TRACK, GR_NONE, {P_ALLOC, P_DETUNE, P_PAN, P_MUTE}},
     {"VOICE 3", FAM_EDIT, SC_TRACK, GR_NONE, {P_SPRD, 0xFF, 0xFF, 0xFF}},   /* #148: SPREAD */
+    {"JUNO", FAM_EDIT, SC_TRACK, GR_NONE, {P_RSV_LN, 0xFF, 0xFF, 0xFF}},    /* DRIFT only (ui.c page_visible): its chorus, OFF I II I+II */
     /* 1.2 (Discussion #153): a family's pages go round in this order, a tap of its button each (ui.c open_family) */
     {"SONG", FAM_GLO, SC_GLOBAL, GR_SONG, {0xFF, 0xFF, 0xFF, 0xFF}},        /* GLO's only page (1.2; up to 1.1.5 SEQ's) */
     /* SAVE's taps (1.5, #173): USER (SAVE from another page: the quick save, SAVE OCT+ OCT+), PRESETS (the engines and

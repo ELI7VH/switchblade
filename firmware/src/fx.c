@@ -782,6 +782,51 @@ static __attribute__((noinline)) void track_insert(track_t *t, int32_t *b, uint3
 static void events_block(uint32_t n);                    /* seq.c */
 static int32_t send_c[CTL], send_d[CTL], send_r[CTL], wet[CTL], mix_l[CTL], mix_r[CTL];
 
+/* The part's own stereo stage (engine_t.part_fx: DRIFT's Juno chorus, Task 6.2). part_fx() runs it on the part's block b (after DIST, INSERT, the
+ * SLICER and the mute: the last thing on the part) and returns 1 when it made a pair: b is then the mid (L + R) / 2 and chor_z the side (L - R) / 2.
+ * mix_stereo is mix_part's level / pan / sends loop for such a part, with PAN and SPREAD:
+ *   PAN balances the pair as a stereo source: L = (x + w) gl, R = (x - w) gr (x the level-scaled mid, w the side, gl / gr PAN's law),
+ *     PAN centre being the Juno's two jacks, L the dry plus line 0, R the dry plus line 1;
+ *   SPREAD (d, the voices' left - right of mix_spread, 0 = none): the voices keep their law (y gld, y grd), the chorus' side rides on the
+ *     mid's gains (glm, grm): SPREAD places the voices, the chorus widens the sum;
+ *   the sends (CHO / DLY / REV) and perf_throw take the mid, mono, as they take b everywhere; t->peak the louder channel.
+ * |x + w| and |x - w| are the level-scaled channels, each held by the stage to 6 full scales (x <= 466,224 at LEVEL 127): x * g stays inside int32
+ * (task-7.2a-review.md). Without a part_fx (OB-Z, WAVE, ACID) none of this runs and the loops below are the ones there always were. */
+static int32_t chor_z[CTL];
+static int part_fx(track_t *t, int32_t *b, uint32_t n)
+{
+    const engine_t *e = ENGINES[eng_idx(t->engine)];
+    return e->part_fx ? e->part_fx(t, b, chor_z, n) : 0;
+}
+static __attribute__((noinline)) void mix_stereo(track_t *t, const int32_t *b, const int32_t *d, const int32_t *z, uint32_t n)
+{
+    uint32_t i;
+    int32_t lvl = LEVEL_Q12[t->p[P_LEVEL] & 127], pan = t->p[P_PAN], s = d ? (t->p[P_SPRD] + 1) >> 1 : 0;
+    int32_t pa = clamp(pan - s, -64, 63), pb = clamp(pan + s, -64, 63);
+    int32_t gla = 4096 - (pa > 0 ? pa * 64 : 0), gra = 4096 + (pa < 0 ? pa * 64 : 0);
+    int32_t glb = 4096 - (pb > 0 ? pb * 64 : 0), grb = 4096 + (pb < 0 ? pb * 64 : 0);
+    int32_t glm = (gla + glb) >> 1, grm = (gra + grb) >> 1, gld = (gla - glb) >> 1, grd = (gra - grb) >> 1;
+    int32_t c = t->p[P_CHOR] * 258, dl = t->p[P_DLY] * 258, r = t->p[P_REV] * 258, pk = t->peak;
+    int32_t xmax = c > dl ? c : dl;
+    xmax = 0x7FFFFFFF / ((xmax > r ? xmax : r) | 1);
+    for (i = 0; i < n; i++) {
+        int32_t x = ((b[i] >> 2) * lvl) >> 10, w = ((z[i] >> 2) * lvl) >> 10, y = d ? ((d[i] >> 2) * lvl) >> 10 : 0;
+        int32_t xl = x + w, xr = x - w, a = (xl < 0 ? -xl : xl) > (xr < 0 ? -xr : xr) ? (xl < 0 ? -xl : xl) : (xr < 0 ? -xr : xr);
+        int32_t xs = clamp(x, -xmax, xmax);
+        if (a > pk)
+            pk = a;
+        if (c)
+            send_c[i] += mulq15(xs, c);
+        if (dl)
+            send_d[i] += mulq15(xs, dl);
+        if (r)
+            send_r[i] += mulq15(xs, r);
+        mix_l[i] += ((xl * glm) >> 12) + ((y * gld) >> 12);
+        mix_r[i] += ((xr * grm) >> 12) + ((y * grd) >> 12);
+    }
+    t->peak = pk;
+}
+
 /* SPREAD (#148): a POLY or UNISON part whose SPRD is above 0. Its voices start left and right of PAN in turn (voice.c
  * voice_start; UNISON's detuned voices alternate), at PAN -/+ SPRD / 2 (SPRD 127: hard left and right), with the pan
  * law PAN has (the far side down, the near one as it is). track_render gives every voice (b, as always) and the left
@@ -811,6 +856,10 @@ static __attribute__((noinline)) void mix_spread(track_t *t, int32_t *b, uint32_
     slicer_track_sd(t, b, d, n);
     if ((pf.mute >> (t - trk)) & 1u)
         perf_mute_sd((uint32_t)(t - trk), b, d, n);
+    if (part_fx(t, b, n)) {                             /* the part's stereo stage (DRIFT's chorus): its own level / pan loop */
+        mix_stereo(t, b, d, chor_z, n);
+        return;
+    }
     for (i = 0; i < n; i++) {
         int32_t x = ((b[i] >> 2) * lvl) >> 10, a = x < 0 ? -x : x, y = ((d[i] >> 2) * lvl) >> 10;
         int32_t xs = clamp(x, -xmax, xmax);
@@ -834,6 +883,7 @@ static void mix_part(track_t *t, uint32_t n)
 {
     int32_t *b = part_buf;
     uint32_t i;
+    int cz = 0;
     mod_begin(t);                                       /* the matrix's per-block values into t->p (mod.c) */
     spread_on = t->p[P_SPRD] > 0 && (trk_vmode(t) == V_POLY || trk_vmode(t) == V_UNISON);   /* (SPREAD, mix_spread) */
     if (track_render(t, b, n))
@@ -856,8 +906,10 @@ static void mix_part(track_t *t, uint32_t n)
         slicer_track(t, b, n);                          /* slicer.c: before the level, pan and sends */
         if ((pf.mute >> (t - trk)) & 1u)
             perf_mute((uint32_t)(t - trk), b, n);       /* perform.c: a black key in the FX layer */
+        if ((cz = part_fx(t, b, n)))                    /* the part's stereo stage (DRIFT's chorus): its own level / pan loop */
+            mix_stereo(t, b, 0, chor_z, n);
     }
-    if (!spread_on) {                                   /* (the mix's values read after the calls: none is held over
+    if (!spread_on && !cz) {                                   /* (the mix's values read after the calls: none is held over
                                                          * them, no spill in the loop: the ISR's cost as before 1.5) */
         int32_t lvl = LEVEL_Q12[t->p[P_LEVEL] & 127], pan = t->p[P_PAN];
         int32_t gl = 4096 - (pan > 0 ? pan * 64 : 0), gr = 4096 + (pan < 0 ? pan * 64 : 0);
