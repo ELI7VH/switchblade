@@ -23,6 +23,19 @@
  * 8. demos (DEMO_DIR): each preset playing a phrase, a POS sweep per table.
  * 9. against the plugin: eng_void.c's filter and the plugin's own Filter.cpp (build/void_ref, tools/void_ref.cpp:
  *    skipped without it) on the same saw: the level, and the harmonics within 50 dB of the loudest. */
+/* Task 4.5: the engine's table reads and its slow path are instrumented from here (eng_wave.c VOID_AT / VOID_FORCE_SLOW) */
+static unsigned long void_oob;                         /* table reads outside their table */
+static int void_force_slow;
+static inline unsigned long void_chk(long i, unsigned long n)
+{
+    if (i < 0 || (unsigned long)i >= n) {
+        void_oob++;
+        return i < 0 ? 0ul : n - 1u;                   /* (the read itself is kept inside, so the test does not crash) */
+    }
+    return (unsigned long)i;
+}
+#define VOID_CHK(i, n) void_chk((long)(i), (n))
+#define VOID_FORCE_SLOW void_force_slow
 #define main hostsim_main
 #include "hostsim.c"
 #undef main
@@ -124,7 +137,7 @@ static track_t *plain(uint32_t tb1, uint32_t ft)
     t->p[P_VOICE] = V_POLY;
     t->p[P_E0] = (int16_t)tb1;
     t->p[P_E1] = 0;
-    t->p[P_E2] = 0;
+    t->p[P_E2] = 64;                                   /* (WARP off since Task 4.5; TBL2 before: unread) */
     t->p[P_E3] = 0;
     t->p[P_E4] = 127;
     t->p[P_E5] = 0;
@@ -272,6 +285,106 @@ static void test_one_osc(void)
     snprintf(msg, sizeof msg, "one oscillator: TBL2, MIX and OSC2 at any value change no sample of any preset (%u of %u differ)",
              bad_n, (unsigned)ENGINES[ENGI_WAVE]->npresets);
     check(msg, bad_n == 0u);
+}
+
+/* ------------------------------------------------------------------ 4.5 --- */
+/* The render before Task 4.5, as hashes. One type's scenarios: 3 tables x CUT {0, 1, 64, 127} x RES {0, 64, 127} x DRV {0, 100}, each
+ * with the cutoff held and again swept (a triangle over the blocks, through the closing region), a 4-note chord, the first two released
+ * part-way: 144 renders of 64 blocks, hashed together. The WAVE_RENDER_HASH rows were recorded from the tree at 1a5b3df/e1acdb7 (before
+ * Task 4.5). The LP24 ladder is untouched (the user kept it), so every type that existed is bit for bit as before, and WARP at 64 (off) keeps it so. */
+static const uint64_t SCEN_HASH[6] = {0x89c9d66272840c8aull, 0x723981c818e6fee8ull, 0xb82f2a46533caa75ull, 0xd106dfad484512ccull,
+                                      0x1695f2cbd027b44dull, 0x4f6e5c2300649526ull};   /* LP24 BP HP LP12 HP24 NOTCH */
+static uint64_t scen_hash(uint32_t ft)
+{
+    static const uint8_t TB[3] = {1, 2, 3}, N[4] = {36, 43, 60, 84}, CUT[4] = {0, 1, 64, 127}, RES[3] = {0, 64, 127};
+    uint64_t h = 1469598103934665603ull;
+    uint32_t a, b, c, d, e, i, k;
+    for (a = 0; a < 3u; a++)
+        for (b = 0; b < 4u; b++)
+            for (c = 0; c < 3u; c++)
+                for (d = 0; d < 2u; d++)
+                    for (e = 0; e < 2u; e++) {
+                        track_t *t;
+                        memset(eng_mem, 0, sizeof eng_mem);
+                        memset(eng_mem_owner, 0, sizeof eng_mem_owner);
+                        t = plain(TB[a], ft);
+                        t->p[P_E1] = 40;
+                        t->p[P_E4] = CUT[b];
+                        t->p[P_E5] = RES[c];
+                        t->p[P_E7] = d ? 100 : 0;
+                        for (i = 0; i < 4u; i++)
+                            trk_note_on(t, N[i], 100);
+                        nrec = 0;
+                        for (k = 0; k < 64u; k++) {
+                            if (e)
+                                t->p[P_E4] = (int16_t)(k < 32u ? 127u - k * 4u : (k - 32u) * 4u);
+                            if (k == 40u) {
+                                trk_note_off(t, N[0]);
+                                trk_note_off(t, N[1]);
+                            }
+                            blocks(1);
+                        }
+                        for (i = 0; i < nrec; i++)
+                            h = (h ^ (uint32_t)rec[i]) * 1099511628211ull;
+                    }
+    return h;
+}
+
+static void test_scen(void)
+{
+    uint32_t ft, bad_n = 0, forced = 0;
+    char msg[200];
+    for (ft = 0; ft < 6u; ft++) {
+        uint64_t h = scen_hash(ft);
+        if (h != SCEN_HASH[ft]) {
+            printf("void: type %u renders %016llx, was %016llx\n", ft, (unsigned long long)h, (unsigned long long)SCEN_HASH[ft]);
+            bad_n++;
+        }
+    }
+    snprintf(msg, sizeof msg, "bit for bit: the six filter types x 144 renders (held and swept cutoff, closing, drain) are as before Task 4.5 (%u differ)", bad_n);
+    check(msg, bad_n == 0u);
+    /* the slow loop for every block (VOID_FORCE_SLOW) must give what the dispatch gave: a fast loop used while a note fades in or the
+     * cutoff closes (or drains) would differ here. The scenarios reach CUT 0 (shut), CUT 1 at RES 127 (close 1170: the drain) and the sweeps */
+    void_force_slow = 1;
+    for (ft = 0; ft < 6u; ft++)
+        forced += scen_hash(ft) != SCEN_HASH[ft];
+    void_force_slow = 0;
+    snprintf(msg, sizeof msg, "slow path: forcing it for every block changes no sample of the same scenarios (%u of 6 types differ)", forced);
+    check(msg, forced == 0u);
+}
+
+/* Task 4.5 (the 4.4 review's Minor 3): switching the filter TYPE while notes sound fed the SVF's state (|f| up to 150000) into the
+ * ladder's void_tanh1, which indexes VOID_TANH1[257] by (x + 32768) >> 8: a read past the table. Every pair of types, in a row, one
+ * switch a block; RES 0 / 127, DRV 0 / 127, MIDI 24..99. VOID_AT counts any read of a signal-indexed table outside it. */
+static void test_oob(void)
+{
+    uint32_t nft = (uint32_t)TP[P_FTYPE].max + 1u, a, b, n, r, d, k, runs = 0;
+    int32_t pk = 0;
+    char msg[200];
+    void_oob = 0;
+    for (r = 0; r < 2u; r++)
+        for (d = 0; d < 2u; d++)
+            for (n = 24; n <= 99u; n++) {
+                track_t *t = plain(1, 0);
+                t->p[P_E5] = r ? 127 : 0;
+                t->p[P_E7] = d ? 127 : 0;
+                t->p[P_E4] = 90;
+                trk_note_on(t, (uint8_t)n, 127);
+                trk_note_on(t, (uint8_t)(n + 7u), 127);
+                nrec = 0;
+                for (a = 0; a < nft; a++)
+                    for (b = 0; b < nft; b++)
+                        for (k = 0; k < 2u; k++) {
+                            t->p[P_FTYPE] = (int16_t)(k ? b : a);
+                            blocks(1);
+                        }
+                for (k = 0; k < nrec; k++)
+                    pk = abs(rec[k]) > pk ? abs(rec[k]) : pk;
+                runs++;
+            }
+    snprintf(msg, sizeof msg, "TYPE switched every block over all %u types x RES 0/127 x DRV 0/127 x MIDI 24..99 (%u runs): %lu table reads out of range",
+             nft, runs, void_oob);
+    check(msg, void_oob == 0ul && pk > 0);
 }
 
 /* ------------------------------------------------------------------ 3 --- */
@@ -800,6 +913,8 @@ int main(int argc, char **argv)
     test_px();
     test_pitch();
     test_one_osc();
+    test_scen();
+    test_oob();
     test_bandlimit();
     test_bounded();
     test_dc();

@@ -40,9 +40,21 @@
  * void_test.c) unlike the firmware's */
 #define VOID_INLINE static inline __attribute((always_inline))
 
+/* Every table read whose index comes from a signal goes through VOID_AT; a host test (tests/void_test.c) defines VOID_CHK to count the
+ * reads that fall outside the table. In the firmware it is the plain read. */
+#ifndef VOID_CHK
+#define VOID_CHK(i, n) (i)
+#endif
+#define VOID_AT(tab, i) ((tab)[VOID_CHK((i), NELEM(tab))])
+/* a test may force the one-copy slow loop for every block, to prove the fast loops bit for bit the same (tests/void_test.c) */
+#ifndef VOID_FORCE_SLOW
+#define VOID_FORCE_SLOW 0
+#endif
+
 static const char *const N_VOID_TBL[VOID_NTBL] = {"SINE", "SAW", "SQUARE", "SPECT", "FORMA", "FORME", "BASS1",
                                                   "BASS2", "NOISE"};
 enum { VF_LP24, VF_BP, VF_HP, VF_LP12, VF_HP24, VF_NOTCH };   /* P_FTYPE (params.c N_FTYPE) */
+_Static_assert(VOID_N0LOG2_MIN >= VOID_NLEV, "void_osc_at: the level search shifts by n0l - 2 - lv, lv < NLEV, so n0l - 2 >= NLEV - 1");
 #define VOID_SQUARE 2u
 #define VOID_WT_NORM ((int32_t)((32768LL * 32768 + VOID_WT_ONE / 2) / VOID_WT_ONE))   /* table -> Q15 */
 #define VOID_LIM_INC 1753014234u /* 18 kHz as a phase increment: the top harmonic of a level stays below */
@@ -86,7 +98,8 @@ static void_vc_t *void_vc(const track_t *t, const voice_t *v)
 VOID_INLINE int32_t void_tanh(int32_t x)
 {
     int32_t a = x < 0 ? -x : x, i = a >> 8, y;
-    y = i >= 512 ? VOID_TANH[512] : VOID_TANH[i] + (((VOID_TANH[i + 1] - VOID_TANH[i]) * (a & 255)) >> 8);
+    y = i >= 512 ? VOID_TANH[512]
+                 : VOID_AT(VOID_TANH, i) + (((VOID_AT(VOID_TANH, i + 1) - VOID_AT(VOID_TANH, i)) * (a & 255)) >> 8);
     return x < 0 ? -y : y;
 }
 
@@ -94,8 +107,8 @@ VOID_INLINE int32_t void_tanh(int32_t x)
 VOID_INLINE int32_t void_tanh1(int32_t x)
 {
     uint32_t u = (uint32_t)(x + 32768), i = u >> 8;
-    int32_t a = VOID_TANH1[i];
-    return a + (((VOID_TANH1[i + 1u] - a) * (int32_t)(u & 255u)) >> 8);
+    int32_t a = VOID_AT(VOID_TANH1, i);
+    return a + (((VOID_AT(VOID_TANH1, i + 1u) - a) * (int32_t)(u & 255u)) >> 8);
 }
 
 /* a * b / 32768 for |a| < 2^17 (signals up to 4.0), b <= 32767 */
@@ -369,7 +382,7 @@ VOID_INLINE int32_t void_clip(int32_t y)
             a = VOID_CLIP_MAX;
         o = (uint32_t)(a - VOID_CLIP_THR);
         k = o >> 8;
-        a = VOID_CLIP_THR + VOID_SOFT[k] + (((VOID_SOFT[k + 1u] - VOID_SOFT[k]) * (int32_t)(o & 255u)) >> 8);
+        a = VOID_CLIP_THR + VOID_AT(VOID_SOFT, k) + (((VOID_AT(VOID_SOFT, k + 1u) - VOID_AT(VOID_SOFT, k)) * (int32_t)(o & 255u)) >> 8);
         y = y < 0 ? -a : a;
     }
     return y;
@@ -441,6 +454,14 @@ VOID_INLINE void void_block(const void_blk_t *b, voice_t *v, void_vc_t *c, int32
     const uint32_t inc1 = b->inc1;
     uint32_t i, ph1 = v->ph[0];
     int32_t ramp = c->ramp, dcw = c->dcw, f[4] = {c->f[0], c->f[1], c->f[2], c->f[3]};
+    if (lad) {             /* the ladder's stages are tanh1 outputs mixed in, |f| <= 32767 while it runs. After a TYPE switch mid-note the state is an
+                            * SVF's (up to 150000) and void_tanh1 would index VOID_TANH1 past its end: bound it, once a block (a no-op for a ladder
+                            * that ran, so every render is as before) */
+        f[0] = clamp(f[0], -32767, 32767);
+        f[1] = clamp(f[1], -32767, 32767);
+        f[2] = clamp(f[2], -32767, 32767);
+        f[3] = clamp(f[3], -32767, 32767);
+    }
     int32_t amp = m->amp0 << CTL_LOG2, damp = m->amp1 - m->amp0;   /* voice_amp's ramp, stepped */
     for (i = 0; i < n; i++) {
         int32_t s = void_osc(&o1, ph1) * c1, y;
@@ -519,7 +540,7 @@ static void void_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
     }
     void_flt_set(&b.fl, (uint32_t)p[P_FTYPE] % 6u, clamp((int32_t)VOID_CUT_Q8[cutk] + mc, 0, 127 << 8),
                  clamp(p[P_E5], 0, 127), clamp(p[P_E7], 0, 127), !cutk && mc <= 0);
-    if (c->ramp < 32767 || b.fl.close < 32767) {
+    if (VOID_FORCE_SLOW || c->ramp < 32767 || b.fl.close < 32767) {
         void_block_slow(&b, v, c, out, n, m);
     } else if (b.fl.ft == VF_LP24) {
         if (b.fl.drv)
