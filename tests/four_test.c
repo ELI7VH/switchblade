@@ -38,6 +38,25 @@ static void test_presets(void)
         }
     }
     CHECK(NELEM(WAVE_PX) == 32u, "WAVE_PX %u", (unsigned)NELEM(WAVE_PX));
+    {   /* DRIFT's chorus (Task 6.2): DRIFT_PX[k] is preset k's CHOR (0 OFF, 1 I, 2 II, 3 I+II); a load sets it, any other engine's load resets it */
+        uint32_t nb = 0, nk = 0, non = 0;
+        CHECK(NELEM(DRIFT_PX) == 32u, "DRIFT_PX %u", (unsigned)NELEM(DRIFT_PX));
+        for (k = 0; k < 32u && k < NELEM(DRIFT_PX); k++) {
+            uint32_t c = preset_cat(ENGI_DRIFT, k);
+            CHECK(DRIFT_PX[k] <= 3u, "DRIFT_PX[%u] = %u", (unsigned)k, (unsigned)DRIFT_PX[k]);
+            non += DRIFT_PX[k] != 0u;
+            nb += c == CAT_BASS && DRIFT_PX[k] == 0u;
+            nk += c == CAT_KEYS && (DRIFT_PX[k] == 1u || DRIFT_PX[k] == 2u);
+            host_tracks_init();
+            host_preset(&trk[0], ENGI_DRIFT, k);
+            CHECK(trk[0].p[P_RSV_LN] == DRIFT_PX[k], "DRIFT %s loads CHOR %d, wants %u", ENGINES[ENGI_DRIFT]->presets[k].name, trk[0].p[P_RSV_LN], (unsigned)DRIFT_PX[k]);
+            host_preset(&trk[0], ENGI_OBX, 0);
+            CHECK(trk[0].p[P_RSV_LN] == 0, "an OB-Z load leaves CHOR %d", trk[0].p[P_RSV_LN]);
+        }
+        CHECK(nb >= 9u, "basses mostly OFF: %u of 12", (unsigned)nb);
+        CHECK(nk == 10u, "every DRIFT keys preset has I or II: %u of 10", (unsigned)nk);
+        CHECK(non >= 14u && non <= 24u, "%u DRIFT presets with the chorus on", (unsigned)non);
+    }
     CHECK(NELEM(N_VOID_OSC2) == VOID_OSC2_N, "N_VOID_OSC2 has %u names for %u values", (unsigned)NELEM(N_VOID_OSC2),
           (unsigned)VOID_OSC2_N);
 }

@@ -111,6 +111,12 @@
 #                   corners, the donor's DCO (inharmonic energy < -50 dB, the spectrum and the waveform against the ideal, PW, the auto PWM), KTR, the two DC
 #                   blockers, the voice start (reset when finished, kept on a retrigger), and the cost: the DRIFT part inside its pin, the dearest legal
 #                   four-track mix measured and printed (macOS only, a loud SKIP elsewhere).
+# CHORUS (tests/chorus_test.c, tests/chorus_ref.cpp, tests/chorus_ref_cfg.h; Task 6.2): DRIFT's Juno chorus (dsp_chorus.c, the per-part stereo hook of fx.c; the
+#                   Ultramaster KR-106's KR106Chorus.h + BBDFilter.h, GPL-3.0). Per mode I / II / I+II: the LFO rate (+-5 %) and the delay sweep (+-10 %) against the
+#                   donor's and its constants, L / R in antiphase, the 1 kHz sidebands against the donor's, 15 renders against the donor's own kr106::Chorus (noise
+#                   off), block-size independence, the fades; the int part block (mid / side, the guard clamp, an out-of-range mode is OFF); through the mix: CHOR OFF
+#                   bit for bit as before, other engines ignore it, stereo, PAN, SPREAD, the worst case inside the mixer's integer limits; the parameter and its
+#                   legacy value; the cost per part (macOS only, a loud SKIP elsewhere).
 # WAVE (tests/void_tables_test.py, tests/void_test.c): the VOID WAVE plugin's voice (the WAVE engine, was VOID). Its wavetables against the plugin's
 #                   frames recomputed with numpy (every keyframe and level band-limited, the crossfade within its limit;
 #                   skipped without numpy); the engine: pitch, OSC2's steps, band-limited at C8, bounded and without DC at
@@ -341,6 +347,21 @@ if [ -f build/gen/felucca_tables.h ]; then
     $CC -O2 -w -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/drift_test" tests/drift_test.c -lm
     run "DRIFT: the filter against the donor's kr106::VCF (40 cases), the halfband, 24 dB/oct, DRV's THD, self-oscillation, DRFT, VAR, the MIX spectrum, the HPF (and its flat fallback), the corners, the donor's DCO (bandlimiting, spectrum, waveform, PW, PWM), KTR, the DC blockers, the voice start, the cost pin and the dearest legal mix" \
         "$OUT/drift_test" build/drift_ref
+    # CHORUS (Task 6.2): the donor's kr106::Chorus (tests/chorus_ref.cpp, KR106Chorus.h with its noise off) against dsp_chorus.c, the hook and the mix
+    mkdir -p build/chorus_ref
+    rm -f build/chorus_ref/*.f32
+    if [ -f "$KR/Source/DSP/KR106Chorus.h" ]; then
+        if ${CXX:-c++} -std=c++17 -O2 -ffp-contract=off -w -I"$KR/Source/DSP" -Itests -o "$OUT/chorus_ref" tests/chorus_ref.cpp; then
+            "$OUT/chorus_ref" build/chorus_ref >/dev/null || fail=1
+        else
+            echo "CHORUS: tests/chorus_ref.cpp does not build against the donor in $KR: FAIL"
+            fail=1
+        fi
+    fi
+    $CC -O2 -w -ffp-contract=off -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/chorus_test" tests/chorus_test.c -lm
+    run "CHORUS: the Juno chorus against the donor's kr106::Chorus (rate, sweep, antiphase, sidebands, 15 renders), the fades, the part block and its guard, OFF bit for bit, stereo / PAN / SPREAD, the headroom, the cost pin" \
+        "$OUT/chorus_test" build/chorus_ref
+    rm -f build/chorus_ref/*.f32
     $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/slicer_test" tests/slicer_test.c -lm
     mkdir -p build/slicer_demo
     run "SLICER: no clicks, timing, sync with the sequencer, STUT, cost, demos" "$OUT/slicer_test" build/slicer_demo

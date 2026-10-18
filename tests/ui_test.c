@@ -3186,6 +3186,7 @@ static int test_edit_cycle(void)
     static const char *const CYC_W[] = {"EDIT", "MACHINE 1", "MACHINE 2", "FILTER", "FLT ENV", "VOICE", "VOICE 2",
                                         "VOICE 3", "EDIT"};
     static const char *const CYC_P[] = {"EDIT", "MACHINE 1", "MACHINE 2", "VOICE", "VOICE 2", "VOICE 3", "EDIT"};   /* ACID, DRIFT */
+    static const char *const CYC_D[] = {"EDIT", "MACHINE 1", "MACHINE 2", "VOICE", "VOICE 2", "VOICE 3", "JUNO", "EDIT"};   /* DRIFT: + its chorus (Task 6.2) */
     int bad = 0, ok;
     uint32_t i;
     ui_power_on();
@@ -3203,7 +3204,7 @@ static int test_edit_cycle(void)
     set_engine_of(TSEL, ENGI_ACID);
     bad += check("EDIT cycle (ACID): EDIT MACHINE 1 MACHINE 2 VOICE VOICE 2 VOICE 3 EDIT (no FILTER)", engine_cycle(CYC_P, NELEM(CYC_P)));
     set_engine_of(TSEL, ENGI_DRIFT);
-    bad += check("EDIT cycle (DRIFT): EDIT MACHINE 1 MACHINE 2 VOICE VOICE 2 VOICE 3 EDIT (no FILTER)", engine_cycle(CYC_P, NELEM(CYC_P)));
+    bad += check("EDIT cycle (DRIFT): EDIT MACHINE 1 MACHINE 2 VOICE VOICE 2 VOICE 3 JUNO EDIT (no FILTER; JUNO, the chorus, is DRIFT's only)", engine_cycle(CYC_D, NELEM(CYC_D)));
     set_engine_of(TSEL, ENGI_WAVE);
     go_title("FLT ENV"); ui.fam_last[FAM_EDIT] = ui.page;
     set_engine_of(TSEL, 0); frame();

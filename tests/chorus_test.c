@@ -1,0 +1,558 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* chorus_test.c: DRIFT's Juno chorus (firmware/src/dsp_chorus.c, the per-part stereo hook in fx.c; Ultramaster KR-106 KR106Chorus.h + BBDFilter.h,
+ * GPL-3.0). Task 6.2.
+ *   cc -O2 -w -ffp-contract=off -Ibuild/gen -Ifirmware/src -Itests -o build/host/chorus_test tests/chorus_test.c -lm
+ *   build/host/chorus_test [build/chorus_ref]
+ * Through the DSP (chorus_block: float in, L / R out, the port's own gains), per mode I / II / I+II:
+ *   (a) the modulation rate within +-5 % of the donor's and of the constants (the delay track of an impulse train);
+ *   (b) the delay sweep range within +-10 % of the donor's and of 2 x depth x trim; (c) L and R in antiphase (corr < -0.99), different;
+ *   (d) a 1 kHz sine's sidebands at +-1 and +-2 LFO rates within 1.5 dB of the donor's, and present;
+ *   (e) the donor itself (tests/chorus_ref.cpp, noise off): the time-domain error of 15 renders (sines, a saw, noise, impulses);
+ *   (f) one block or 32 or 7 at a time: the same bits; OFF is not active and passes the input; a mode switch fades (no step).
+ * Through the int part block (chorus_part): L = mid + side equals the DSP's times CHORUS_TRIM, the guard clamp, an out-of-range mode is OFF.
+ * Through the mix (hostsim's mix_block, the real fx.c hook): OFF bit for bit as before (pinned hashes of today's output), other engines
+ * ignore the parameter, ON is stereo, PAN / SPREAD, the worst case inside the integer mixer's limits (task-7.2a-review: x <= 524,287 per
+ * track, the four-track sum < 2^21), the parameter's descriptor and its legacy value, the cost. */
+#include <stdint.h>
+#include <stdarg.h>
+#include <math.h>
+#include <stdio.h>
+#include <string.h>
+#include "dsp_chorus.c"
+#include "chorus_ref_cfg.h"
+#define main hostsim_main
+#include "hostsim.c"
+#undef main
+#ifdef __APPLE__
+#include <libproc.h>
+#include <sys/resource.h>
+#endif
+
+static int bad;
+static void check(int ok, const char *fmt, ...)
+{
+    va_list ap;
+    printf("chorus: %s ", ok ? "ok  " : "FAIL");
+    va_start(ap, fmt);
+    vprintf(fmt, ap);
+    va_end(ap);
+    printf("\n");
+    bad += !ok;
+}
+#define FSD 44100.0
+static const char *refdir = "build/chorus_ref";
+
+/* the donor's constants (KR106Chorus.h): LFO Hz, half-amplitude ms, the two lines' clock trims, the centre */
+static const double LFO_HZ[4] = {0, 0.514, 0.842, 7.85}, DEPTH_MS[4] = {0, 2.13, 1.71, 0.236}, CENTRE_MS = 3.30;
+
+/* ------------------------------------------------------------ the donor's files --- */
+static float *load_ref(int c, uint32_t n)            /* n frames of L, R; 0 when the file is not there (no donor built) */
+{
+    char path[600];
+    FILE *f;
+    float *x;
+    snprintf(path, sizeof path, "%s/%02d.f32", refdir, c);
+    f = fopen(path, "rb");
+    if (!f)
+        return 0;
+    x = malloc((size_t)n * 2u * sizeof(float));
+    if (!x || fread(x, sizeof(float), (size_t)n * 2u, f) != (size_t)n * 2u) {
+        free(x);
+        x = 0;
+    }
+    fclose(f);
+    return x;
+}
+/* the port on a case: float in, stereo out (32 samples a call, as the firmware's block) */
+static float *run_case(const chorus_ref_cfg_t *k, uint32_t blk)
+{
+    float *o = malloc((size_t)k->n * 2u * sizeof(float)), *in = malloc((size_t)k->n * sizeof(float)), *l = malloc((size_t)k->n * sizeof(float)),
+          *r = malloc((size_t)k->n * sizeof(float));
+    static chorus_t C;
+    uint32_t i, b;
+    memset(&C, 0, sizeof C);
+    for (i = 0; i < k->n; i++)
+        in[i] = chorus_ref_input(k, i);
+    for (b = 0; b < k->n; b += blk)
+        chorus_block(&C, k->mode, in + b, l + b, r + b, (k->n - b < blk ? k->n - b : blk));
+    for (i = 0; i < k->n; i++) {
+        o[2u * i] = l[i];
+        o[2u * i + 1u] = r[i];
+    }
+    free(in), free(l), free(r);
+    return o;
+}
+
+/* ------------------------------------------------------------ measurements --- */
+/* the delay of each impulse's wet pulse (samples, parabolic on |x|), one channel (stride 2) of a stereo float buffer */
+static uint32_t delay_track(const float *x, uint32_t n, double *d, double *t)
+{
+    uint32_t p, m = 0;
+    for (p = CK_IMP_START; p + 320u < n; p += CK_IMP_GAP) {
+        uint32_t j, jb = p + 20u;
+        double a, b, c, den;
+        for (j = p + 20u; j < p + 300u; j++)
+            if (fabsf(x[2u * j]) > fabsf(x[2u * jb]))
+                jb = j;
+        a = fabs((double)x[2u * (jb - 1u)]), b = fabs((double)x[2u * jb]), c = fabs((double)x[2u * (jb + 1u)]);
+        den = a - 2.0 * b + c;
+        d[m] = (double)(jb - p) + (den != 0.0 ? 0.5 * (a - c) / den : 0.0);
+        t[m++] = (double)p;
+    }
+    return m;
+}
+static uint32_t delay_track_r(const float *x, uint32_t n, double *d, double *t)   /* the right channel: x + 1 */
+{
+    return delay_track(x + 1, n, d, t);
+}
+/* rate (Hz) from the upward crossings of the mean, range (samples) over the track after the first 4 impulses */
+static void track_stats(const double *d, const double *t, uint32_t m, double *rate, double *range, double *mean_out)
+{
+    double mean = 0.0, lo = 1e9, hi = -1e9, first = -1.0, last = -1.0;
+    uint32_t i, nc = 0;
+    for (i = 4; i < m; i++) {
+        mean += d[i];
+        lo = d[i] < lo ? d[i] : lo;
+        hi = d[i] > hi ? d[i] : hi;
+    }
+    mean /= (double)(m - 4u);
+    for (i = 5; i < m; i++)
+        if (d[i - 1u] < mean && d[i] >= mean) {
+            double tc = t[i - 1u] + (t[i] - t[i - 1u]) * (mean - d[i - 1u]) / (d[i] - d[i - 1u]);
+            if (nc++ == 0)
+                first = tc;
+            last = tc;
+        }
+    *rate = nc >= 3u ? FSD * (double)(nc - 1u) / (last - first) : 0.0;
+    *range = hi - lo;
+    *mean_out = mean;
+}
+static double dft_db(const float *x, uint32_t n, double hz)   /* Hann-windowed single-frequency magnitude, dB (x stride 2: the left channel) */
+{
+    double re = 0.0, im = 0.0, w = 2.0 * 3.14159265358979323846 * hz / FSD;
+    uint32_t i;
+    for (i = 0; i < n; i++) {
+        double h = 0.5 - 0.5 * cos(2.0 * 3.14159265358979323846 * (double)i / (double)n);
+        re += (double)x[2u * i] * h * cos(w * (double)i);
+        im -= (double)x[2u * i] * h * sin(w * (double)i);
+    }
+    return 20.0 * log10(sqrt(re * re + im * im) + 1e-30);
+}
+
+/* ------------------------------------------------------------ (a)-(e) against the donor --- */
+#define ERR_TOL_DB (-50.0)         /* the time-domain error of the port against the donor, re the donor's rms: see the report */
+static void test_donor(void)
+{
+    int c, have = 1, mode;
+    static double dd[2][4096], tt[2][4096];
+    for (mode = 1; mode <= 3; mode++) {
+        const int ci = (mode - 1) * 5 + 4, cs = (mode - 1) * 5;
+        const chorus_ref_cfg_t *ki = &CHORUS_REF_CFG[ci], *ks = &CHORUS_REF_CFG[cs];
+        float *got = run_case(ki, 32), *ref = load_ref(ci, ki->n);
+        double rate_g, range_g, mean_g, rate_r = 0, range_r = 0, mean_r = 0, rate_g1, range_g1, mean_g1, cor = 0, sx = 0, sy = 0, nom_pp0;
+        uint32_t m = delay_track(got, ki->n, dd[0], tt[0]), m1 = delay_track_r(got, ki->n, dd[1], tt[1]), i;
+        track_stats(dd[0], tt[0], m, &rate_g, &range_g, &mean_g);
+        track_stats(dd[1], tt[1], m1, &rate_g1, &range_g1, &mean_g1);
+        nom_pp0 = 2.0 * DEPTH_MS[mode] * 0.985 * FSD / 1000.0;
+        check(fabs(rate_g / LFO_HZ[mode] - 1.0) < 0.05, "(a) mode %d: LFO %.4f Hz (L), %.4f Hz (R); the donor's constant %.3f Hz (+-5 %%)", mode, rate_g, rate_g1,
+              LFO_HZ[mode]);
+        check(fabs(range_g / nom_pp0 - 1.0) < 0.10, "(b) mode %d: delay sweep %.2f samples = %.3f ms (L); 2 x %.3f ms x 0.985 = %.3f ms (+-10 %%)", mode, range_g,
+              range_g * 1000.0 / FSD, DEPTH_MS[mode], nom_pp0 * 1000.0 / FSD);
+        for (i = 0; i < m && i < m1; i++) {         /* antiphase: the two lines' delays move opposite ways */
+            sx += (dd[0][i] - mean_g) * (dd[1][i] - mean_g1);
+            cor += (dd[0][i] - mean_g) * (dd[0][i] - mean_g);
+            sy += (dd[1][i] - mean_g1) * (dd[1][i] - mean_g1);
+        }
+        check(sx / sqrt(cor * sy + 1e-30) < -0.99, "(c) mode %d: the two delays in antiphase, correlation %.4f; centres %.2f / %.2f samples", mode,
+              sx / sqrt(cor * sy + 1e-30), mean_g, mean_g1);
+        if (ref) {
+            uint32_t mr = delay_track(ref, ki->n, dd[0], tt[0]);
+            track_stats(dd[0], tt[0], mr, &rate_r, &range_r, &mean_r);
+            check(fabs(rate_g / rate_r - 1.0) < 0.05 && fabs(range_g / range_r - 1.0) < 0.10 && fabs(mean_g - mean_r) < 1.5,
+                  "(a)(b) mode %d against the donor's own pulses: rate %.4f vs %.4f Hz (+-5 %%), sweep %.2f vs %.2f samples (+-10 %%), centre %.2f vs %.2f", mode,
+                  rate_g, rate_r, range_g, range_r, mean_g, mean_r);
+        } else {
+            have = 0;
+        }
+        free(got), free(ref);
+        /* (d) the sidebands of a 1 kHz sine, left channel */
+        {
+            const uint32_t n0 = 30000u, nn = 262144u;
+            float *g = run_case(ks, 32), *r = load_ref(cs, ks->n);
+            double fl = LFO_HZ[mode], car_g = dft_db(g + 2u * n0, nn, 1000.0), s1_g, s2_g, s1_r = 0, s2_r = 0;
+            s1_g = dft_db(g + 2u * n0, nn, 1000.0 + fl) - car_g;
+            s2_g = dft_db(g + 2u * n0, nn, 1000.0 + 2.0 * fl) - car_g;
+            check(s1_g > -35.0 && s1_g < 20.0, "(d) mode %d: a 1 kHz sine has sidebands at +%.3f Hz: %.1f dBc, at +%.3f Hz: %.1f dBc", mode, fl, s1_g, 2.0 * fl, s2_g);
+            if (r) {
+                double car_r = dft_db(r + 2u * n0, nn, 1000.0);
+                s1_r = dft_db(r + 2u * n0, nn, 1000.0 + fl) - car_r;
+                s2_r = dft_db(r + 2u * n0, nn, 1000.0 + 2.0 * fl) - car_r;
+                check(fabs(s1_g - s1_r) < 1.5 && (s2_r < -45.0 || fabs(s2_g - s2_r) < 1.5), "(d) mode %d against the donor: %.1f / %.1f dBc vs %.1f / %.1f dBc (1.5 dB)", mode,
+                      s1_g, s2_g, s1_r, s2_r);
+            }
+            free(g), free(r);
+        }
+    }
+    /* (e) the whole waveform, every case but the impulse trains' tails, from 250 ms */
+    for (c = 0; c < CHORUS_REF_NCFG; c++) {
+        const chorus_ref_cfg_t *k = &CHORUS_REF_CFG[c];
+        float *g, *r = load_ref(c, k->n);
+        double e[2] = {0, 0}, s[2] = {0, 0}, db[2];
+        uint32_t i, ch;
+        if (!r)
+            continue;
+        g = run_case(k, 32);
+        for (i = 11025u; i < k->n; i++)
+            for (ch = 0; ch < 2u; ch++) {
+                double dlt = (double)g[2u * i + ch] - (double)r[2u * i + ch];
+                e[ch] += dlt * dlt;
+                s[ch] += (double)r[2u * i + ch] * (double)r[2u * i + ch];
+            }
+        for (ch = 0; ch < 2u; ch++)
+            db[ch] = 10.0 * log10(e[ch] / (s[ch] + 1e-30) + 1e-30);
+        check(db[0] < ERR_TOL_DB && db[1] < ERR_TOL_DB, "(e) case %02d (mode %d, kind %d, f0 %.0f): error vs the donor %.1f dB (L) %.1f dB (R) re the donor's rms (limit %.0f dB)", c, k->mode,
+              k->kind, k->f0, db[0], db[1], ERR_TOL_DB);
+        free(g), free(r);
+    }
+    if (!have)
+        printf("chorus: NOT CHECKED against the donor: %s/NN.f32 are not there (tests/chorus_ref.cpp needs ../ultramaster_kr106-main or KR106_DIR)\n", refdir);
+}
+
+/* ------------------------------------------------------------ (f) the DSP's own behaviour --- */
+static void test_dsp(void)
+{
+    enum { N = 44100 };
+    static float in[N], l1[N], r1[N], l2[N], r2[N];
+    static chorus_t C;
+    uint32_t i, b, step;
+    int ok = 1, act;
+    float worst = 0.0f;
+    for (i = 0; i < N; i++)
+        in[i] = 0.3f * (float)sin(2.0 * 3.14159265358979323846 * 200.0 * (double)i / FSD);
+    /* block size does not matter: 1 x N, 32, 7 */
+    memset(&C, 0, sizeof C);
+    chorus_block(&C, 3, in, l1, r1, N);
+    memset(&C, 0, sizeof C);
+    for (b = 0; b < N; b += 32u)
+        chorus_block(&C, 3, in + b, l2 + b, r2 + b, N - b < 32u ? N - b : 32u);
+    ok = !memcmp(l1, l2, sizeof l1) && !memcmp(r1, r2, sizeof r1);
+    memset(&C, 0, sizeof C);
+    for (b = 0; b < N; b += 7u)
+        chorus_block(&C, 3, in + b, l2 + b, r2 + b, N - b < 7u ? N - b : 7u);
+    ok &= !memcmp(l1, l2, sizeof l1) && !memcmp(r1, r2, sizeof r1);
+    check(ok, "(f) a block of 44100, of 32 and of 7 samples give the same bits");
+    check(memcmp(l1, r1, sizeof l1) != 0, "(c) L and R differ (mode I+II)");
+    /* OFF is inactive and passes the input; the first mode starts a fade, a switch fades out and in, OFF fades out and then is inactive */
+    memset(&C, 0, sizeof C);
+    act = chorus_block(&C, 0, in, l1, r1, 64);
+    check(!act && !memcmp(l1, in, 64 * sizeof(float)) && !memcmp(r1, in, 64 * sizeof(float)), "(f) OFF from the start: inactive, the input untouched");
+    {   /* the switch sequence: 0 -> I (5000) -> II (15000) -> OFF (25000), steps of 32 */
+        static float lo[N], ro[N];
+        int a1 = 0, a_end = 1;
+        memset(&C, 0, sizeof C);
+        for (b = 0; b < N; b += 32u) {
+            uint32_t mode = b < 5000u ? 0u : b < 15000u ? 1u : b < 25000u ? 2u : 0u;
+            int a = chorus_block(&C, mode, in + b, lo + b, ro + b, N - b < 32u ? N - b : 32u);
+            if (b == 5024u)
+                a1 = a;
+            if (b > 26000u)
+                a_end &= a == 0;
+        }
+        for (i = 1; i < N; i++) {
+            float s = fabsf(lo[i] - lo[i - 1u]), t = fabsf(ro[i] - ro[i - 1u]);
+            worst = s > worst ? s : worst;
+            worst = t > worst ? t : worst;
+        }
+        step = 0;
+        for (i = 26000u; i < N; i++)
+            step |= lo[i] != in[i] || ro[i] != in[i];
+        check(worst < 0.04f && a1 && a_end && !step, "(f) OFF -> I -> II -> OFF: the largest sample step %.4f (limit 0.04; an unfaded wet steps ~0.25), active while on, inactive after the fade, the input back exactly",
+              worst);
+    }
+}
+
+/* ------------------------------------------------------------ the int part block --- */
+static void test_part(void)
+{
+    enum { N = 8192 };
+    static float in[N], l[N], r[N];
+    static int32_t b[N], z[N], b0[N];
+    static chorus_t C, D;
+    uint32_t i, k;
+    int mode, ok = 1, act = 1;
+    int32_t worst = 0, mx = 0;
+    for (mode = 1; mode <= 3; mode++) {
+        memset(&C, 0, sizeof C);
+        memset(&D, 0, sizeof D);
+        for (i = 0; i < N; i++) {
+            in[i] = 0.4f * (float)sin(2.0 * 3.14159265358979323846 * 330.0 * (double)i / FSD);
+            b0[i] = b[i] = (int32_t)(in[i] * 32768.0f);
+        }
+        for (k = 0; k < N; k += CTL)
+            act &= chorus_part(&C, mode, b + k, z + k, CTL);
+        chorus_block(&D, (uint32_t)mode, in, l, r, N);
+        for (i = 1024; i < N; i++) {
+            /* L = mid + side, R = mid - side (the int path quantises the input: 1 LSB of 1/32768 through a gain of < 2.2) */
+            int32_t el = (int32_t)(l[i] * 32768.0f * CHORUS_TRIM), er = (int32_t)(r[i] * 32768.0f * CHORUS_TRIM);
+            int32_t dl = (b[i] + z[i]) - el, dr = (b[i] - z[i]) - er;
+            dl = dl < 0 ? -dl : dl, dr = dr < 0 ? -dr : dr;
+            worst = dl > worst ? dl : worst;
+            worst = dr > worst ? dr : worst;
+        }
+    }
+    check(act && worst <= 8, "(g) chorus_part: mid + side = the DSP's L, mid - side = R, times CHORUS_TRIM (%.4f), within %d LSB; active", CHORUS_TRIM, (int)worst);
+    /* the guard: a huge square (100 FS) is held to CHORUS_GUARD_FS per channel, so |mid| + |side| <= guard */
+    memset(&C, 0, sizeof C);
+    for (i = 0; i < N; i++)
+        b[i] = ((i / 40u) & 1u) ? (3 << 20) : -(3 << 20);
+    for (k = 0; k < N; k += CTL)
+        chorus_part(&C, 3, b + k, z + k, CTL);
+    for (i = 0; i < N; i++) {
+        int32_t m = (b[i] < 0 ? -b[i] : b[i]) + (z[i] < 0 ? -z[i] : z[i]);
+        mx = m > mx ? m : mx;
+    }
+    check(mx <= CHORUS_GUARD_FS * 32768 && mx > CHORUS_GUARD_FS * 32768 / 2, "(h) the guard: 100 FS in, max(|L|, |R|) = |mid| + |side| = %d <= %d (%d FS), and reached", (int)mx,
+          CHORUS_GUARD_FS * 32768, CHORUS_GUARD_FS);
+    /* an out-of-range mode is OFF: inactive and the block untouched (a stored 127 of the old reserved lane level, -1, 4) */
+    ok = 1;
+    for (i = 0; i < 4u; i++) {
+        static const int32_t M[4] = {127, -1, 4, 0};
+        uint32_t j;
+        memset(&C, 0, sizeof C);
+        for (j = 0; j < CTL; j++)
+            b[j] = b0[j];
+        ok &= !chorus_part(&C, M[i], b, z, CTL) && !memcmp(b, b0, CTL * sizeof(int32_t));
+    }
+    check(ok, "(h) a mode of 127, -1, 4 or 0 is OFF: inactive, the block untouched");
+}
+
+/* ------------------------------------------------------------ the mix --- */
+static int32_t mix_out[2 * CTL];
+static void mix_reset(void)                        /* the whole mix at power-on (regress.c job_cpu / drift_test.c mix_cost) */
+{
+    uint32_t k;
+    memset(dly_buf, 0, sizeof dly_buf);
+    memset(cho_buf, 0, sizeof cho_buf);
+    memset(rev_comb, 0, sizeof rev_comb);
+    memset(rev_ap, 0, sizeof rev_ap);
+    memset(&fx, 0, sizeof fx);
+    memset(&pf, 0, sizeof pf);
+    for (k = 0; k < NTRK; k++)
+        pf.mg[k] = 32768;
+    perf_held = perf_latched = 0;
+    lim_env = LIM_T;
+    dc_l = dc_r = dce_l = dce_r = 0;
+    vage = 0;
+    rng_state = 0x1234567u;
+    mod_seed = 0x2545F491u;
+    memset(trk, 0, sizeof trk);
+    memset(&mod, 0, sizeof mod);
+    memset(sl, 0, sizeof sl);
+    memset(eng_mem, 0, sizeof eng_mem);
+    memset(eng_mem_owner, 0, sizeof eng_mem_owner);
+    host_tracks_init();
+    song.sel = 0;
+    song.g[G_CLOCK] = 0;
+    song.g[G_BPM] = 120;
+}
+/* part 0: engine e preset pi with CHOR = chor (forced after the preset), one note; renders n blocks: the hash of the stereo output, the energies */
+typedef struct { uint64_t h; double el, er, ed; int32_t pk_x, pk_sum; } mixr_t;
+static mixr_t mix_run(uint32_t e, uint32_t pi, int chor, uint32_t note, uint32_t nb, void (*setup)(void))
+{
+    mixr_t r;
+    uint32_t b, i;
+    memset(&r, 0, sizeof r);
+    r.h = 1469598103934665603ull;
+    mix_reset();
+    host_preset(&trk[0], e, pi);
+    trk[0].p[P_VOICE] = V_POLY;
+    trk[0].p[P_SUS] = 127;
+    trk[0].p[P_AMODE] = 0;
+    trk[0].p[P_RSV_LN] = (int16_t)chor;
+    trk[1].p[P_MUTE] = trk[2].p[P_MUTE] = trk[3].p[P_MUTE] = 1;
+    if (setup)
+        setup();
+    trk_note_on(&trk[0], note, 100);
+    for (b = 0; b < nb; b++) {
+        mix_block(mix_out, CTL);
+        for (i = 0; i < 2u * CTL; i++) {
+            r.h = (r.h ^ (uint32_t)mix_out[i]) * 1099511628211ull;
+            if (b >= nb / 4u)
+                (i & 1u ? &r.er : &r.el)[0] += (double)mix_out[i] * (double)mix_out[i];
+        }
+        for (i = 0; i < CTL; i++) {
+            double d = (double)mix_out[2u * i] - (double)mix_out[2u * i + 1u];
+            if (b >= nb / 4u)
+                r.ed += d * d;
+        }
+    }
+    return r;
+}
+/* the hashes of today's DRIFT output with CHOR OFF (1.5 s, one note, the preset's own sends), recorded from the tree before this task:
+ * the OFF path must not move (the golden file pins the same on all 32 presets) */
+static const uint64_t PIN_OFF[3] = {0x8ed17cc72f710e75ull, 0x86d05a877157c0cfull, 0xb2a34c3a9b2314cdull};
+static const uint8_t PIN_PRESET[3] = {0, 22, 21};
+static void test_mix_off(void)
+{
+    uint32_t k;
+    int ok = 1;
+    for (k = 0; k < 3u; k++) {
+        mixr_t r = mix_run(ENGI_DRIFT, PIN_PRESET[k], 0, 48, 2067, 0);
+        if (r.h != PIN_OFF[k])
+            printf("chorus: DRIFT preset %u OFF hash %016llx (pinned %016llx)\n", PIN_PRESET[k], (unsigned long long)r.h, (unsigned long long)PIN_OFF[k]);
+        ok &= r.h == PIN_OFF[k];
+    }
+    check(ok, "(i) CHOR OFF: DRIFT presets 0, 22 and 21 render bit for bit as before the chorus (pinned hashes)");
+    ok = 1;
+    for (k = 0; k < 3u; k++) {
+        static const uint8_t EP[3] = {ENGI_OBX, ENGI_WAVE, ENGI_ACID};
+        mixr_t a = mix_run(EP[k], 3, 0, 48, 600, 0), b = mix_run(EP[k], 3, 3, 48, 600, 0);
+        ok &= a.h == b.h;
+    }
+    check(ok, "(i) OB-Z, WAVE and ACID ignore the parameter (CHOR 3 renders as CHOR 0)");
+}
+static void no_sends(void);
+static void test_mix_on(void)
+{
+    uint32_t m;
+    mixr_t off = mix_run(ENGI_DRIFT, 22, 0, 48, 1500, no_sends);
+    int ok = off.ed == 0.0 && off.el > 0.0;
+    check(ok, "(j) CHOR OFF is centred mono as before: L == R exactly, energy %.3g", off.el);
+    for (m = 1; m <= 3u; m++) {
+        mixr_t on = mix_run(ENGI_DRIFT, 22, (int)m, 48, 1500, no_sends);
+        check(on.h != off.h && on.ed > 0.0 && on.ed / (on.el + on.er + 1e-30) > 0.02 && on.el > 0.2 * off.el && on.el < 3.0 * off.el,
+              "(j) CHOR %u: a changed, stereo signal (L-R energy %.1f %% of L+R) at a level near the dry's (%.2f x)", m, 100.0 * on.ed / (on.el + on.er + 1e-30), sqrt(on.el / off.el));
+    }
+}
+static void no_sends(void) { trk[0].p[P_DIST] = trk[0].p[P_CHOR] = trk[0].p[P_DLY] = trk[0].p[P_REV] = 0; }
+static void set_pan_left(void) { no_sends(); trk[0].p[P_PAN] = -64; }
+static void set_pan_right(void) { no_sends(); trk[0].p[P_PAN] = 63; }
+static void set_spread(void) { no_sends(); trk[0].p[P_SPRD] = 127; }
+static void test_mix_pan(void)
+{
+    mixr_t pl = mix_run(ENGI_DRIFT, 22, 1, 48, 1500, set_pan_left), pr = mix_run(ENGI_DRIFT, 22, 1, 48, 1500, set_pan_right);
+    mixr_t sp = mix_run(ENGI_DRIFT, 22, 1, 48, 1500, set_spread), sp0 = mix_run(ENGI_DRIFT, 22, 0, 48, 1500, set_spread);
+    check(pl.er == 0.0 && pl.el > 0.0 && pr.el < 0.01 * pr.er && pr.er > 0.0, "(k) PAN hard left silences R, hard right leaves L under 1 %% (the pair is balanced like a stereo source): %.3g / %.3g, %.3g / %.3g",
+          pl.el, pl.er, pr.el, pr.er);
+    check(sp.h != sp0.h && sp.ed > 0.0 && sp.el > 0.0 && sp.er > 0.0, "(k) SPREAD 127 with the chorus still plays and is stereo (L-R energy %.1f %%)", 100.0 * sp.ed / (sp.el + sp.er + 1e-30));
+}
+
+/* the worst case: four DRIFT parts, LEVEL 127, PAN centre, RES 127, DRV 127, MIX saw, CUT open, a chord at the part's cap, I+II, DIST 127 (task-7.2a-review:
+ * x per track <= 524,287 before x * gl; the four-track sum |mix + wet| < 2^21) */
+static void test_headroom(void)
+{
+    int dist, mode;
+    int32_t worst_x = 0, worst_sum = 0;
+    for (dist = 0; dist <= 127; dist += 127)
+        for (mode = 1; mode <= 3; mode++) {
+            uint32_t b, i, p;
+            mix_reset();
+            for (p = 0; p < 4u; p++) {
+                track_t *t = &trk[p];
+                host_preset(t, ENGI_DRIFT, 21);
+                t->p[P_VOICE] = V_POLY, t->p[P_SUS] = 127, t->p[P_AMODE] = 0, t->p[P_LEVEL] = 127, t->p[P_PAN] = 0;
+                t->p[P_E0] = 64, t->p[P_E4] = 127, t->p[P_E5] = 127, t->p[P_E6] = 127, t->p[P_E3] = 127, t->p[P_E2] = 127;
+                t->p[P_DIST] = (int16_t)dist, t->p[P_CHOR] = t->p[P_DLY] = t->p[P_REV] = 127;
+                t->p[P_RSV_LN] = (int16_t)mode;
+                trk_note_on(t, 40 + 7u * p, 127);
+                trk_note_on(t, 47 + 7u * p, 127);
+                trk_note_on(t, 52 + 7u * p, 127);
+                trk_note_on(t, 56 + 7u * p, 127);
+            }
+            for (b = 0; b < 1500u; b++) {
+                mix_block(mix_out, CTL);
+                for (p = 0; p < 4u; p++)
+                    worst_x = trk[p].peak > worst_x ? trk[p].peak : worst_x;
+                for (i = 0; i < CTL; i++) {
+                    int32_t sl_ = mix_l[i] + wet[i], sr_ = mix_r[i] + wet[i];
+                    sl_ = sl_ < 0 ? -sl_ : sl_, sr_ = sr_ < 0 ? -sr_ : sr_;
+                    worst_sum = sl_ > worst_sum ? sl_ : worst_sum;
+                    worst_sum = sr_ > worst_sum ? sr_ : worst_sum;
+                }
+            }
+        }
+    check(worst_x <= 524287 && worst_sum < 2097151, "(l) worst case (4 parts, LEVEL 127, RES / DRV 127, chords, sends 127, DIST 0 / 127, I / II / I+II): x %d <= 524287, four-track sum %d < 2097151", (int)worst_x, (int)worst_sum);
+}
+
+/* ------------------------------------------------------------ the parameter --- */
+static void test_param(void)
+{
+    const param_desc_t *d = &TP[P_RSV_LN];
+    check(!strcmp(d->label, "CHOR") && d->fmt == F_ENUM && d->min == 0 && d->max == 3 && d->def == 0 && d->names && !strcmp(d->names[0], "OFF") && !strcmp(d->names[1], "I") &&
+              !strcmp(d->names[2], "II") && !strcmp(d->names[3], "I+II"),
+          "(m) P_RSV_LN is CHOR: an enum OFF / I / II / I+II, default OFF");
+    check(param_fit(d, 127) == 0 && param_fit(d, -1) == 0 && param_fit(d, 4) == 0 && param_fit(d, 2) == 2 && param_fit(d, 3) == 3 && param_fit(&TP[P_REV], 200) == 127,
+          "(m) param_fit sends the old reserved lane level 127 (and any out-of-range value) of this one parameter to OFF, other parameters clamp as before");
+}
+
+/* ------------------------------------------------------------ the cost --- */
+static uint64_t instr_now(void)
+{
+#ifdef __APPLE__
+    struct rusage_info_v4 ri;
+    if (!proc_pid_rusage(getpid(), RUSAGE_INFO_V4, (rusage_info_t *)&ri))
+        return ri.ri_instructions;
+#endif
+    return 0;
+}
+/* The pin: chorus_part per sample per part (the int32 block in, mid / side out), the whole stage, in regress.c's units (kernel-counted instructions
+ * on the Mac, cc -O2); +10 % of the measured worst of the three modes. Another compiler or -O level moves it: re-measure and say why, never to hide a
+ * regression. The device's cost is what Task 8.1's PERF run measures. */
+#define CHORUS_COST_MAX 0.0
+static void test_cost(void)
+{
+    enum { NB = 4096 };
+    static int32_t b[CTL], z[CTL];
+    static chorus_t C;
+    double cost[4] = {0, 0, 0, 0}, worst = 0.0;
+    uint32_t i, k, mode;
+    if (!instr_now()) {
+        printf("chorus: SKIP cost: NOT CHECKED, there is no instruction counter on this host (macOS proc_pid_rusage only)\n");
+        return;
+    }
+    for (mode = 1; mode <= 3u; mode++) {
+        uint64_t i0, i1;
+        memset(&C, 0, sizeof C);
+        for (i = 0; i < CTL; i++)
+            b[i] = (int32_t)(12000.0 * sin(0.04 * (double)i));
+        for (k = 0; k < 64u; k++)
+            chorus_part(&C, (int32_t)mode, b, z, CTL);
+        i0 = instr_now();
+        for (k = 0; k < NB; k++) {
+            for (i = 0; i < CTL; i++)
+                b[i] = (int32_t)(12000.0 * sin(0.04 * (double)i));
+            chorus_part(&C, (int32_t)mode, b, z, CTL);
+        }
+        i1 = instr_now();
+        cost[mode] = (double)(i1 - i0) / ((double)NB * CTL);
+        {   /* less the input synthesis, measured alone */
+            uint64_t j0 = instr_now(), j1;
+            for (k = 0; k < NB; k++)
+                for (i = 0; i < CTL; i++)
+                    b[i] = (int32_t)(12000.0 * sin(0.04 * (double)i));
+            j1 = instr_now();
+            cost[mode] -= (double)(j1 - j0) / ((double)NB * CTL);
+        }
+        worst = cost[mode] > worst ? cost[mode] : worst;
+    }
+    printf("chorus: cost per part per sample (chorus_part, int32 in / mid + side out): I %.0f, II %.0f, I+II %.0f instructions (-O2, regress.c's units)\n", cost[1], cost[2], cost[3]);
+    check(worst >= 100.0 && worst <= CHORUS_COST_MAX, "cost: the worst mode %.0f <= the pin %.0f (+10 %% of the measured worst, -O2)", worst, CHORUS_COST_MAX);
+}
+
+int main(int argc, char **argv)
+{
+    setvbuf(stdout, 0, _IONBF, 0);
+    if (argc > 1)
+        refdir = argv[1];
+    test_param();
+    test_dsp();
+    test_part();
+    test_donor();
+    test_mix_off();
+    test_mix_on();
+    test_mix_pan();
+    test_headroom();
+    test_cost();
+    printf("chorus_test: %s\n", bad ? "FAIL" : "ok");
+    return bad ? 1 : 0;
+}
