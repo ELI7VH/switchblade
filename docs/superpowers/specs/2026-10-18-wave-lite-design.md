@@ -17,6 +17,20 @@ filter type runs on one SVF routine, and WARP costs nothing when it is off.
 3. **Task 4.6**: the 32 presets (replace `presets/four/wave.py`'s bank) + distinctness check + audition sign-off.
 4. The single flash already planned (after 6.2, 4.4, 6.3, and now 4.5 / 4.6), then device PERF.
 
+## What shipped (recorded after Task 4.6)
+
+- **4.5a was dropped by the user**: LP24 is still the plugin-faithful Huovilainen ladder (dca1659), not two SVFs. In the
+  tables below "LP" means that ladder and "LP12" the SVF.
+- **WARP's descriptor minimum is 9** (`VOID_WARP_MIN`): a stored P_E2 of 0..8 is an old TBL2 value and loads as 64 (off), so
+  WARP 0..8 is not selectable.
+- **WARP's alias bound**: the "-50 dB at MIDI 96" figure cannot be met (the unwarped SAW at C7 is already -34 dB); the
+  kept bound is off-harmonic energy of at most -21.7 dB over MIDI 36..96 and at most +13 dB over the same note unwarped,
+  reached by pulling the knee towards 1/2 (the warp fades out above about 2 kHz).
+- **4.6 realised within the engine**: no engine change. "Synced" LFO rates are the rate matching the division at 120 BPM
+  (the preset format has no SYNC field and a preset load sets SYNC OFF). UNISON is the engine's six voices (not x3). The
+  only matrix sources are the amp ENV, LFO, VEL, KEY, RAND, MODW, AT, S&H, SLEW, so "filter env -> WARP" (WARP SYNC) is
+  ENV -> WARP, and ENV -> PITCH presets end their dive with the amp envelope (sustain 0).
+
 ## Task 4.5a: LP24 as two SVFs and one saturator (user decision, 2026-10-18)
 
 The faithful LP24 ladder (4 table-lerped tanh stages, ~85 of a ~175 instr/sample voice, about half) is replaced. The

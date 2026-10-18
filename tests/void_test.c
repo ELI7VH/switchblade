@@ -150,6 +150,19 @@ static track_t *plain(uint32_t tb1, uint32_t ft)
     t->p[P_E6] = 0;
     t->p[P_E7] = 0;
     t->p[P_FTYPE] = (int16_t)ft;
+    /* The pinned hashes below were recorded when WAVE's preset 0 was the Task 4.4 stopgap bank's AMBIENT SINE, whose
+     * extras (an LFO at RATE 17 to CUT 2 and SHP 11, a filter envelope, default detune, no spread or glide) fresh() loaded
+     * and this function left in place. The bank is now original (Task 4.6): those extras are set here, so the scenarios
+     * stay what they were, and the hashes with them. */
+    t->p[P_DETUNE] = TP[P_DETUNE].def;
+    t->p[P_SPRD] = 0;
+    t->p[P_GLIDE] = 0;
+    t->p[P_LRATE] = 17; t->p[P_LWAVE] = 0; t->p[P_LTRIG] = 1; t->p[P_LFADE] = 0;
+    t->p[P_FM1_LEVEL] = 64; t->p[P_FM1_ATK] = 32; t->p[P_FM1_DEC] = 79; t->p[P_FM1_SUS] = 89; t->p[P_FM1_REL] = 79;
+    t->p[P_M1SRC] = 1; t->p[P_M1DST] = 2; t->p[P_M1AMT] = 2;
+    t->p[P_M2SRC] = 1; t->p[P_M2DST] = 3; t->p[P_M2AMT] = 11;
+    t->p[P_M3SRC] = t->p[P_M3DST] = t->p[P_M3AMT] = 0;
+    t->p[P_M4SRC] = t->p[P_M4DST] = t->p[P_M4AMT] = 0;
     return t;
 }
 
@@ -266,6 +279,7 @@ static uint64_t chord_hash(uint32_t pi, int t2, int mx, int o2)
     memset(eng_mem_owner, 0, sizeof eng_mem_owner);
     fresh(ENGI_WAVE, pi);
     t->p[P_DIST] = t->p[P_CHOR] = t->p[P_DLY] = t->p[P_REV] = 0;
+    t->p[P_VOICE] = V_POLY;                            /* (UNISON's start phases come from a static seed no reset reaches: two renders differ) */
     t->p[P_E2] = (int16_t)t2;
     t->p[P_E3] = (int16_t)mx;
     t->p[P_E6] = (int16_t)o2;

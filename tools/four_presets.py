@@ -22,7 +22,7 @@ MACHINES = ["OBX", "WAVE", "ACID", "DRIFT"]                      # engine number
 CAT_ORDER = ["BASS", "LEAD", "KEYS", "BRASS", "STRINGS", "ATMOS", "ACID"]     # category.c: CAT_NONE = 0, then these
 CATS = {                                                         # per machine: category -> count (in this order)
     "OBX": {"BRASS": 8, "STRINGS": 8, "KEYS": 8, "LEAD": 8},
-    "WAVE": {"ATMOS": 12, "LEAD": 10, "BASS": 10},
+    "WAVE": {"ATMOS": 8, "LEAD": 10, "BASS": 14},
     "ACID": {"ACID": 32},
     "DRIFT": {"BASS": 12, "LEAD": 10, "KEYS": 10},
 }
@@ -51,6 +51,59 @@ def wave_ranges(tables):
     hid = (0, 0)                                                 # MIX (E3), OSC2 (E6): hidden since Task 4.4 (eng_wave.c), range 0..0
     warp = (9, 127)                                              # WARP (E2, was TBL2): 64 = off; 0..8 are the old TBL2 values (eng_wave.c VOID_WARP_MIN)
     return [(0, ntbl - 1), PCT, warp, hid, PCT, PCT, hid, PCT]
+
+
+WAVE_TABLES = ["SINE", "SAW", "SQUARE", "SPECT", "FORMA", "FORME", "BASS1", "BASS2", "NOISE"]   # eng_wave.c N_VOID_TBL
+WAVE_TYPES = ["LP", "BP", "HP", "LP12", "HP24", "NOTCH", "VOWEL"]                                # params.c N_FTYPE
+MX_SRC = dict(LFO=1, ENV=2, VEL=3, KEY=4, RAND=5, MODW=6, AT=7, EXPR=8, SH=9, SLEW=10)           # mod.c MS_*
+MX_DST = dict(PITCH=1, CUT=2, POS=(3, 13), AMP=4, VIB=11, TBL=12, WARP=14)                       # mod.c MD_* (POS: SHP or E2)
+
+
+def route_holds(p, term):
+    """does the preset really have the routing a signature term names? UNISON, GLIDE, FENV->CUT (the filter envelope),
+    ENV->CUT also by the ENV -> FLT amount, or SRC->DST in a matrix slot"""
+    if term == "UNISON":
+        return p["voice"] == 3
+    if term == "GLIDE":
+        return p["glide"] > 0 and p["mono"] == 1
+    if "->" not in term:
+        return False
+    src, dst = term.split("->")
+    if src == "FENV":
+        return dst == "CUT" and p["fe"][0] > 0 and p["fenv"] != 0
+    if src == "ENV" and dst == "CUT" and p["fe"][0] == 0 and p["fenv"] != 0:
+        return True
+    if src not in MX_SRC or dst not in MX_DST:
+        return False
+    ds = MX_DST[dst] if isinstance(MX_DST[dst], tuple) else (MX_DST[dst],)
+    return any(r[0] == MX_SRC[src] and r[1] in ds and r[2] != 0 for r in p["mx"])
+
+
+def check_distinct(errs, pr):
+    """WAVE's distinctness rule: every preset declares a signature route (sig), which must hold in its routing, and no
+    two presets share (table, TYPE, sig)"""
+    seen = {}
+    for p in pr:
+        who = f"WAVE {p.get('name')!r}"
+        sig = p.get("sig")
+        if not isinstance(sig, str) or not sig:
+            errs.append(f"{who}: no signature route (sig)")
+            continue
+        src = ""
+        for term in sig.split("+"):
+            if "->" in term:
+                src = term.split("->")[0]
+            elif term not in ("UNISON", "GLIDE"):
+                term = f"{src}->{term}"               # "VEL->CUT+WARP": the second destination of the same source
+            if not route_holds(p, term):
+                errs.append(f"{who}: signature term {term!r} is not in the preset's routing")
+        e0, ft = p["e"][0], p["ftype"]
+        if not 0 <= e0 < len(WAVE_TABLES) or not 0 <= ft < len(WAVE_TYPES):
+            continue
+        key = (WAVE_TABLES[e0], WAVE_TYPES[ft], sig)
+        if key in seen:
+            errs.append(f"WAVE: {p['name']!r} and {seen[key]!r} share the signature {key}")
+        seen[key] = p["name"]
 
 
 def check_range(errs, who, what, v, lo, hi):
@@ -115,6 +168,8 @@ def validate(m, pr, rng, errs):
                 for j, r in enumerate(mx):
                     for i, x in enumerate(r):
                         check_range(errs, who, f"mx[{j}][{i}]", x, -64 if i == 2 else 0, 63 if i == 2 else 127)
+    if m == "WAVE":
+        check_distinct(errs, pr)
     for cat, want in allowed.items():
         if count.get(cat, 0) != want:
             errs.append(f"{m}: {count.get(cat, 0)} {cat} presets, need {want}")

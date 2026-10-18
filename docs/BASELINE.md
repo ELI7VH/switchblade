@@ -92,6 +92,16 @@ Plan: `docs/plans/2026-10-17-drift-juno.md` "Task 6.3". Measured on this Mac, `-
   (DRIFT plays 3 voices of its 4 notes there; `4parts_light` untouched).
 - ACID: `ACID_GUARD_FS` 6 -> 5 (four ACID parts at the guard with every send at 127 and HALL: |mix + wet| 2,353,498 at 6 FS, 2,042,682 at 5); no ACID golden or cost line moved.
 
+## Task 4.6: WAVE's 32 original presets (2026-10-18)
+
+The bank is new, so the 32 `preset/WAVE/*` goldens, `song/4track_mix_four` and `slicer/song_gate_stut_four` (power-on WAVE part), the 114 `union_golden.txt` sequences that
+play WAVE (directly or beside), and the 32 `cpu/WAVE/*` lines were re-recorded, deliberately. No other machine's hash moved. `cpu/mix/*` lines stay (inside +25 %).
+- Dearest WAVE part (8 notes held, cap 6): **ACID WARP 1989** (the WARP slow loop; was 1665). Host, `-O2`, regress units.
+- **Dearest legal mix** (`drift_test.c (i)`): the DRIFT one is unchanged in kind, **3769** (was 3767): ACID OVERDRIVE x1 + ACID OVERDRIVE x1 + DRIFT FAT SAW BASS x3 + DRIFT FAT SAW BASS x3;
+  with CHOR II on both DRIFT parts 4188 (was 4178). The WAVE-led, DRIFT-free worst moved **3454 -> 3737** (WAVE ACID WARP x5 + ACID OVERDRIVE x1 on each of three parts; the ENV -> WARP presets
+  take the slow loop) and one part per engine 2940 -> 3165 (WAVE ACID WARP x4 + ACID OVERDRIVE x1 + DRIFT FAT SAW BASS x3). Task 8.1 should read PERF on the 3769 mix and on the 3737 one.
+  The UNISON presets (REESE, SUPERSAW, EVOLVE PAD) are not dearer than ACID WARP.
+
 ## Host tests (`sh tests/run_tests.sh`, ~6 min) failures that exist before any FM1-Four change
 These are environment failures on this Mac, not regressions. Later tasks may not add to this list.
 1. `perform: FLANGER over REPEAT 1/16 ... PHASER ... FAIL` (perform_test cost check, host timing).
