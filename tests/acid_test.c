@@ -16,12 +16,15 @@
  *   (g) amp() stays in [0, 32767] whatever the settings; done() ends a released voice and a held one; the state fits. */
 #include <stdint.h>
 #include <stdarg.h>
-static int imp_mode, imp_pending;                  /* the B3_IN seam: the oscillator off, one impulse on request */
+static int imp_mode, imp_pending;                  /* the B3_IN seam: the oscillator off, one impulse on request; mode 2 a square (test_wet_bus) */
+static uint32_t imp_t, imp_n, imp_half, imp_os = 1, imp_blk = 1;            /* mode 2: the square's sample count (set per block), the call within the block, its half period */
 static float imp_in(float s)
 {
     float r;
     if (!imp_mode)
         return s;
+    if (imp_mode == 2)                             /* a 100 x square, the same for every track (calls come CTL x oversampling per track and block) */
+        return (((imp_t + imp_n++ % imp_blk / imp_os) / imp_half) & 1u) ? 100.0f : -100.0f;
     r = imp_pending ? 100.0f : 0.0f;               /* acid_meas.h AM_IMP */
     imp_pending = 0;
     return r;
@@ -951,6 +954,56 @@ static void test_headroom(void)
           "headroom: the guard clamp +-%d FS by itself: x %d, four tracks %d", ACID_GUARD_FS, (int)((((ACID_GUARD_FS * 32768 - 1) >> 2) * 9713) >> 10), 4 * (int)((((ACID_GUARD_FS * 32768 - 1) >> 2) * 9713) >> 10));
 }
 
+/* Follow-up F2 of task-7.2a-review-r2: the wet bus. Four ACID parts driven to the guard clamp (a 100 x square through the voice, LEVEL 127, PAN centre,
+ * every send 127, REVERB HALL at SIZE 127 / DAMP 0, the delay's feedback up): |mix + wet| in both channels must stay under 2^21, the master's ((x >> 2) * mg).
+ * At 6 FS the four dry parts are 1.865 M and the wet bus does not fit in the 232 k that is left; at 5 FS there are 543 k. */
+static void test_wet_bus(void)
+{
+    enum { NBLK = 1200 };
+    static const uint32_t HALF[5] = {7, 40, 97, 211, 1500};
+    int32_t worst = 0, wx = 0, wn = 0x7FFFFFFF, guard_x = (int32_t)((((ACID_GUARD_FS * 32768) >> 2) * 9713) >> 10);
+    uint32_t h, p, b, i;
+    for (h = 0; h < 5u; h++) {
+        mix_fresh(ENGI_ACID, 27);
+        song.g[G_RTYPE] = 2, song.g[G_RSIZE] = 127, song.g[G_RDAMP] = 0, song.g[G_DTIME] = 3, song.g[G_DFDBK] = 120;
+        song.master_q12 = 4096;
+        for (p = 0; p < 4u; p++) {
+            if (p)
+                host_preset(&trk[p], ENGI_ACID, 27);
+            T = &trk[p];
+            T->p[P_MUTE] = 0, T->p[P_PAN] = 0, T->p[P_DIST] = 0, T->p[P_LEVEL] = 127;
+            T->p[P_CHOR] = T->p[P_DLY] = T->p[P_REV] = 127;
+            pots(0, 58, 60, 127, 127, 127, 0, 0, 127);
+            T->p[P_LEVEL] = 127;
+        }
+        T = &trk[0];
+        imp_mode = 2, imp_half = HALF[h], imp_t = 0, imp_os = BASS303_OS, imp_blk = CTL * BASS303_OS;
+        for (p = 0; p < 4u; p++)
+            trk_note_on(&trk[p], 26, 127);
+        for (b = 0; b < NBLK; b++) {
+            imp_n = 0;
+            mix_block(mix_out, CTL);
+            imp_t += CTL;
+            for (p = 0; p < 4u; p++) {
+                wx = trk[p].peak > wx ? trk[p].peak : wx;
+                wn = b > 200u && trk[p].peak < wn ? trk[p].peak : wn;
+            }
+            for (i = 0; i < CTL; i++) {
+                int64_t sl_ = (int64_t)mix_l[i] + wet[i], sr_ = (int64_t)mix_r[i] + wet[i];
+                sl_ = sl_ < 0 ? -sl_ : sl_, sr_ = sr_ < 0 ? -sr_ : sr_;
+                worst = (int32_t)(sl_ > worst ? sl_ : worst);
+                worst = (int32_t)(sr_ > worst ? sr_ : worst);
+            }
+        }
+        imp_mode = 0;
+    }
+    printf("acid: wet bus, four parts at the %d FS guard (x %d at the guard), sends 127, HALL SIZE 127 DAMP 0: worst |mix + wet| %d (limit %d), a part's x up to %d (and at least %d once settled)\n",
+           ACID_GUARD_FS, guard_x, worst, HR_SUM_LIMIT, wx, wn);
+    check(wx >= guard_x - 16, "headroom: the square drives the parts into the guard (x %d, the guard's %d)", wx, guard_x);
+    check(wx <= HR_X_LIMIT && worst < 2097151, "headroom: four ACID parts at the guard, sends 127, HALL SIZE 127 DAMP 0, square halves 7 .. 1500 samples: |mix + wet| %d < 2097151 (%.2f %% left), a part's x %d <= %d",
+          (int)worst, 100.0 * (2097151.0 - (double)worst) / 2097151.0, (int)wx, HR_X_LIMIT);
+}
+
 int main(int argc, char **argv)
 {
     setvbuf(stdout, 0, _IONBF, 0);
@@ -968,6 +1021,7 @@ int main(int argc, char **argv)
     test_slots();
     test_level();
     test_headroom();
+    test_wet_bus();
     test_cost();
     printf("acid_test: %s\n", bad ? "FAIL" : "ok");
     return bad ? 1 : 0;

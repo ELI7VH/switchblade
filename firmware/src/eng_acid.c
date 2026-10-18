@@ -31,18 +31,20 @@ typedef struct {                 /* the part's engine memory */
  * 127, in proportion, which brings the DISTORTED presets in with the rest. Applied to the voice's output, after the whole chain. */
 #define ACID_TRIM_DB 3.0f
 #define ACID_DRV_MAKEUP_DB 9.5f
-/* The guard clamp (whole full scales, strict: |s| < ACID_GUARD_FS). It exists so that a runaway or a NaN never reaches the integer
+/* The guard clamp (whole full scales, inclusive: |s| <= ACID_GUARD_FS). It exists so that a runaway or a NaN never reaches the integer
  * conversion, and it is sized to the mixer's int32 headroom, which this engine's output must not exceed. Accents reach 3.5 .. 4.9 FS
- * on the shipped presets and about 6.8 FS on a hand-edited worst case, so it is not a limiter: the master limiter and softclip
- * do the levelling.
+ * on the shipped presets (4.86 at most) and about 6.8 FS on a hand-edited worst case, so it is not a limiter: the master limiter and
+ * softclip do the levelling.
  *   mix_part (fx.c) takes b = s * 32768, then x = ((b >> 2) * LEVEL_Q12[127]) >> 10, with LEVEL_Q12[127] = 9713, so
  *   x = 77,704 per full scale; it then forms x * gl with gl <= 4096 (pan 0), which has to stay below 2^31: x <= 524,287 (6.747 FS).
- *   The master forms ((mix_l + wet) >> 2) * mg with mg <= 4096 (MASTER_FULL): mix_l + wet < 2^21 = 2,097,152. Four ACID parts
- *   sum to 4 x, so x <= 524,287 holds there too, with the wet bus (sends are clamped well under the tracks) in what is left.
- *   At 6 FS: b <= 196,607, x <= 466,224 (margin 1.125 on x * gl, 12.5 %), four parts 1.865 M against 2.097 M (margin 1.124, 11 %
- *   left for the wet bus). At 8 FS (the previous value) x = 621 k: x * gl wrapped above 6.75 FS, and four parts overflowed. 7 FS
- *   would give 543,9xx, still over (x <= 543,911). tests/acid_test.c test_headroom pins both products through the real mix path. */
-#define ACID_GUARD_FS 6
+ *   The master forms ((mix_l + wet) >> 2) * mg with mg <= 4096 (MASTER_FULL): mix_l + wet < 2^21 = 2,097,152, and the wet bus (the
+ *   sends at 127, REVERB HALL at SIZE 127 / DAMP 0, the delay's feedback up) rides on top of the four parts' dry sum.
+ *   At 6 FS (the previous value): x <= 466,224, four parts 1.865 M, 232 k left for the wet bus, and four parts held at the guard with
+ *   every send at 127 and HALL measured |mix + wet| = 2,353,498, 12.2 % over 2^21 (tests/acid_test.c test_wet_bus). At 5 FS:
+ *   b <= 163,840, x <= 388,520 (margin 1.35 on x * gl), four parts 1.554 M, 543 k left for the wet bus. The shipped presets (4.86 FS at
+ *   most) are untouched. At 8 FS (the value before that) x = 621 k and x * gl wrapped above 6.75 FS. The same figure, for the same
+ *   reason, as DRIFT's chorus guard (dsp_chorus.c CHORUS_GUARD_FS). test_headroom and test_wet_bus pin both products through the real mix path. */
+#define ACID_GUARD_FS 5
 #define ACID_MEM (sizeof(acid_t))
 
 static acid_t *acid_of(const track_t *t)
