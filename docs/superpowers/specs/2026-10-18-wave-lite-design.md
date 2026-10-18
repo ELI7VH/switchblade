@@ -6,18 +6,38 @@ Date: 2026-10-18. Status: design approved by the user, spec awaiting review.
 
 VOID FOUR's WAVE machine (`firmware/src/eng_wave.c`), made single-oscillator by Task 4.4, gets two cheap signature
 features and a new bank of 32 presets that are each clearly distinct and lean on what a wavetable synth does best.
-The engine stays "ultra lightweight": the new features cost at most what the LP24 ladder costs, and nothing changes
-when they are off.
+The engine stays "ultra lightweight": LP24 becomes a cheap two-SVF filter (about half the ladder's cost), every
+filter type runs on one SVF routine, and WARP costs nothing when it is off.
 
 ## Order of work
 
 1. **Task 4.4** (WAVE single-osc, uncommitted in the tree as of this spec) is finished, reviewed and committed first.
    Everything below builds on it.
-2. **Task 4.5**: VOWEL filter type and WARP (DSP + tests).
+2. **Task 4.5**: the cheap LP24, the VOWEL filter type and WARP (DSP + tests).
 3. **Task 4.6**: the 32 presets (replace `presets/four/wave.py`'s bank) + distinctness check + audition sign-off.
 4. The single flash already planned (after 6.2, 4.4, 6.3, and now 4.5 / 4.6), then device PERF.
 
-## Task 4.5a: VOWEL filter type
+## Task 4.5a: LP24 as two SVFs and one saturator (user decision, 2026-10-18)
+
+The faithful LP24 ladder (4 table-lerped tanh stages, ~85 of a ~175 instr/sample voice, about half) is replaced. The
+bank is now original, so matching the plugin's `Filter.cpp` is no longer a requirement for WAVE.
+
+- `VF_LP24` = two cascaded SVF low-passes on the same coefficients routine LP12 uses (`void_svf1`, states f[0..3],
+  as HP24 already does): stage 1 at a fixed k = 1.414 (no resonance), then **one** `void_tanh` on stage 1's output,
+  then stage 2 with k from RES. RES 127 resonates strongly and softly self-oscillates; the tanh between the stages
+  and the existing +-150000 state clamps bound it.
+- Makeup gain from RES (tuned in 4.5) so the passband level at RES 0 is within 2 dB of LP12 and within 3 dB across
+  RES.
+- The close-gain behaviour near 20 Hz, the 2 % pre-saturation, the drive front-end and the SVF saturation above
+  RES 0.78 are unchanged and shared with LP12.
+- `void_ladder`, its feedback / makeup coefficients and the `g / (1 + g)` divide are deleted. `VOID_TANH1` is
+  deleted if nothing else reads it (flash saving).
+- Cost target (host): LP24 <= 45 instr/sample/voice, measured and recorded in the 4.5 report.
+- **LP12 is untouched** (bit-exact).
+- `tests/void_test.c`'s 18-case comparison against the plugin's `Filter.cpp` is narrowed to the types WAVE still
+  shares with the plugin (LP12, BP, HP, NOTCH, HP24). LP24 gets its own tests (below).
+
+## Task 4.5b: VOWEL filter type
 
 - `N_FTYPE` (params.c) gains `"VOWEL"` as type 6. WAVE_PX `ftype` range (tools/four_presets.py) grows from (0, 5)
   to (0, 6). `eng_wave.c` uses `p[P_FTYPE] % 7u`. OB-Z and DRIFT play type 6 as LP, the same fallback they use for
@@ -29,11 +49,12 @@ when they are off.
   I 270/2290 Hz). Every source that moves the cutoff (HOME CUT knob, filter envelope, LFO -> cutoff, matrix CUT)
   therefore sweeps the vowel.
 - RES sets the band-passes' Q (from Q 2 at 0 to Q 12 at 127). DRV keeps feeding the existing pre-filter shaper.
-- Coefficients are computed once per 32-sample block, like the LP24 ladder.
-- VOWEL replaces the ladder when selected (it does not stack). Per-voice state grows by two SVF states (8 bytes).
-- Cost target: VOWEL's per-voice instructions <= LP24's on the host CPU check.
+- Coefficients are computed once per 32-sample block, like the other types.
+- VOWEL is a filter type like the others (it does not stack). It uses the existing f[0..3] states, so per-voice
+  memory does not grow.
+- Cost target: VOWEL within 10 % of the new LP24 on the host CPU check.
 
-## Task 4.5b: WARP on E2
+## Task 4.5c: WARP on E2
 
 - P_E2 (hidden since 4.4, previously TBL2) is un-hidden and named `WARP`. Bipolar, 0..127, **64 = off**. Its stored
   id does not move. The parameter's default becomes 64, and any loaded preset or project whose P_E2 holds an old
@@ -123,13 +144,17 @@ sound complete with no aftertouch / mod wheel input.
 
 ## Testing
 
-- **4.5 (void_test.c):** VOWEL F1 / F2 peaks within +-1 semitone of the vowel table at CUT 0, 64, 127; VOWEL at
+- **4.5 (void_test.c):** LP24 slope >= 21 dB/oct one octave above the cutoff at RES 0; a resonant peak at RES 127
+  within +-1 semitone of the cutoff; bounded at RES 127 + DRV 127 over MIDI 24..99 (no int32 overflow, DC < 1 % rms);
+  LP12 renders bit-exact against the pre-4.5 render; VOWEL F1 / F2 peaks within +-1 semitone of the vowel table at CUT 0, 64, 127; VOWEL at
   RES 127 + DRV 127 over MIDI 24..99 stays bounded (no runaway, no int32 overflow, DC < 1 % rms after the blocker);
   WARP = 64 renders bit-exact against the pre-4.5 render; WARP 0 and 127 at MIDI 96 keep aliasing below -50 dB;
   host CPU lines for VOWEL vs LP24 and WARP on vs off.
+- **Goldens:** 4.5 re-records the WAVE goldens and `cpu/WAVE/` lines its LP24 change moves (the old bank, still in
+  place); 4.6 re-records them again for the new bank. Each is a deliberate, stated re-record; no other machine's hash
+  may move.
 - **4.6:** the generator's range and distinctness checks; every preset passes the audition renderer's level window
-  (no RMS_LOW / clipping); WAVE goldens and `cpu/WAVE/` lines are re-recorded **once**, deliberately, in 4.6, and
-  no other machine's hash moves.
+  (no RMS_LOW / clipping).
 - **Sign-off:** the user rates all 32 by ear on the audition page (`build/audition/index.html`) before the flash.
 
 ## Risks
