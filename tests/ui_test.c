@@ -187,6 +187,9 @@ static void ui_power_on(void)
     proj_name[0] = 0;
     proj_cur = PROJ_NO_SLOT;
     memset(&favorites, 0, sizeof favorites);
+    memset(&midi_clock, 0, sizeof midi_clock);    /* (no clock in, MIDI OUT's transport as at power-on: what an earlier test left (the soak's random walk ends with a clock mode)
+                                                   * is not carried in, so which tests see a stopped or a running transport no longer depends on the page set) */
+    mout_run = mout_crun = 0;
     ml_off();                                     /* (MIDI LEARN off, nothing learned) */
     memset(&undo, 0, sizeof undo);
     memset(pat_last, 0, sizeof pat_last);
@@ -2675,7 +2678,8 @@ static uint32_t leds_at(uint32_t ms)
     return m | (((ms / 250u) & 1u) ? 0u : br);
 }
 
-/* the channel messages (not the clock's F8 / FA / FC, MIDI OUT's CLOCK OUT while a test has the transport running) put out since word `from` */
+/* the channel messages (not the clock's F8 / FA / FC: MIDI OUT's CLOCK OUT, on by default, is legitimate while a test has the transport running, song.playing = 1; "no MIDI at all"
+ * was true only while the transport had been stopped by an earlier test's leftover clock mode) put out since word `from` */
 static uint32_t mo_msgs(uint32_t from)
 {
     uint32_t q, n = 0;

@@ -185,7 +185,7 @@ typedef struct {                 /* an engine (engines.c ENGINES[]; the eng_*.c 
     /* optional: the part's own stereo stage (DRIFT's Juno chorus, Task 6.2). fx.c mix_part calls it once a block with the part's mono block b (after
      * DIST, INSERT, the SLICER and the mute, at the point where the part becomes stereo) and a scratch z: it returns 0 and leaves both alone, or 1
      * with b := the mid (L + R) / 2 and z := the side (L - R) / 2 of the pair (same scale). mix_stereo (fx.c) places them with PAN and SPREAD. NULL
-     * (OB-Z, WAVE, ACID): the part's path is the same code as without it. The output must stay inside the mixer's integer limits (|L|, |R| <= 6 full
+     * (OB-Z, WAVE, ACID): the part's path is the same code as without it. The output must stay inside the mixer's integer limits (|L|, |R| <= 5 full
      * scales: task-7.2a-review.md) */
     int (*part_fx)(struct track *t, int32_t *b, int32_t *z, uint32_t n);
 } engine_t;

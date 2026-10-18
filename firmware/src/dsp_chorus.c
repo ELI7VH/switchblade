@@ -31,14 +31,22 @@
 #define CHORUS_LEN 256u                  /* the ring: 5.8 ms; the longest delay is 3.30 + 2.13 ms at x1.015 = 5.51 ms (243 samples) + 2 for the Hermite */
 #define CHORUS_CHUNK 32u                 /* chorus_part's float scratch (the mixer's block, CTL) */
 #define CHORUS_SUB 8u                    /* the LFO, the delay and the fade are ramped over this many samples */
+/* the tail: the samples after the last non-zero input until the wet is below 1 LSB of the Q15 output even at the guard (5 FS). The input, once in the ring,
+ * is heard for the longest delay: 3.30 ms x 1.015 + 2.13 ms x 1.015 = 243.06 samples, plus the Hermite's 2 taps beyond it (age 245) and the write offset 1 = 246;
+ * then the post filter pair's settle and the pre filter's before it, CHORUS_SETTLE each: the Butterworth pair has |z| = 0.425 (the bilinear map of g (-1 +- j)
+ * / sqrt 2 with g = 0.822), so 0.425^16 = 1.2e-6, 0.2 LSB of 163,840; the 20 kHz pole (0.137) is faster. 246 + 2 x 16 = 278 samples (6.3 ms), a whole number
+ * of CHORUS_SUB sub-blocks: 280. tests/chorus_test.c measures the last audible sample from a burst and pins this from both sides. */
+#define CHORUS_SETTLE 16u
+#define CHORUS_TAIL 280u
 #define CHORUS_TRIM 0.6558515f           /* 1 / sqrt(kDry^2 + kWet^2) */
-/* the guard clamp, in whole full scales (inclusive: |s| <= CHORUS_GUARD_FS). Each of L and R is held to it, so |mid| + |side| <= 6 x 32768 = 196,608:
+/* the guard clamp, in whole full scales (inclusive: |s| <= CHORUS_GUARD_FS). Each of L and R is held to it, so |mid| + |side| <= 5 x 32768 = 163,840:
  *   mix_part (fx.c) takes x = ((b >> 2) * LEVEL_Q12[127]) >> 10 with LEVEL_Q12[127] = 9713 (x = 77,704 per full scale), then x * gl with gl <= 4096,
  *   which has to stay below 2^31: x <= 524,287 (6.747 FS); the master forms ((mix + wet) >> 2) * mg and needs mix + wet < 2^21, four parts
- *   included (.superpowers/sdd/task-7.2a-review.md and -r2). At 6 FS: x <= 466,224 (12.5 % margin on x * gl), four parts 1.865 M of 2.097 M.
+ *   included (.superpowers/sdd/task-7.2a-review.md and -r2). At 5 FS: x <= 388,520 (26 % margin on x * gl), four parts 1.554 M of 2.097 M, which leaves 543 k for the wet bus. At 6 FS (466,224; 1.865 M) the wet bus did not fit:
+ *   four parts held at the guard with every send 127 and a HALL (SIZE 127, DAMP 0) reached 2.36 M (tests/chorus_test.c (p); the reviewer measured a 0.5 % margin on ACID).
  *   DRIFT's voice is held to +-2 FS, so the chorus (2.12 x T = 1.39 at most) reaches 2.8 FS and never this at POLY 1; it is for DIST (a mono sum
  *   up to 7 FS), the follow-up polyphony, and a runaway or a NaN, which never reach the integer conversion. */
-#define CHORUS_GUARD_FS 6
+#define CHORUS_GUARD_FS 5
 
 /* the donor's filter pair (BBDFilter.h): tan(pi 9661 / 44100) = g, a1 = 1 / (1 + g / Q + g^2), the pole's g / (1 + g) at min(20 kHz, 0.45 fs) */
 #define CH_G 0.82236413f
@@ -69,7 +77,8 @@ typedef struct {
     uint32_t w;                          /* the write position */
     uint32_t ph, inc;                    /* the LFO phase (2^32 = one turn) and its step per sample */
     uint8_t on, mode, req, sub;          /* running; the configured mode (1..3); the requested one; the sample in the sub-block */
-    uint8_t sine, pad[3];                /* the LFO shape: 1 sine (I+II), 0 triangle */
+    uint8_t sine, pad;                   /* the LFO shape: 1 sine (I+II), 0 triangle */
+    uint16_t zrun;                       /* chorus_part: the samples of exact zero input in a row (saturating); CHORUS_TAIL of them and the line has rung out */
 } chorus_t;
 #define CHORUS_MEM (sizeof(chorus_t))
 
@@ -254,15 +263,27 @@ static int chorus_block(chorus_t *c, uint32_t req, const float *in, float *l, fl
 static int chorus_part(chorus_t *c, int32_t mode, int32_t *b, int32_t *z, uint32_t n)
 {
     float in[CHORUS_CHUNK], l[CHORUS_CHUNK], r[CHORUS_CHUNK];
-    uint32_t req = (uint32_t)mode <= 3u ? (uint32_t)mode : 0u, o, i, m;
+    uint32_t req = (uint32_t)mode <= 3u ? (uint32_t)mode : 0u, o, i, m, zr;
     int ran = 0;
     if (!c->on && !req)
         return 0;
+    zr = c->zrun;
     for (o = 0; o < n; o += m) {
         m = n - o < CHORUS_CHUNK ? n - o : CHORUS_CHUNK;
         for (i = 0; i < m; i++)
             in[i] = (float)b[o + i] * (1.0f / 32768.0f);
+        for (i = m; i > 0u && !b[o + i - 1u]; i--)         /* the zeros at the end of the chunk (one compare for a chunk that ends in sound) */
+            ;
+        zr = i ? m - i : (zr + m < 65535u ? zr + m : 65535u);   /* (saturating) */
+        if (!c->on && !i) {                                 /* idle and silent (the tail has rung out): never starts on nothing; b is zero already */
+            for (i = 0; i < m; i++)
+                z[o + i] = 0;
+            continue;
+        }
         ran |= chorus_block(c, req, in, l, r, m);
+        c->zrun = (uint16_t)zr;                             /* (after: a start clears the state) */
+        if (zr >= CHORUS_TAIL)                         /* nothing went in for the whole line: it has rung out, stop (the next start is clean) */
+            c->on = 0;
         for (i = 0; i < m; i++) {
             float sl = l[i] * 32768.0f, sr = r[i] * 32768.0f;
             int32_t li, ri;

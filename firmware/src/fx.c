@@ -790,7 +790,7 @@ static int32_t send_c[CTL], send_d[CTL], send_r[CTL], wet[CTL], mix_l[CTL], mix_
  *   SPREAD (d, the voices' left - right of mix_spread, 0 = none): the voices keep their law (y gld, y grd), the chorus' side rides on the
  *     mid's gains (glm, grm): SPREAD places the voices, the chorus widens the sum;
  *   the sends (CHO / DLY / REV) and perf_throw take the mid, mono, as they take b everywhere; t->peak the louder channel.
- * |x + w| and |x - w| are the level-scaled channels, each held by the stage to 6 full scales (x <= 466,224 at LEVEL 127): x * g stays inside int32
+ * |x + w| and |x - w| are the level-scaled channels, each held by the stage to 5 full scales (x <= 388,520 at LEVEL 127): x * g stays inside int32
  * (task-7.2a-review.md). Without a part_fx (OB-Z, WAVE, ACID) none of this runs and the loops below are the ones there always were. */
 static int32_t chor_z[CTL];
 static int part_fx(track_t *t, int32_t *b, uint32_t n)
@@ -883,7 +883,7 @@ static void mix_part(track_t *t, uint32_t n)
 {
     int32_t *b = part_buf;
     uint32_t i;
-    int cz = 0;
+    int cz = 0, ring = 0;
     mod_begin(t);                                       /* the matrix's per-block values into t->p (mod.c) */
     spread_on = t->p[P_SPRD] > 0 && (trk_vmode(t) == V_POLY || trk_vmode(t) == V_UNISON);   /* (SPREAD, mix_spread) */
     if (track_render(t, b, n))
@@ -893,11 +893,19 @@ static void mix_part(track_t *t, uint32_t n)
         slicer_track(t, 0, n);                          /* (the SLICER's step clock runs on) */
         if (t->ins_run && !t->p[P_ITYPE])
             ins_rest(t);                                /* TYPE OFF while silent: no fade-out left for the next note */
-        if (mod.on)
-            mod_end(t);
-        return;
+        if (!(cz = part_fx(t, b, n))) {                 /* a part with a stereo stage (DRIFT's chorus) rings its tail out on the zero block b (track_render
+                                                         * cleared it): dsp_chorus.c CHORUS_TAIL samples; once rung out it returns 0, as an idle part. Other
+                                                         * engines have no hook: part_fx() is 0 and this is the old return */
+            if (mod.on)
+                mod_end(t);
+            return;
+        }
+        mix_stereo(t, b, 0, chor_z, n);
+        ring = 1;
     }
-    if (spread_on)
+    if (ring)
+        ;                                               /* (the chorus' tail: mixed above) */
+    else if (spread_on)
         mix_spread(t, b, n);
     else {
         track_dist(t, b, n);

@@ -328,6 +328,9 @@ static void test_dsp(void)
 }
 
 /* ------------------------------------------------------------ the int part block --- */
+/* the guard's limit, written down independently of CHORUS_GUARD_FS (task-7.2a-review: x <= 524,287 per track): 5 full scales per channel */
+#define GUARD_LIMIT 163840
+#define GUARD_X ((((GUARD_LIMIT) >> 2) * 9713) >> 10)       /* 9713 = LEVEL_Q12[127] (checked below) */
 static void test_part(void)
 {
     enum { N = 8192 };
@@ -367,8 +370,12 @@ static void test_part(void)
         int32_t m = (b[i] < 0 ? -b[i] : b[i]) + (z[i] < 0 ? -z[i] : z[i]);
         mx = m > mx ? m : mx;
     }
-    check(mx <= CHORUS_GUARD_FS * 32768 + 1 && mx > CHORUS_GUARD_FS * 32768 / 2, "(h) the guard: 100 FS in, max(|L|, |R|) = |mid| + |side| = %d <= %d (%d FS; +1: the floor shifts of mid / side), and reached", (int)mx,
-          CHORUS_GUARD_FS * 32768, CHORUS_GUARD_FS);
+    /* the LITERAL limit, not the macro: x = ((b >> 2) * LEVEL_Q12[127]) >> 10 at 196,608 is 466,224 and x * 4096 must stay under 2^31 (x <= 524,287); a guard of 7 FS
+     * (229,376: x = 543,928) is the overflow of task-7.2a-review. The guard is also reached (above half of it), so a clamp that is not there does not pass */
+    check(mx <= GUARD_LIMIT + 1 && mx > GUARD_LIMIT / 2, "(h) the guard: 100 FS in, max(|L|, |R|) = |mid| + |side| = %d <= %d (the literal 5 FS; +1: the floor shifts of mid / side), and reached", (int)mx,
+          GUARD_LIMIT);
+    check(GUARD_X == 388520 && GUARD_X <= 524287 && (((int64_t)GUARD_X) * 4096) < 2147483648ll && ((((int64_t)(mx + 1) >> 2) * LEVEL_Q12[127]) >> 10) <= 524287,
+          "(h) the guard's x at LEVEL 127 is %d (<= 524287 : x * 4096 inside int32), from the measured output %d too", GUARD_X, (int)((((int64_t)(mx + 1) >> 2) * LEVEL_Q12[127]) >> 10));
     /* an out-of-range mode is OFF: inactive and the block untouched (a stored 127 of the old reserved lane level, -1, 4) */
     ok = 1;
     for (i = 0; i < 4u; i++) {
@@ -476,8 +483,8 @@ static void test_mix_on(void)
     check(ok, "(j) CHOR OFF is centred mono as before: L == R exactly, energy %.3g", off.el);
     for (m = 1; m <= 3u; m++) {
         mixr_t on = mix_run(ENGI_DRIFT, 22, (int)m, 48, 1500, no_sends);
-        check(on.h != off.h && on.ed > 0.0 && on.ed / (on.el + on.er + 1e-30) > 0.02 && on.el > 0.2 * off.el && on.el < 3.0 * off.el,
-              "(j) CHOR %u: a changed, stereo signal (L-R energy %.1f %% of L+R) at a level near the dry's (%.2f x)", m, 100.0 * on.ed / (on.el + on.er + 1e-30), sqrt(on.el / off.el));
+        check(on.h != off.h && on.ed > 0.0 && on.ed / (on.el + on.er + 1e-30) > 0.02 && on.el > 0.45 * off.el && on.el < 0.85 * off.el,   /* amplitude 0.67 .. 0.92 x the dry's: the measured 0.79 .. 0.84 (the donor's comb at a low note, the trim in) */
+              "(j) CHOR %u: a changed, stereo signal (L-R energy %.1f %% of L+R) at a level of 0.67 .. 0.92 x the dry's (%.2f x)", m, 100.0 * on.ed / (on.el + on.er + 1e-30), sqrt(on.el / off.el));
     }
 }
 static void no_sends(void) { trk[0].p[P_DIST] = trk[0].p[P_CHOR] = trk[0].p[P_DLY] = trk[0].p[P_REV] = 0; }
@@ -527,7 +534,7 @@ static void test_headroom(void)
                 }
             }
         }
-    check(worst_x <= 524287 && worst_sum < 2097151, "(l) worst case (4 parts, LEVEL 127, RES / DRV 127, chords, sends 127, DIST 0 / 127, I / II / I+II): x %d <= 524287, four-track sum %d < 2097151", (int)worst_x, (int)worst_sum);
+    check(worst_x <= GUARD_X && worst_sum < 2097151, "(l) worst case (4 parts, LEVEL 127, RES / DRV 127, chords, sends 127, DIST 0 / 127, I / II / I+II): x %d <= 388520 (5 FS at LEVEL 127), four-track sum %d < 2097151", (int)worst_x, (int)worst_sum);
 }
 
 
@@ -535,7 +542,7 @@ static void test_headroom(void)
  * (the int64 sums equal the int32 ones) and each channel stays under 4 x 466,224 */
 static void test_stereo_limits(void)
 {
-    static const int32_t MS[5][2] = {{196608, 0}, {0, 196608}, {98304, 98304}, {-196608, 0}, {-98304, 98304}};
+    static const int32_t MS[5][2] = {{163840, 0}, {0, 163840}, {81920, 81920}, {-163840, 0}, {-81920, 81920}};
     int ok = 1;
     int32_t worst = 0, wpk = 0;
     uint32_t cse, p, i;
@@ -560,18 +567,191 @@ static void test_stereo_limits(void)
         worst = (int32_t)(el > worst ? el : er > worst ? er : worst);
         ok &= send_c[5] <= 4 * 65538 && send_c[5] >= -4 * 65538;
     }
-    check(ok && wpk <= 466230, "(l) mix_stereo at the guard (|L| or |R| = 6 FS), four parts, LEVEL 127, sends full: no wrap, one channel at most %d < 2097151, a part's x at most %d (<= 524287)", (int)worst, (int)wpk);
+    check(ok && wpk <= 388530, "(l) mix_stereo at the guard (|L| or |R| = 5 FS), four parts, LEVEL 127, sends full: no wrap, one channel at most %d < 2097151, a part's x at most %d (<= 524287)", (int)worst, (int)wpk);
 }
 
 /* ------------------------------------------------------------ the parameter --- */
 static void test_param(void)
 {
     const param_desc_t *d = &TP[P_RSV_LN];
+    /* the level trim, from the donor's two gains alone (kDry 0.863, kWet 1.257 of KR106Chorus.h), not from the macro it is compared with: 1 / sqrt(0.863^2 + 1.257^2) */
+    check(fabs((double)CHORUS_TRIM - 1.0 / sqrt(0.863 * 0.863 + 1.257 * 1.257)) < 1e-3 && LEVEL_Q12[127] == 9713,
+          "(m) CHORUS_TRIM %.4f is 1 / sqrt(kDry^2 + kWet^2) = %.4f from the donor's gains (+-1e-3); LEVEL_Q12[127] = %d is the 9713 the guard's arithmetic uses", (double)CHORUS_TRIM,
+          1.0 / sqrt(0.863 * 0.863 + 1.257 * 1.257), (int)LEVEL_Q12[127]);
     check(!strcmp(d->label, "CHOR") && d->fmt == F_ENUM && d->min == 0 && d->max == 3 && d->def == 0 && d->names && !strcmp(d->names[0], "OFF") && !strcmp(d->names[1], "I") &&
               !strcmp(d->names[2], "II") && !strcmp(d->names[3], "I+II"),
           "(m) P_RSV_LN is CHOR: an enum OFF / I / II / I+II, default OFF");
     check(param_fit(d, 127) == 0 && param_fit(d, -1) == 0 && param_fit(d, 4) == 0 && param_fit(d, 2) == 2 && param_fit(d, 3) == 3 && param_fit(&TP[P_REV], 200) == 127,
           "(m) param_fit sends the old reserved lane level 127 (and any out-of-range value) of this one parameter to OFF, other parameters clamp as before");
+}
+
+/* ------------------------------------------------------------ the tail --- */
+/* Fix round 1, Important 1: the chorus keeps ringing for the BBD's longest delay after the last voice. (1) the length, measured from a burst of the loudest input, against the
+ * constants worked out here from the donor's numbers; (2) the line then stops, and the next start is the same as from a fresh state; (3) through the mix with REL 0 there is no cut. */
+static void test_tail_dsp(void)
+{
+    enum { BURST = 3008, TOT = BURST + 1216 };   /* (whole blocks of CTL = 32) */
+    static int32_t b[TOT], z[TOT], bf[TOT], zf[TOT];
+    static chorus_t C, F;
+    int mode, ok = 1, ok_off = 1, ok_stop = 1, ok_clean = 1;
+    uint32_t last_worst = 0, ndmax, k, i;
+    /* the longest delay in samples: (3.30 ms x 1.015 + the deepest half-amplitude 2.13 ms x 1.015) x 44.1, +2 for the Hermite's taps beyond it, +1 for the write offset */
+    double dmax = (CENTRE_MS * 1.015 + DEPTH_MS[1] * 1.015) * 44.1;
+    ndmax = (uint32_t)ceil(dmax) + 2u + 1u;
+    for (mode = 1; mode <= 3; mode++) {
+        uint32_t last = 0;
+        memset(&C, 0, sizeof C);
+        for (i = 0; i < BURST; i++)                                  /* a full-scale-ish noise burst: every delay and every filter state is loaded */
+            b[i] = (int32_t)((rand() / (double)RAND_MAX - 0.5) * 2.0 * 32768.0 * 2.0);
+        for (; i < TOT; i++)
+            b[i] = 0;
+        memset(z, 0, sizeof z);
+        for (k = 0; k < TOT; k += CTL)
+            chorus_part(&C, mode, b + k, z + k, CTL);
+        for (i = BURST; i < TOT; i++)
+            if (b[i] + z[i] != 0 || b[i] - z[i] != 0)
+                last = i - BURST + 1u;                              /* the tail in samples: the index after the last audible one */
+        last_worst = last > last_worst ? last : last_worst;
+        ok_stop &= !C.on;                                           /* it has stopped by the end ... */
+        for (i = BURST + last; i < TOT; i++)
+            ok_off &= b[i] == 0 && z[i] == 0;                       /* ... and is exactly silent */
+        /* a start after the stop is the same as from a fresh state: the same input gives the same bits */
+        memset(&F, 0, sizeof F);
+        for (i = 0; i < 2016; i++)
+            bf[i] = (int32_t)(8000.0 * sin(0.05 * (double)i)), zf[i] = 0;
+        memcpy(b, bf, 2016 * sizeof(int32_t));
+        memset(z, 0, 2016 * sizeof(int32_t));
+        for (k = 0; k < 2016; k += CTL)
+            chorus_part(&C, mode, b + k, z + k, k + CTL <= 2016 ? CTL : 2016 - k);
+        for (k = 0; k < 2016; k += CTL)
+            chorus_part(&F, mode, bf + k, zf + k, k + CTL <= 2016 ? CTL : 2016 - k);
+        ok_clean &= !memcmp(b, bf, 2016 * sizeof(int32_t)) && !memcmp(z, zf, 2016 * sizeof(int32_t));
+    }
+    printf("chorus: the tail: the last audible sample %u after the input stops (worst of the 3 modes); the longest delay %.2f samples -> %u with the Hermite and write offset; CHORUS_TAIL %u\n",
+           last_worst, dmax, ndmax, (unsigned)CHORUS_TAIL);
+    check(CHORUS_TAIL >= ndmax && CHORUS_TAIL >= last_worst && CHORUS_TAIL <= last_worst + 40u && CHORUS_TAIL % CHORUS_SUB == 0u,
+          "(n) CHORUS_TAIL %u covers the measured tail %u (and the longest delay %u) and is not longer than 40 samples more (a whole number of sub-blocks)", (unsigned)CHORUS_TAIL, last_worst, ndmax);
+    check(ok_stop && ok_off, "(n) after the tail the chorus stops (not running) and the output is exactly zero");
+    {   /* idle and silent: the hook does nothing, not even a restart (a start clears the 1.1 kB state: mix_part calls it every block of a silent part with the chorus on) */
+        static int32_t zb[CTL], zz[CTL];
+        uint32_t j;
+        memset(&C, 0, sizeof C);
+        C.buf[7] = 1.0f;
+        for (j = 0; j < 50u; j++)
+            chorus_part(&C, 3, zb, zz, CTL);
+        check(!C.on && C.buf[7] == 1.0f, "(n) an idle chorus fed zeros stays idle and untouched (no restart, no state clear) over 50 blocks");
+    }
+    check(ok_clean, "(n) a start after the tail is bit for bit the start from a fresh state (no stale ring or filter state)");
+}
+
+/* a mix of one DRIFT note with REL 0 and CHOR m: the dry mix after the part, note-off at block 200, 80 blocks of release.
+ * Returns the last non-zero sample (either channel) and the largest sample-to-sample step among the 64 samples before it, relative to the note's rms. */
+typedef struct { double last, step, rms; uint32_t end; } rel_t;
+static void set_rel0(void) { no_sends(); trk[0].p[P_REL] = 0; trk[0].p[P_ATK] = 0; }
+static rel_t rel_run(int chor)
+{
+    enum { NB = 80 };
+    static int32_t l[NB * CTL], r[NB * CTL];
+    rel_t o;
+    uint32_t b, i, e = 0;
+    double acc = 0.0;
+    memset(&o, 0, sizeof o);
+    mix_reset();
+    host_preset(&trk[0], ENGI_DRIFT, 22);
+    trk[0].p[P_VOICE] = V_POLY, trk[0].p[P_SUS] = 127, trk[0].p[P_AMODE] = 0, trk[0].p[P_RSV_LN] = (int16_t)chor;
+    trk[1].p[P_MUTE] = trk[2].p[P_MUTE] = trk[3].p[P_MUTE] = 1;
+    set_rel0();
+    trk_note_on(&trk[0], 48, 100);
+    for (b = 0; b < 200u; b++) {
+        mix_block(mix_out, CTL);
+        if (b >= 100u)
+            for (i = 0; i < CTL; i++)
+                acc += (double)mix_l[i] * (double)mix_l[i];
+    }
+    o.rms = sqrt(acc / (100.0 * CTL));
+    trk_note_off(&trk[0], 48);
+    for (b = 0; b < NB; b++) {
+        mix_block(mix_out, CTL);
+        memcpy(l + b * CTL, mix_l, CTL * sizeof(int32_t));
+        memcpy(r + b * CTL, mix_r, CTL * sizeof(int32_t));
+    }
+    for (i = 0; i < NB * CTL; i++)
+        if (l[i] || r[i])
+            e = i;
+    o.end = e;
+    o.last = fmax(fabs((double)l[e]), fabs((double)r[e]));
+    for (i = e > 63u ? e - 63u : 1u; i <= e; i++) {
+        double s = fmax(fabs((double)l[i] - l[i - 1u]), fabs((double)r[i] - r[i - 1u]));
+        o.step = s > o.step ? s : o.step;
+    }
+    return o;
+}
+static void test_tail_mix(void)
+{
+    rel_t off = rel_run(0), on = rel_run(3);
+    uint32_t m;
+    int ok = 1;
+    printf("chorus: REL 0 release, note rms %.0f: CHOR OFF last sample %.0f, end step %.0f (the dry's 3 ms fade); CHOR I+II last %.0f, end step %.0f, ends %u samples after the OFF's\n", off.rms, off.last,
+           off.step, on.last, on.step, on.end - off.end);
+    /* the bound. The chorus-OFF end is the dry's own 3 ms fade: its last sample is <= 2 % of the note's rms and its end step is what that fade leaves (here a saw's reset
+     * times the fade, 580). The chorus' end is the same kind of fade after the tail rang out: the last sample <= 2 % of the rms (the bug: 5 .. 40 %, a cut mid-wave) and the
+     * step into it at most 1.5 x the OFF's. The tail must also run: the end comes after the OFF's, within CHORUS_TAIL + 2 blocks */
+    check(off.last <= 0.02 * off.rms && on.last <= 0.02 * on.rms && on.step <= 1.5 * off.step,
+          "(o) REL 0, CHOR I+II: the last sample before the end %.0f (<= 2 %% of the note's rms %.0f = %.0f) and the step into it %.0f (<= 1.5 x the OFF's %.0f) ; OFF last %.0f", on.last, on.rms,
+          0.02 * on.rms, on.step, off.step, off.last);
+    check(on.end >= off.end && on.end <= off.end + CHORUS_TAIL + 2u * CTL, "(o) the tail rings out: it ends %u samples after the dry's end (0 .. %u)", on.end - off.end, (unsigned)CHORUS_TAIL + 2u * CTL);
+    for (m = 1; m <= 3u; m++) {
+        rel_t x = rel_run((int)m);
+        printf("chorus: REL 0, CHOR %u: last %.0f, end step %.0f, ends %u samples after the OFF's\n", m, x.last, x.step, x.end - off.end);
+        ok &= x.last <= 0.02 * x.rms && x.step <= 1.5 * off.step;
+    }
+    check(ok, "(o) the same for CHOR I, II and I+II");
+    /* silence, then a new note: the chorus has stopped (a clean state) */
+    rel_run(3);
+    check(!drift_chorus(&trk[0])->on, "(o) after the release and the silence the chorus is stopped (the next note starts from a clean state)");
+}
+
+/* ------------------------------------------------------------ the wet bus --- */
+/* Fix round 1, the wet bus at the guard: four parts whose chorus is held at the guard (5 FS per channel, a 100 FS square), LEVEL 127, PAN centre, every send 127, REVERB HALL at
+ * SIZE 127 / DAMP 0 (the review's worst), through mix_stereo and the real buses (fx_buses, rev_side_mix): |mix + wet| must stay under 2^21 (the master's ((x >> 2) * mg)). */
+static void test_wet_bus(void)
+{
+    enum { NBLK = 1200 };
+    static const uint32_t HALF[5] = {7, 40, 97, 211, 1500};
+    int32_t worst = 0, wx = 0;
+    uint32_t h, p, k, i, b;
+    for (h = 0; h < 5u; h++) {
+        static int32_t bb[CTL], zz[CTL];
+        mix_reset();
+        song.g[G_RTYPE] = 2, song.g[G_RSIZE] = 127, song.g[G_RDAMP] = 0, song.g[G_DTIME] = 3, song.g[G_DFDBK] = 120;
+        for (p = 0; p < 4u; p++) {
+            host_preset(&trk[p], ENGI_DRIFT, 22);
+            trk[p].p[P_LEVEL] = 127, trk[p].p[P_PAN] = 0, trk[p].p[P_SPRD] = 0, trk[p].p[P_CHOR] = trk[p].p[P_DLY] = trk[p].p[P_REV] = 127, trk[p].p[P_RSV_LN] = 3;
+        }
+        for (b = 0, k = 0; b < NBLK; b++) {
+            for (i = 0; i < CTL; i++)
+                send_c[i] = send_d[i] = send_r[i] = mix_l[i] = mix_r[i] = 0;
+            for (p = 0; p < 4u; p++) {
+                for (i = 0; i < CTL; i++)
+                    bb[i] = (((k + i + p * 13u) / HALF[h]) & 1u) ? (3 << 20) : -(3 << 20);
+                chorus_part(drift_chorus(&trk[p]), 3, bb, zz, CTL);
+                trk[p].peak = 0;
+                mix_stereo(&trk[p], bb, 0, zz, CTL);
+                wx = trk[p].peak > wx ? trk[p].peak : wx;
+            }
+            k += CTL;
+            fx_buses(send_c, send_d, send_r, wet, CTL);
+            rev_side_mix(mix_l, mix_r, CTL);
+            for (i = 0; i < CTL; i++) {
+                int64_t sl_ = (int64_t)mix_l[i] + wet[i], sr_ = (int64_t)mix_r[i] + wet[i];
+                sl_ = sl_ < 0 ? -sl_ : sl_, sr_ = sr_ < 0 ? -sr_ : sr_;
+                worst = (int32_t)(sl_ > worst ? sl_ : worst);
+                worst = (int32_t)(sr_ > worst ? sr_ : worst);
+            }
+        }
+    }
+    check(worst < 2097151 && wx <= GUARD_X + 16, "(p) four parts at the 5 FS guard, sends 127, HALL SIZE 127 DAMP 0, square halves 7 .. 1500 samples: |mix + wet| %d < 2097151 (%.2f %% left), a part's x %d <= %d",
+          (int)worst, 100.0 * (2097151.0 - (double)worst) / 2097151.0, (int)wx, GUARD_X + 16);
 }
 
 /* ------------------------------------------------------------ the cost --- */
@@ -603,13 +783,13 @@ static void test_cost(void)
         uint64_t i0, i1;
         memset(&C, 0, sizeof C);
         for (i = 0; i < CTL; i++)
-            b[i] = (int32_t)(12000.0 * sin(0.04 * (double)i));
+            b[i] = (int32_t)(12016.0 * sin(0.04 * (double)i));
         for (k = 0; k < 64u; k++)
             chorus_part(&C, (int32_t)mode, b, z, CTL);
         i0 = instr_now();
         for (k = 0; k < NB; k++) {
             for (i = 0; i < CTL; i++)
-                b[i] = (int32_t)(12000.0 * sin(0.04 * (double)i));
+                b[i] = (int32_t)(12016.0 * sin(0.04 * (double)i));
             chorus_part(&C, (int32_t)mode, b, z, CTL);
         }
         i1 = instr_now();
@@ -618,7 +798,7 @@ static void test_cost(void)
             uint64_t j0 = instr_now(), j1;
             for (k = 0; k < NB; k++)
                 for (i = 0; i < CTL; i++)
-                    b[i] = (int32_t)(12000.0 * sin(0.04 * (double)i));
+                    b[i] = (int32_t)(12016.0 * sin(0.04 * (double)i));
             j1 = instr_now();
             cost[mode] -= (double)(j1 - j0) / ((double)NB * CTL);
         }
@@ -643,6 +823,9 @@ int main(int argc, char **argv)
     test_mix_pan();
     test_headroom();
     test_stereo_limits();
+    test_tail_dsp();
+    test_tail_mix();
+    test_wet_bus();
     test_cost();
     printf("chorus_test: %s\n", bad ? "FAIL" : "ok");
     return bad ? 1 : 0;

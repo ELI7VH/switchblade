@@ -52,14 +52,16 @@ would have to fake a SPREAD pair. The chosen point is where the part's mono sum 
 (the int32 part block: Q15 -> float, the chorus, the guard clamp, mid / side). `eng_drift.c` gets only: `#include "dsp_chorus.c"`,
 the state placement (`DRIFT_MEM` grows by `sizeof(chorus_t)`, after the voices), a 6-line `drift_part_fx` and `.part_fx = drift_part_fx`.
 Activation clears the ring and the filters (an off -> on switch never plays stale audio) and starts the LFO at phase 0 (the donor's
-Init state, so the reference is sample-aligned). A part with no voice sounding skips the hook (mix_part returns early): the ~5 ms
-tail of an already released voice is dropped, the ring is stale-but-silent; no state advances while silent (the cost is zero).
+Init state, so the reference is sample-aligned). A part with no voice sounding keeps calling the hook with a zero block until the line has rung
+out (fix round 1: the first version dropped the tail and clicked at REL 0): `CHORUS_TAIL` = 280 samples (6.3 ms) after the last non-zero input = the longest delay 243.06 + 2 Hermite
+taps + 1, + 2 x 16 samples of filter settle, rounded up to the 8-sample sub-block. Then the chorus stops (the next start is clean, as from a fresh state) and an idle part costs a
+NULL test and a compare. Only parts with a `part_fx` hook are affected (OB-Z, WAVE, ACID return 0 at once).
 
 ## 4. Integer headroom
 
 The hook's output feeds `x = ((b >> 2) * lvl) >> 10` then `x * gl` (limit x <= 524,287) and the four-track sum (< 2^21).
-Guard at the float -> int boundary, as ACID's: each of L and R is held to `|s| < CHORUS_GUARD_FS = 6` full scale (NaN -> 0),
-so `|mid| + |side| = max(|L|, |R|) <= 196,608` and `x <= 466,224` (LEVEL 127, 12.5 % margin on `x * gl`, 4 tracks 1.865 M of 2.097 M).
+Guard at the float -> int boundary, as ACID's: each of L and R is held to `|s| <= CHORUS_GUARD_FS = 5` full scale (NaN -> 0; fix round 1: 6 FS left too little for the wet bus),
+so `|mid| + |side| = max(|L|, |R|) <= 163,840` and `x <= 388,520` (LEVEL 127, 26 % margin on `x * gl`, 4 tracks 1.554 M of 2.097 M, 543 k for the wet bus; four guard-hit parts with every send 127 and HALL SIZE 127 measured 2.05 M).
 DRIFT's own voice output is held to +-2 FS, so with POLY 1 the chorus never reaches the guard (2.12 * 0.657 * 2 = 2.8 FS);
 the guard is for DIST (a mono sum up to 7 FS) and the 3-voice follow-up. Pinned by a test through the real `mix_block` (RES 127,
 DRV 127, chords at max, LEVEL 127, I+II, four DRIFT tracks).
