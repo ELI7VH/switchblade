@@ -48,8 +48,8 @@ def load(m):
 def wave_ranges(tables):
     t = Path(tables).read_text()
     ntbl = int(re.search(r"#define VOID_NTBL (\d+)", t).group(1))
-    nosc2 = int(re.search(r"#define VOID_OSC2_N (\d+)", t).group(1))
-    return [(0, ntbl - 1), PCT, (0, ntbl - 1), PCT, PCT, PCT, (0, nosc2 - 1), PCT]
+    hid = (0, 0)                                                 # TBL2 (E2), MIX (E3), OSC2 (E6): hidden since Task 4.4 (eng_wave.c), range 0..0
+    return [(0, ntbl - 1), PCT, hid, hid, PCT, PCT, hid, PCT]
 
 
 def check_range(errs, who, what, v, lo, hi):

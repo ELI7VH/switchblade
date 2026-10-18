@@ -1,5 +1,10 @@
 # VOID: the VOID WAVE synth as a Felucca engine
 
+> **Departure, Task 4.4 (2026-10-18, the user's decision):** WAVE is a *single*-oscillator wavetable synth. The plugin has two oscillators
+> (OSC2 blended by MIX: Blend / Ring / Sync / FM, and a Morph mix); this engine drops OSC2, MIX, the OSC2 pitch and MORPH, and keeps the
+> keyframe crossfade. TBL2 / MIX / OSC2 (`P_E2`, `P_E3`, `P_E6`) are hidden slots, ids unchanged. Sections below that describe OSC2 or MIX are history.
+
+
 Status (2026-10-13): milestones 1-4 implemented and tested on the host; not yet run on an FM-1.
 
 - Wavetables: `tools/gen_void_tables.py` (55 keyframes, 41.8 KB; `tests/void_tables_test.py`: every keyframe and

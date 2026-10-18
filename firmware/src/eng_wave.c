@@ -1,14 +1,23 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* VOID: the VOID WAVE plugin's voice (VoidWave/Source/DSP), in Felucca's fixed point.
  *
- * Two wavetable oscillators on the plugin's built-in tables 0-8 (tools/gen_void_tables.py: the same
- * frames, keyframes crossfaded, band-limited per octave), blended by MIX; then, as the plugin's
- * Filter.cpp: a 2 % x|x| pre-saturation, its drive shaper (gain, sine, tanh), and the filter TYPE (the
- * track's P_FTYPE): LP = the plugin's LP24 tanh ladder (fb 4.2 re, makeup 1 + 1.8 re), BP / HP / LP12
- * / HP24 / NOTCH its Simper SVF (k = 2 (1 - r)^1.5); then its 0.72 soft clipper (VoiceManager.cpp).
+ * ONE wavetable oscillator on the plugin's built-in tables 0-8 (tools/gen_void_tables.py: the same
+ * frames, keyframes crossfaded, band-limited per octave); then, as the plugin's Filter.cpp: a 2 % x|x|
+ * pre-saturation, its drive shaper (gain, sine, tanh), and the filter TYPE (the track's P_FTYPE): LP = the
+ * plugin's LP24 tanh ladder (fb 4.2 re, makeup 1 + 1.8 re), BP / HP / LP12 / HP24 / NOTCH its Simper SVF
+ * (k = 2 (1 - r)^1.5); then its 0.72 soft clipper (VoiceManager.cpp).
  * The plugin's movement, per voice: pitch drift (+-1.5 cents, a damped random walk), WT drift (up to
- * +-0.055 of the position), and a micro-LFO per oscillator (0.01-0.25 Hz, 0.4-2.5 cents, 0.5-2 % level),
- * new random values every note; phase 0 at a new note (its FREE mode); a 5 ms fade-in before the filter.
+ * +-0.055 of the position), and a micro-LFO (0.01-0.25 Hz, 0.4-2.5 cents, 0.5-2 % level), new random
+ * values every note; phase 0 at a new note (its FREE mode); a 5 ms fade-in before the filter.
+ *
+ * A departure from the plugin, by the user's decision (Task 4.4, 2026-10-18): the plugin has TWO oscillators (OSC2,
+ * blended by osc_mix: Blend / Ring / Sync / FM, and a Morph mix of OSC1 reading both tables); WAVE has one. OSC2
+ * and MIX are gone, and with them the OSC2 pitch (its semitone and fine steps), MORPH and the second micro-LFO's
+ * state. The keyframe crossfade of the one oscillator (the plugin's frame morph along POS) is kept: a position sweep
+ * still morphs smoothly. Their edit slots (P_E2 TBL2, P_E3 MIX, P_E6 OSC2) are hidden, not removed: the ids stay, so
+ * the stored layout (FOR4, user presets, the editor) does not move, and a value a project saved there sounds nothing.
+ * The plugin's detuned pairs (two oscillators of one table a few cents apart) lose their beating here; UNISON and
+ * DETUNE (a voice each) bring it back (presets/four/wave.py names the seven).
  *
  * Felucca's own: the ADSR (amp: the plugin's ENV2; ENV -> FILTER, PITCH, SHAPE), the LFO, the matrix, UNISON /
  * SPREAD, glide and the FX. SHAPE moves the WT position (127 steps of it = the whole table): the plugin's LFO -> WT
@@ -56,8 +65,8 @@ typedef struct {                 /* per voice (engine memory) */
     int32_t f[4];                /* filter: the ladder's y0..y3; the SVFs' ic1, ic2 (HP24: and its second) */
     int32_t pd, pdv;             /* pitch drift and its velocity, cents Q20 */
     int32_t wd, wdv;             /* WT drift and its velocity, position Q20 */
-    uint32_t lph[2], linc[2];    /* micro-LFOs: phase, increment per control block */
-    int32_t lpit[2], llev[2];    /* their depths: cents Q20, level Q15 */
+    uint32_t lph, linc;          /* the micro-LFO: phase, increment per control block */
+    int32_t lpit, llev;          /* its depths: cents Q20, level Q15 */
     int32_t rng;
     int32_t ramp;                /* fade-in, Q15 */
     int32_t dcw;                 /* the DC blocker's state, Q(15 + VOID_DC_SH) */
@@ -107,8 +116,8 @@ static void void_osc_at(void_osc_t *o, uint32_t tb, int32_t pos, uint32_t inc)
 {
     uint32_t n0l = VOID_N0LOG2[tb], hmax = (1u << n0l) >> 2, lv = 0, k = VOID_KFIRST[tb], k1 = VOID_KFIRST[tb + 1] - 1u;
     uint32_t ofs;
-    while (lv < VOID_NLEV - 1u && inc > VOID_LIM_INC / (hmax >> lv))   /* the most harmonics below 18 kHz */
-        lv++;
+    while (lv < VOID_NLEV - 1u && inc > (VOID_LIM_INC >> (n0l - 2u - lv)))   /* the most harmonics below 18 kHz: */
+        lv++;                                          /* hmax >> lv is a power of two (n0l >= 7), so the divide is a shift */
     ofs = (2u << n0l) - ((2u << n0l) >> lv);
     o->sh = 32u - (n0l - lv);
     o->mask = ((1u << n0l) >> lv) - 1u;
@@ -335,6 +344,12 @@ static inline int32_t void_flt_run(const void_flt_t *fl, int32_t *f, int32_t s)
  * y * 49 <= 2^23 -- all comfortably inside int32. VOID_CLIP_MAX does not move with R. 124448 is past what
  * the soft clipper's table covers, so the return is clamped to VOID_CLIP_MAX here rather than at the call
  * site: y is what indexes that table (tests/void_test.c test_dc_range pins both halves of this). */
+VOID_INLINE int32_t void_dc_raw(int32_t *w, int32_t x)    /* void_dc without the clamp: void_clip clamps, inside its branch */
+{
+    int32_t y = x + (*w >> VOID_DC_SH);
+    *w -= (y * (32768 - VOID_DC_R)) >> (15 - VOID_DC_SH);
+    return y;
+}
 VOID_INLINE int32_t void_dc(int32_t *w, int32_t x)
 {
     int32_t y = x + (*w >> VOID_DC_SH);
@@ -342,14 +357,31 @@ VOID_INLINE int32_t void_dc(int32_t *w, int32_t x)
     return clamp(y, -VOID_CLIP_MAX, VOID_CLIP_MAX);    /* the state keeps the unclamped y: the response is */
 }                                                      /* linear, the clamp only guards the table index */
 
+/* the soft clipper on the blocker's raw output: above 0.72, thr + o / (1 + o) from VOID_SOFT. The table index must stay in range, which
+ * is void_dc's clamp: it is done here, inside the branch (the clamp is the identity at or below VOID_CLIP_THR < VOID_CLIP_MAX, so
+ * the common sample does not pay for it); void_clip(y) == the old void_clip'(clamp(y, +-VOID_CLIP_MAX)) for every y (test_dc_range) */
+VOID_INLINE int32_t void_clip(int32_t y)
+{
+    int32_t a = y < 0 ? -y : y;
+    if (a > VOID_CLIP_THR) {
+        uint32_t o, k;
+        if (a > VOID_CLIP_MAX)
+            a = VOID_CLIP_MAX;
+        o = (uint32_t)(a - VOID_CLIP_THR);
+        k = o >> 8;
+        a = VOID_CLIP_THR + VOID_SOFT[k] + (((VOID_SOFT[k + 1u] - VOID_SOFT[k]) * (int32_t)(o & 255u)) >> 8);
+        y = y < 0 ? -a : a;
+    }
+    return y;
+}
+
 /* ------------------------------------------------------------------------- voice --- */
 static void void_note_on(track_t *t, voice_t *v)
 {
     void_vc_t *c = void_vc(t, v);
-    uint32_t k;
     if (!c->rng)
         c->rng = (int32_t)(0x2545F491u ^ ((uint32_t)(v - t->v) * 0x9E3779B9u) ^ ((uint32_t)(t - trk) << 24));
-    v->ph[0] = v->ph[1] = 0;                           /* FREE: a new note from phase 0 (a sounding voice */
+    v->ph[0] = 0;                                      /* FREE: a new note from phase 0 (a sounding voice */
     if (!v->env) {                                     /* keeps its phases: voice.c) */
         c->f[0] = c->f[1] = c->f[2] = c->f[3] = 0;
         c->ramp = 0;
@@ -364,14 +396,18 @@ static void void_note_on(track_t *t, voice_t *v)
         c->epk = 32767 - vs + ((vs * (int32_t)v->vel) >> 7);
     }
     c->tick = 0;
-    for (k = 0; k < 2u; k++) {                         /* UnisonVoice.cpp, per note: */
+    {                                                  /* UnisonVoice.cpp, per note: */
         uint32_t u1 = (uint32_t)void_rnd16(c), u2 = (uint32_t)void_rnd16(c);
         int32_t u3 = void_rnd16(c), u4 = void_rnd16(c);
-        c->linc[k] = 31165u + ((u1 >> 4) * 747950u >> 12);   /* 0.01 + U 0.24 Hz (Hz * CTL / FS * 2^32) */
-        c->lph[k] = u2 << 16;
-        c->lpit[k] = 419430 + ((u3 * 8601) >> 8);      /* 0.4 + U 2.1 cents, Q20 */
-        c->llev[k] = 164 + ((u4 * 492) >> 16);         /* 0.005 + U 0.015, Q15 */
+        c->linc = 31165u + ((u1 >> 4) * 747950u >> 12);   /* 0.01 + U 0.24 Hz (Hz * CTL / FS * 2^32) */
+        c->lph = u2 << 16;
+        c->lpit = 419430 + ((u3 * 8601) >> 8);         /* 0.4 + U 2.1 cents, Q20 */
+        c->llev = 164 + ((u4 * 492) >> 16);            /* 0.005 + U 0.015, Q15 */
     }
+    /* the plugin's second oscillator drew its micro-LFO here, four more values. Gone with it, but the draws are kept: the
+     * walk's random sequence (void_walk) follows them, so dropping them would change the drift, and so the sound, of
+     * every preset, including those that never sounded OSC2 (MIX 0) and are otherwise bit for bit as before */
+    (void)void_rnd16(c), (void)void_rnd16(c), (void)void_rnd16(c), (void)void_rnd16(c);
 }
 
 /* the plugin's per-block random walks (VoiceManager.cpp), every 4th control block (its 128 samples) */
@@ -387,55 +423,46 @@ static void void_walk(void_vc_t *c)
 
 /* a block of one voice, the inner loop specialised by its filter (lad: the ladder, else the SVFs) and drive */
 typedef struct {
-    void_osc_t o1, o2;
+    void_osc_t o1;
     void_flt_t fl;
-    int32_t c1, c2;              /* each oscillator's weight: blend, micro-LFO level, table -> Q15; Q14 */
-    uint32_t inc1, inc2;
-    int two;                     /* OSC2 sounds (MIX > 0) */
+    int32_t c1;                  /* the oscillator's weight: micro-LFO level, table -> Q15; Q14 */
+    uint32_t inc1;
 } void_blk_t;
 
 /* the loop of a block, specialised at each call by its filter (lad: the ladder, else the SVFs) and drive */
 VOID_INLINE void void_block(const void_blk_t *b, voice_t *v, void_vc_t *c, int32_t *out, uint32_t n, const vmod_t *m,
-                            const int lad, const int drv)
+                            const int lad, const int drv, const int slow)
 {
     /* everything the loop reads, local: out[] is written through a pointer, so the compiler would read each of
      * these again after every sample */
-    const void_osc_t o1 = b->o1, o2 = b->o2;
+    const void_osc_t o1 = b->o1;
     const void_flt_t fl = b->fl;
-    const int32_t c1 = b->c1, c2 = b->c2, two = b->two;
-    const uint32_t inc1 = b->inc1, inc2 = b->inc2;
-    uint32_t i, ph1 = v->ph[0], ph2 = v->ph[1];
+    const int32_t c1 = b->c1;
+    const uint32_t inc1 = b->inc1;
+    uint32_t i, ph1 = v->ph[0];
     int32_t ramp = c->ramp, dcw = c->dcw, f[4] = {c->f[0], c->f[1], c->f[2], c->f[3]};
     int32_t amp = m->amp0 << CTL_LOG2, damp = m->amp1 - m->amp0;   /* voice_amp's ramp, stepped */
     for (i = 0; i < n; i++) {
-        int32_t s = void_osc(&o1, ph1) * c1, y, a;
-        if (two)
-            s += void_osc(&o2, ph2) * c2;
+        int32_t s = void_osc(&o1, ph1) * c1, y;
         s >>= 14;                                      /* Q15, 1.0 = the plugin's */
         ph1 += inc1;
-        ph2 += inc2;
-        if (ramp < 32767) {
+        if (slow && ramp < 32767) {
             ramp += VOID_RAMP_STEP;
             s = mulq15(s, ramp > 32767 ? 32767 : ramp);
         }
         s = void_front(&fl, s, drv);
-        y = void_close(&fl, f, lad ? void_ladder(&fl, f, s) : void_svf(&fl, f, s));
+        y = lad ? void_ladder(&fl, f, s) : void_svf(&fl, f, s);
+        if (slow)
+            y = void_close(&fl, f, y);
         /* the voice at the plugin's level, the DC blocker (void_dc: not the plugin's), then its soft clipper:
          * above 0.72, thr + o / (1 + o). The blocker comes first so the clipper keeps its two sides symmetric
          * about 0, as the plugin's does. The plugin's level is ~6 dB below Felucca's other engines, made up
          * after the clipper (which stays at the plugin's level) */
-        y = void_dc(&dcw, mulq15(clamp(y, -110000, 110000), VOID_OUT_LEVEL));
-        a = y < 0 ? -y : y;
-        if (a > VOID_CLIP_THR) {                       /* o / (1 + o) from VOID_SOFT (o < 2: VOID_CLIP_MAX) */
-            uint32_t o = (uint32_t)(a - VOID_CLIP_THR), k = o >> 8;
-            a = VOID_CLIP_THR + VOID_SOFT[k] + (((VOID_SOFT[k + 1u] - VOID_SOFT[k]) * (int32_t)(o & 255u)) >> 8);
-            y = y < 0 ? -a : a;
-        }
+        y = void_clip(void_dc_raw(&dcw, mulq15(clamp(y, -110000, 110000), VOID_OUT_LEVEL)));
         out[i] += mulq15(mulq15(y, amp >> CTL_LOG2), VOICE_FS) << 2;   /* voice_amp; +6 dB after the clipper: */
         amp += damp;                                   /* Felucca's engines' level */
     }
     v->ph[0] = ph1;
-    v->ph[1] = ph2;
     c->ramp = ramp;
     c->dcw = dcw;
     c->f[0] = f[0];
@@ -444,47 +471,39 @@ VOID_INLINE void void_block(const void_blk_t *b, voice_t *v, void_vc_t *c, int32
     c->f[3] = f[3];
 }
 
+/* a block that fades in (the first 5 ms of a note) or closes (CUT at 20 Hz): the same loop with every test in it, one
+ * copy, lad / drv at run time, out of line. The four fast loops carry neither: void_close's drain, which the host
+ * compiler if-converts, cost ~29 instructions a sample in each of them whether it ran or not (it never runs in the
+ * factory sounds), the ramp ~8 more, for the first 7 blocks of a note */
+static __attribute__((noinline)) void void_block_slow(const void_blk_t *b, voice_t *v, void_vc_t *c, int32_t *out,
+                                                      uint32_t n, const vmod_t *m)
+{
+    void_block(b, v, c, out, n, m, b->fl.ft == VF_LP24, b->fl.drv != 0, 1);
+}
+
 static void void_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
 {
     const int16_t *p = t->p;
     void_vc_t *c = void_vc(t, v);
     void_blk_t b;
-    int32_t mix = clamp(p[P_E3], 0, 127) * 2, cutk = clamp(p[P_E4], 0, 127), pos, l1, l2, g1, g2, mc;
+    int32_t cutk = clamp(p[P_E4], 0, 127), pos, l1, g1, mc;
     if (n > CTL)
         n = CTL;
     if ((c->tick++ & 3u) == 0u)
         void_walk(c);
-    c->lph[0] += c->linc[0];
-    c->lph[1] += c->linc[1];
-    l1 = sine_i(c->lph[0]);
-    l2 = sine_i(c->lph[1]);
-    g1 = 32767 + mulq15(l1, c->llev[0]);               /* micro-LFO level, Q15 around 1 */
-    g2 = 32767 + mulq15(l2, c->llev[1]);
-    /* pitch: the drift (both) and each micro-LFO, in cents; OSC2 against OSC1 by its step, or (MORPH) OSC1's pitch
-     * and phase with its micro-LFO: one oscillator reading two tables, as the plugin's Morph mix */
-    b.inc1 = void_detune(m->inc, c->pd + ((l1 * (c->lpit[0] >> 8)) >> 7));
-    if (p[P_E6] >= VOID_OSC2_MORPH) {
-        b.inc2 = b.inc1;
-        v->ph[1] = v->ph[0];
-        g2 = g1;
-    } else {
-        b.inc2 = void_detune(cents_inc(m->pitch16, VOID_OSC2_CT[clamp(p[P_E6], 0, VOID_OSC2_N - 1)], m->fine),
-                             c->pd + ((l2 * (c->lpit[1] >> 8)) >> 7));
-    }
+    c->lph += c->linc;
+    l1 = sine_i(c->lph);
+    g1 = 32767 + mulq15(l1, c->llev);                  /* micro-LFO level, Q15 around 1 */
+    b.inc1 = void_detune(m->inc, c->pd + ((l1 * (c->lpit >> 8)) >> 7));   /* pitch: the drift and the micro-LFO, in cents */
     /* position: the knob, SHAPE (127 steps = the table), the drift */
     pos = p[P_E1] * 255 * 256 / 127 + (m->shape - (64 << 8)) * 255 / 127 + ((c->wd * 255) >> 12);
     pos = clamp(pos, 0, 255 << 8);
     void_osc_at(&b.o1, (uint32_t)clamp(p[P_E0], 0, VOID_NTBL - 1), pos, b.inc1);
-    void_osc_at(&b.o2, (uint32_t)clamp(p[P_E2], 0, VOID_NTBL - 1), pos, b.inc2);
-    /* the weights: (1 - mix) and mix (MIX 0..127 -> 0..254 / 256), the micro-LFO levels, table -> Q15 (Q14). The
-     * SQUARE's pulse is twice the table's peak: its reading is halved (void_osc) and its weight doubled */
-    b.two = mix != 0;
-    b.c1 = (int32_t)((((int64_t)g1 * (256 - mix)) * (VOID_WT_NORM >> 1)) >> 23);
-    b.c2 = (int32_t)((((int64_t)g2 * mix) * (VOID_WT_NORM >> 1)) >> 23);
+    /* the weight: the micro-LFO level, table -> Q15 (Q14). The SQUARE's pulse is twice the table's peak: its reading
+     * is halved (void_osc) and its weight doubled */
+    b.c1 = (int32_t)((((int64_t)g1 * 256) * (VOID_WT_NORM >> 1)) >> 23);
     if (b.o1.pw)
         b.c1 <<= 1;
-    if (b.o2.pw)
-        b.c2 <<= 1;
     /* the filter: CUT on the plugin's knob law, plus ENV / LFO / matrix (m->cutoff: cutoff steps << 8). With FLT ENV
      * on, ENV DEST FLT's share of m->cutoff (the amp ADSR's) is the filter envelope's instead, the plugin's way */
     mc = m->cutoff;
@@ -500,15 +519,17 @@ static void void_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
     }
     void_flt_set(&b.fl, (uint32_t)p[P_FTYPE] % 6u, clamp((int32_t)VOID_CUT_Q8[cutk] + mc, 0, 127 << 8),
                  clamp(p[P_E5], 0, 127), clamp(p[P_E7], 0, 127), !cutk && mc <= 0);
-    if (b.fl.ft == VF_LP24) {
+    if (c->ramp < 32767 || b.fl.close < 32767) {
+        void_block_slow(&b, v, c, out, n, m);
+    } else if (b.fl.ft == VF_LP24) {
         if (b.fl.drv)
-            void_block(&b, v, c, out, n, m, 1, 1);
+            void_block(&b, v, c, out, n, m, 1, 1, 0);
         else
-            void_block(&b, v, c, out, n, m, 1, 0);
+            void_block(&b, v, c, out, n, m, 1, 0, 0);
     } else if (b.fl.drv) {
-        void_block(&b, v, c, out, n, m, 0, 1);
+        void_block(&b, v, c, out, n, m, 0, 1, 0);
     } else {
-        void_block(&b, v, c, out, n, m, 0, 0);
+        void_block(&b, v, c, out, n, m, 0, 0, 0);
     }
 }
 
@@ -556,11 +577,11 @@ static const engine_t ENG_WAVE = {
     .edit = {
         {"TBL1", F_ENUM, 0, VOID_NTBL - 1, 1, N_VOID_TBL, 0},
         {"POS", F_PCT, 0, 127, 0, 0, 0},
-        {"TBL2", F_ENUM, 0, VOID_NTBL - 1, 1, N_VOID_TBL, 0},
-        {"MIX", F_PCT, 0, 127, 64, 0, 0},
+        {"-", F_INT, 0, 0, 0, 0, 0},                /* E2 TBL2 (hidden: one oscillator, Task 4.4) */
+        {"-", F_INT, 0, 0, 0, 0, 0},                /* E3 MIX (hidden) */
         {"CUT", F_INT, 0, 127, 100, 0, 0},
         {"RES", F_PCT, 0, 127, 0, 0, 0},
-        {"OSC2", F_ENUM, 0, VOID_OSC2_N - 1, VOID_OSC2_ZERO, N_VOID_OSC2, 0},
+        {"-", F_INT, 0, 0, 0, 0, 0},                /* E6 OSC2 (hidden) */
         {"DRV", F_PCT, 0, 127, 0, 0, 0},
     },
     .presets = WAVE_PRESETS,

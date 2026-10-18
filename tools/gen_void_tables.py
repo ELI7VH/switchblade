@@ -183,14 +183,6 @@ def header(path):
 
 
 # ------------------------------------------------------------------------- the curves ---
-OSC2_FINE = [-50, -30, -20, -15, -12, -10, -8, -6, -4, -2, 2, 4, 6, 8, 10, 12, 15, 20, 30, 50]
-
-
-def osc2_steps():
-    """OSC2's pitch against OSC1, in cents: semitones -24..+24 and a fine detune within one"""
-    return sorted(OSC2_FINE + [100 * k for k in range(-24, 25)])
-
-
 def curves():
     L = []
     # CUT 0..127 -> Felucca's cutoff index (CUTOFF_HZ: 30 Hz * (16000 / 30)^(i / 127)), Q8: the plugin's
@@ -221,16 +213,6 @@ def curves():
     # RES 0..127: (1 - r)^1.5, Q15 (r = RES / 127, clamped at 0.9999 as the plugin's): SVF k = 2 x, ladder re = 1 - x
     L += ["/* (1 - RES / 127)^1.5, Q15 */"]
     L += arr("VOID_RES_P15", "uint16_t", [int(round(32767 * (1 - min(v / 127, 0.9999)) ** 1.5)) for v in range(128)])
-    st = osc2_steps()
-    L += ["/* OSC2: its pitch against OSC1 (cents) and the names; the last, MORPH, is OSC1's pitch and phase (the plugin's",
-          " * Morph mix: OSC1 reading OSC2's table) */"]
-    L += arr("VOID_OSC2_CT", "int16_t", st + [0])
-    names = [("0" if c == 0 else f"{c // 100:+d}") if c % 100 == 0 else f"{c:+d}c" for c in st] + ["MORPH"]
-    L += [f"static const char *const N_VOID_OSC2[{len(names)}] = {{"]    # (the steps and MORPH: one name per value)
-    for i in range(0, len(names), 12):
-        L.append("    " + ", ".join(f'"{n}"' for n in names[i:i + 12]) + ",")
-    L += ["};", f"#define VOID_OSC2_N {len(names)}", f"#define VOID_OSC2_ZERO {st.index(0)}",
-          f"#define VOID_OSC2_MORPH {len(st)}"]
     return L
 
 

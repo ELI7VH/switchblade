@@ -4,8 +4,11 @@
  * 1. the engine: number 1 (ENGI_WAVE, "WAVE"), its knobs, its presets; and that loading a preset in the
  *    harness applies WAVE_PX (void_track_loaded) as ui.c apply_preset_to does: TYPE, voice, detune,
  *    spread, glide, LFO routing, filter envelope, matrix.
- * 2. pitch: SINE at A4 is 440 Hz within the plugin's movement (drift +-1.5 cents, micro-LFO up to 2.5); OSC2 +12
- *    alone an octave up; the fine steps (-12c) as many cents.
+ * 2. pitch: SINE at A4 is 440 Hz within the plugin's movement (drift +-1.5 cents, micro-LFO up to 2.5), and at
+ *    A3 220 Hz.
+ * 2b. one oscillator (Task 4.4): the dead edit slots (TBL2, MIX, OSC2: label "-", no range) are hidden from the pages,
+ *    and nothing a preset or a project holds in them sounds: every preset renders the same with them at 0 and at
+ *    the ends of their old ranges.
  * 3. band-limited: SAW, SQUARE and SPECTRAL (its top position) at C8: what is not a harmonic below -30 dB (the
  *    linear read of a level at 4 samples per cycle of its top harmonic; the plugin aliases at ~-10 dB here).
  * 4. bounded: every table x every filter TYPE at RES 127 and DRV 127, CUT 0 / 127, C1 / C4 / C8, POS 0 / 127: no
@@ -106,8 +109,8 @@ static void fresh(uint32_t e, uint32_t pi)
     nrec = 0;
 }
 
-/* track 1 = VOID, dry, no envelope or LFO movement, a held note: the oscillators as they are */
-static track_t *plain(uint32_t tb1, uint32_t tb2, uint32_t mix, uint32_t osc2, uint32_t ft)
+/* track 1 = VOID, dry, no envelope or LFO movement, a held note: the oscillator as it is */
+static track_t *plain(uint32_t tb1, uint32_t ft)
 {
     track_t *t = &trk[0];
     fresh(ENGI_WAVE, 0);
@@ -121,23 +124,14 @@ static track_t *plain(uint32_t tb1, uint32_t tb2, uint32_t mix, uint32_t osc2, u
     t->p[P_VOICE] = V_POLY;
     t->p[P_E0] = (int16_t)tb1;
     t->p[P_E1] = 0;
-    t->p[P_E2] = (int16_t)tb2;
-    t->p[P_E3] = (int16_t)mix;
+    t->p[P_E2] = 0;
+    t->p[P_E3] = 0;
     t->p[P_E4] = 127;
     t->p[P_E5] = 0;
-    t->p[P_E6] = (int16_t)osc2;
+    t->p[P_E6] = 0;
     t->p[P_E7] = 0;
     t->p[P_FTYPE] = (int16_t)ft;
     return t;
-}
-
-static uint32_t osc2_step(int ct)
-{
-    uint32_t k;
-    for (k = 0; k < VOID_OSC2_N; k++)
-        if (VOID_OSC2_CT[k] == ct)
-            return k;
-    return VOID_OSC2_ZERO;
 }
 
 /* frequency of rec[a .. b) by its rising zero crossings (interpolated) */
@@ -161,9 +155,19 @@ static double cents(double f, double ref) { return 1200.0 * log2(f / ref); }
 static void test_engine(void)
 {
     const engine_t *e = ENGINES[ENGI_WAVE];
-    check("engine 1 is WAVE, two EDIT pages of four (TBL1 POS TBL2 MIX, CUT RES OSC2 DRV), presets",
-          str_eq(e->name, "WAVE") && str_eq(e->edit[0].label, "TBL1") && str_eq(e->edit[4].label, "CUT") &&
-          str_eq(e->edit[6].label, "OSC2") && str_eq(e->edit[7].label, "DRV") && e->npresets >= 5u && e->mem);
+    uint32_t k, hidden = 0;
+    check("engine 1 is WAVE, two EDIT pages of four (TBL1 POS - -, CUT RES - DRV), presets",
+          str_eq(e->name, "WAVE") && str_eq(e->edit[0].label, "TBL1") && str_eq(e->edit[1].label, "POS") &&
+          str_eq(e->edit[4].label, "CUT") && str_eq(e->edit[5].label, "RES") && str_eq(e->edit[7].label, "DRV") &&
+          e->npresets >= 5u && e->mem);
+    /* the one-oscillator WAVE (Task 4.4): TBL2 (E2), MIX (E3) and OSC2 (E6) keep their ids, so the stored layout does
+     * not move, but are hidden: label "-" (a blank card on the pages, "E3" in the matrix: mod.c mod_dst_name) and no
+     * range (a knob turn does nothing, a matrix destination adds nothing: the convention of the inert G_DRLVL) */
+    for (k = 0; k < 8u; k++)
+        if (k == 2u || k == 3u || k == 6u)
+            hidden += e->edit[k].label && e->edit[k].label[0] == '-' && e->edit[k].min == 0 && e->edit[k].max == 0 &&
+                      e->edit[k].def == 0;
+    check("WAVE: TBL2, MIX and OSC2 (E3, E4, E7 in the matrix) are hidden: label \"-\", range 0..0, default 0", hidden == 3u);
 }
 
 /* ----------------------------------------------------------------- 1b --- */
@@ -211,23 +215,63 @@ static void test_px(void)
 static void test_pitch(void)
 {
     double f;
-    track_t *t = plain(0, 0, 0, VOID_OSC2_ZERO, 3);
+    track_t *t = plain(0, 3);
     trk_note_on(t, 69, 100);
     blocks(NREC / CTL);
     f = freq_of(FS / 4u, NREC);
     printf("void: SINE A4 %.3f Hz (%+.2f cents)\n", f, cents(f, 440.0));
     check("pitch: SINE at A4 is 440 Hz within the plugin's movement (+-4 cents)", fabs(cents(f, 440.0)) < 4.0);
-    t = plain(0, 0, 127, osc2_step(1200), 3);
+    t = plain(0, 3);
     trk_note_on(t, 57, 100);
     blocks(NREC / CTL);
     f = freq_of(FS / 4u, NREC);
-    check("pitch: OSC2 +12 alone (MIX 127 = 254 / 256 of it): an octave up, 440 Hz from A3", fabs(cents(f, 440.0)) < 4.0);
-    t = plain(0, 0, 127, osc2_step(-12), 3);
-    trk_note_on(t, 69, 100);
-    blocks(NREC / CTL);
-    f = freq_of(FS / 4u, NREC);
-    printf("void: OSC2 -12c at A4: %.3f Hz (%+.2f cents)\n", f, cents(f, 440.0));
-    check("pitch: OSC2 -12c: 12 cents below (+-4)", fabs(cents(f, 440.0) + 12.0) < 4.0);
+    printf("void: SINE A3 %.3f Hz (%+.2f cents)\n", f, cents(f, 220.0));
+    check("pitch: SINE at A3 is 220 Hz (+-4 cents)", fabs(cents(f, 220.0)) < 4.0);
+}
+
+/* ----------------------------------------------------------------- 2b --- */
+/* One oscillator (Task 4.4): TBL2 (P_E2), MIX (P_E3) and OSC2 (P_E6) are dead. Every factory preset, rendered for 0.5 s with a
+ * 3-note chord through the part's own path, must come out the same sample for sample with those three at 0 and with
+ * each at the far end of what they once held (TBL2 8, MIX 127, OSC2 MORPH = 69, then +12 st = 62). A project or a user preset
+ * from before the change carries such values: they must not sound. The real render is compared, not a flag. */
+static uint64_t chord_hash(uint32_t pi, int t2, int mx, int o2)
+{
+    static const uint8_t N[3] = {48, 55, 64};
+    track_t *t = &trk[0];
+    uint64_t h = 1469598103934665603ull;
+    uint32_t i;
+    memset(eng_mem, 0, sizeof eng_mem);                /* (the voices' random state, or two renders of one preset differ) */
+    memset(eng_mem_owner, 0, sizeof eng_mem_owner);
+    fresh(ENGI_WAVE, pi);
+    t->p[P_DIST] = t->p[P_CHOR] = t->p[P_DLY] = t->p[P_REV] = 0;
+    t->p[P_E2] = (int16_t)t2;
+    t->p[P_E3] = (int16_t)mx;
+    t->p[P_E6] = (int16_t)o2;
+    for (i = 0; i < 3u; i++)
+        trk_note_on(t, N[i], 100);
+    nrec = 0;
+    blocks(FS / 2u / CTL);
+    for (i = 0; i < nrec; i++)
+        h = (h ^ (uint32_t)rec[i]) * 1099511628211ull;
+    return h;
+}
+static void test_one_osc(void)
+{
+    uint32_t k, bad_n = 0;
+    char msg[160];
+    for (k = 0; k < ENGINES[ENGI_WAVE]->npresets; k++) {
+        uint64_t a = chord_hash(k, 0, 0, 0);
+        if (a != chord_hash(k, 8, 127, 69) || a != chord_hash(k, 4, 64, 62) || a != chord_hash(k, 0, 127, 0) ||
+            a != chord_hash(k, 8, 0, 0) || a != chord_hash(k, 0, 0, 69)) {
+            printf("void: OSC2 still sounds: %s\n", ENGINES[ENGI_WAVE]->presets[k].name);
+            bad_n++;
+        }
+        if (chord_hash(k, 0, 0, 0) == 1469598103934665603ull)   /* (the render must have run: hashed something) */
+            bad_n++;
+    }
+    snprintf(msg, sizeof msg, "one oscillator: TBL2, MIX and OSC2 at any value change no sample of any preset (%u of %u differ)",
+             bad_n, (unsigned)ENGINES[ENGI_WAVE]->npresets);
+    check(msg, bad_n == 0u);
 }
 
 /* ------------------------------------------------------------------ 3 --- */
@@ -260,7 +304,7 @@ static void test_bandlimit(void)
     double worst = -999;
     char msg[160];
     for (k = 0; k < 3u; k++) {
-        track_t *t = plain(C[k].tb, 0, 0, VOID_OSC2_ZERO, 3);
+        track_t *t = plain(C[k].tb, 3);
         double d;
         t->p[P_E1] = (int16_t)C[k].pos;
         trk_note_on(t, 108, 100);
@@ -282,7 +326,7 @@ static void test_bounded(void)
         for (ft = 0; ft < 6u; ft++)
             for (c = 0; c < 4u; c++)
                 for (nt = 0; nt < 3u; nt++) {
-                    track_t *t = plain(tb, (tb + 4u) % VOID_NTBL, 64, osc2_step(700), ft);
+                    track_t *t = plain(tb, ft);
                     int64_t sum = 0;
                     uint32_t i, dc;
                     t->p[P_E5] = 127;
@@ -309,7 +353,7 @@ static void test_bounded(void)
           wraps == 0u);
     check("bounded: no DC at C4 / C8, CUT 127 (under 2 % of a voice's full scale)", worst_dc < VOICE_FS / 50u);
     {   /* TYPE and table changes while notes sound */
-        track_t *t = plain(1, 3, 64, osc2_step(1200), 0);
+        track_t *t = plain(1, 0);
         uint32_t i, k;
         int32_t pk = 0;
         t->p[P_E5] = 120;
@@ -415,6 +459,29 @@ static void test_dc_range(void)
              "DC: what void_dc returns stays inside the clipper's table (%d <= VOID_CLIP_MAX %d, VOID_SOFT[%u])",
              got, VOID_CLIP_MAX, (unsigned)NELEM(VOID_SOFT));
     check(msg, got <= VOID_CLIP_MAX && (uint32_t)((VOID_CLIP_MAX - VOID_CLIP_THR) >> 8) + 1u < NELEM(VOID_SOFT));
+}
+
+/* Task 4.4: the render loop does not call void_dc (which clamps every sample) but void_dc_raw and void_clip, whose clamp sits inside the
+ * clipper's branch. Exhaustively over the blocker's whole range (+-124448, its peak gain of 2 on a full-scale input) the pair must give what
+ * clamp-then-clip gave, and the table index must stay in range: dropping the clamp from void_clip fails here (read past VOID_SOFT). */
+static void test_clip_equiv(void)
+{
+    int32_t y, bad_n = 0, worst = 0;
+    char msg[200];
+    for (y = -125000; y <= 125000; y++) {
+        int32_t c = clamp(y, -VOID_CLIP_MAX, VOID_CLIP_MAX), a = c < 0 ? -c : c, want = c;
+        if (a > VOID_CLIP_THR) {                       /* the previous loop body, verbatim */
+            uint32_t o = (uint32_t)(a - VOID_CLIP_THR), k = o >> 8;
+            a = VOID_CLIP_THR + VOID_SOFT[k] + (((VOID_SOFT[k + 1u] - VOID_SOFT[k]) * (int32_t)(o & 255u)) >> 8);
+            want = c < 0 ? -a : a;
+        }
+        if (void_clip(y) != want)
+            bad_n++;
+        a = void_clip(y) < 0 ? -void_clip(y) : void_clip(y);
+        worst = a > worst ? a : worst;
+    }
+    snprintf(msg, sizeof msg, "DC: void_clip(raw y) == clip(clamp(y)) for every y in +-125000 (%d differ, largest output %d)", bad_n, worst);
+    check(msg, bad_n == 0);
 }
 
 /* ------------------------------------------------------------------ 6 --- */
@@ -577,7 +644,7 @@ static void demos(const char *dir)
         wav16(dir, nm);
     }
     for (tb = 0; tb < VOID_NTBL; tb++) {
-        track_t *t = plain(tb, 0, 0, VOID_OSC2_ZERO, 3);
+        track_t *t = plain(tb, 3);
         trk_note_on(t, 48, 100);
         for (i = 0; i < NREC / CTL; i++) {
             t->p[P_E1] = (int16_t)(i * 127u / (NREC / CTL));
@@ -680,10 +747,10 @@ static void test_reference(const char *dir)
     check(msg, ok_h);
 }
 
-static double costv(int mix, int ft, int drv, int res, int pos)
+static double costv(int ft, int drv, int res, int pos)
 {
     static const uint8_t NOTES[8] = {48, 52, 55, 59, 60, 64, 67, 71};
-    track_t *t = plain(1, 1, (uint32_t)mix, VOID_OSC2_ZERO + 3, (uint32_t)ft);
+    track_t *t = plain(1, (uint32_t)ft);
     uint32_t i, rep; double best = 1e30;
     t->p[P_E7] = (int16_t)drv; t->p[P_E5] = (int16_t)res; t->p[P_E4] = 80; t->p[P_E1] = (int16_t)pos;
     for (i = 0; i < 8u; i++) trk_note_on(t, NOTES[i], 100);
@@ -705,13 +772,11 @@ int prof_main(void)
 {
     double id = idle_cost();
     printf("idle %.0f\n", id);
-    printf("LP12 mix0 drv0       %.0f\n", costv(0, 3, 0, 0, 0) - id);
-    printf("LP12 mix0 drv0 pos40 %.0f\n", costv(0, 3, 0, 0, 40) - id);
-    printf("LP12 mix64           %.0f\n", costv(64, 3, 0, 0, 0) - id);
-    printf("LP24 mix0            %.0f\n", costv(0, 0, 0, 0, 0) - id);
-    printf("LP24 mix64           %.0f\n", costv(64, 0, 0, 0, 0) - id);
-    printf("LP24 mix64 drv40     %.0f\n", costv(64, 0, 40, 0, 0) - id);
-    printf("LP12 mix64 res110    %.0f\n", costv(64, 3, 0, 110, 0) - id);
+    printf("LP12 drv0            %.0f\n", costv(3, 0, 0, 0) - id);
+    printf("LP12 drv0 pos40      %.0f\n", costv(3, 0, 0, 40) - id);
+    printf("LP24 drv0            %.0f\n", costv(0, 0, 0, 0) - id);
+    printf("LP24 drv40           %.0f\n", costv(0, 40, 0, 0) - id);
+    printf("LP12 res110          %.0f\n", costv(3, 0, 110, 0) - id);
     printf("OB-Z SAW LEAD        %.0f\n", cost(0, 0) - id);
     {
         static const char *const W[][2] = {{"OB-Z", "SUB BASS"}, {"OB-Z", "RAVE"}};
@@ -734,10 +799,12 @@ int main(int argc, char **argv)
     test_engine();
     test_px();
     test_pitch();
+    test_one_osc();
     test_bandlimit();
     test_bounded();
     test_dc();
     test_dc_range();
+    test_clip_equiv();
     test_presets();
     test_cost();
     test_reference(argc > 2 ? argv[2] : "build/void_ref");

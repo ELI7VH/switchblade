@@ -57,8 +57,6 @@ static void test_presets(void)
         CHECK(nk == 10u, "every DRIFT keys preset has I or II: %u of 10", (unsigned)nk);
         CHECK(non >= 14u && non <= 24u, "%u DRIFT presets with the chorus on", (unsigned)non);
     }
-    CHECK(NELEM(N_VOID_OSC2) == VOID_OSC2_N, "N_VOID_OSC2 has %u names for %u values", (unsigned)NELEM(N_VOID_OSC2),
-          (unsigned)VOID_OSC2_N);
 }
 
 /* an engine that runs its own envelope (ACID): amp is constant, the voice ends when done says so, not when the ADSR would */

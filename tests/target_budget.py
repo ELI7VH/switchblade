@@ -19,6 +19,8 @@ FUNCS = ["obx_render", "obx_render_f", "obx_render_p4", "obx_render_x",   # OB-Z
          "acid_render", "bass303_render",            # ACID (eng_acid.c, bass303.c): the voice wrapper, and the 303's per-sample loop
          "drift_render",                            # DRIFT (eng_drift.c): the Juno voice (its ladder is dsp_va.c's, inlined; FPU opcodes are
                                                     # invisible to this count, so it guards the structure -- the loops and the divides -- only)
+         "void_render", "void_block_slow",            # WAVE (eng_wave.c): the four specialised fast loops (LP24 / SVF x DRV), and the one
+                                                    # out-of-line copy for a note's first 5 ms and a closing cutoff (Task 4.4)
          "slicer_track",
          "fm1_alnk0_irq", "fm1_timer5_irq",               # the audio ISR; TIMER5: the key / LED scan (hal/fm1_input.h)
          "uac_tap48",                                       # the USB audio input at 48 kHz: the 44.1 -> 48 resampler (usb.c)

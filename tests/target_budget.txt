@@ -30,3 +30,5 @@ ins_swept 230
 acid_render 86
 bass303_render 8524
 drift_render 59764
+void_render 4650
+void_block_slow 467

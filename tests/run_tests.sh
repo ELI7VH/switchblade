@@ -119,7 +119,7 @@
 #                   legacy value; the cost per part (macOS only, a loud SKIP elsewhere).
 # WAVE (tests/void_tables_test.py, tests/void_test.c): the VOID WAVE plugin's voice (the WAVE engine, was VOID). Its wavetables against the plugin's
 #                   frames recomputed with numpy (every keyframe and level band-limited, the crossfade within its limit;
-#                   skipped without numpy); the engine: pitch, OSC2's steps, band-limited at C8, bounded and without DC at
+#                   skipped without numpy); the engine: pitch, one oscillator (TBL2 / MIX / OSC2 hidden and inert), the clipper's clamp, band-limited at C8, bounded and without DC at
 #                   the corners (every table x TYPE, RES and DRV 127), the presets' levels, the cost at its voice cap
 #                   against OB-Z RAVE; its filter against the plugin's own Filter.cpp (tools/void_ref.cpp, built from
 #                   ../VoidWave or VOIDWAVE_DIR; skipped without it); demos in build/void_demo/.
@@ -322,7 +322,7 @@ if [ -f build/gen/felucca_tables.h ]; then
         rm -f build/void_ref/*.f32
     fi
     $CC -O2 -w -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/void_test" tests/void_test.c -lm
-    run "VOID: pitch, OSC2, band-limited, bounded at the corners, preset levels, cost at its cap, the filter against the plugin's" \
+    run "VOID: pitch, one oscillator, band-limited, bounded at the corners, preset levels, cost at its cap, the filter against the plugin's" \
         "$OUT/void_test" build/void_demo build/void_ref
     $CC -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/four_test" tests/four_test.c -lm && "$OUT/four_test" || fail=1
     $CC -O1 -w -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/obx_test" tests/obx_test.c -lm
