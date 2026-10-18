@@ -195,6 +195,23 @@ def curves():
         q.append(int(round(min(max(i, 0.0), 127.0) * 256)))
     L += ["/* CUT 0..127 -> the cutoff index (CUTOFF_HZ, Q8): the plugin's 20 + 19980 x^4 Hz */"]
     L += arr("VOID_CUT_Q8", "uint16_t", q)
+    # VOWEL (eng_wave.c): the cutoff index (0..127, +1 for the interpolation) -> the two formants' cutoff indices (Q8, the SVF's
+    # g is read at them). The vowels U O A E I sit at CUT 0 / 32 / 64 / 95 / 127 (the five equal steps of the knob, 4 / 127 apiece),
+    # i.e. at the cutoff index those knob values give; between them the position is linear in the index, F1 / F2 linear in Hz.
+    knob_idx = [min(max(127.0 * math.log((20.0 + 19980.0 * (k / 127) ** 4) / 30.0) / math.log(16000.0 / 30.0), 0.0), 127.0)
+                for k in (0, 32, 64, 95, 127)]
+    vowels = [(300, 870), (450, 800), (730, 1090), (530, 1840), (270, 2290)]            # U O A E I: F1, F2 Hz
+    def vidx(hz):
+        return 127.0 * math.log(hz / 30.0) / math.log(16000.0 / 30.0)
+    vt = []
+    for ci in range(129):
+        x = min(float(ci), 127.0)
+        j = max(jj for jj in range(4) if knob_idx[jj] <= x) if x < knob_idx[4] else 3
+        t = min(max((x - knob_idx[j]) / (knob_idx[j + 1] - knob_idx[j]), 0.0), 1.0)
+        for f in range(2):
+            vt.append(int(round(256 * vidx(vowels[j][f] + t * (vowels[j + 1][f] - vowels[j][f])))))
+    L += ["/* VOWEL: [cutoff index][F1, F2] = the formants' cutoff index, Q8 (U O A E I at CUT 0 / 32 / 64 / 95 / 127; 129 rows) */"]
+    L += arr("VOID_VOWEL", "uint16_t", vt)
     # tanh(x) for x = 0 .. 4 in 512 steps, Q15 (TANH_Q15 stops at 2; the ladder's feedback node goes past it)
     L += ["/* tanh(i / 128), i = 0..512, Q15 */"]
     L += arr("VOID_TANH", "int16_t", [int(round(32767 * math.tanh(i / 128))) for i in range(513)])

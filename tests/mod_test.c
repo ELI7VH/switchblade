@@ -448,7 +448,8 @@ static uint64_t instr_now(void)
 }
 
 /* instructions per sample: parts[k] = {engine, preset, notes}; on: every slot of every sounding part active
- * (LFO -> CUT, VEL -> AMP, MODW -> VIB, LFO -> E3: per voice and per block) */
+ * (LFO -> CUT, VEL -> AMP, MODW -> VIB, LFO -> E2: per voice and per block; it was E3 until Task 4.5, when WAVE's E3 became WARP, whose
+ * modulation takes the slow loop (~+45 instructions a voice, measured in tests/void_test.c): not the few percent this checks) */
 static double cost(const uint8_t parts[NPART][3], int on)
 {
     static const uint8_t NOTES[8] = {48, 52, 55, 59, 60, 64, 67, 71};
@@ -466,7 +467,7 @@ static double cost(const uint8_t parts[NPART][3], int on)
             slot(t, 0, MS_LFO, MD_CUT, 30);
             slot(t, 1, MS_VEL, MD_AMP, 40);
             slot(t, 2, MS_MODW, MD_VIB, 8);
-            slot(t, 3, MS_LFO, MD_E1 + 2, 20);
+            slot(t, 3, MS_LFO, MD_E1 + 1, 20);
         }
         for (i = 0; i < parts[p][2]; i++)
             trk_note_on(t, NOTES[i] + 12u * p, 100);

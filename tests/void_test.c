@@ -9,6 +9,9 @@
  * 2b. one oscillator (Task 4.4): the dead edit slots (TBL2, MIX, OSC2: label "-", no range) are hidden from the pages,
  *    and nothing a preset or a project holds in them sounds: every preset renders the same with them at 0 and at
  *    the ends of their old ranges.
+ * 2c. Task 4.5: VOWEL (type 6: F1 / F2 where the vowel table puts them, the level against LP24, bounded and inside the mixer's integer
+ *    headroom), WARP (E2: 64 off bit for bit, the aliasing at C7, the old TBL2 values load as off), LP24 as it was bit for bit, the TYPE switched
+ *    every block (no table read out of range), and OB-Z / ACID / DRIFT playing type 6.
  * 3. band-limited: SAW, SQUARE and SPECTRAL (its top position) at C8: what is not a harmonic below -30 dB (the
  *    linear read of a level at 4 samples per cycle of its top harmonic; the plugin aliases at ~-10 dB here).
  * 4. bounded: every table x every filter TYPE at RES 127 and DRV 127, CUT 0 / 127, C1 / C4 / C8, POS 0 / 127: no
@@ -23,9 +26,11 @@
  * 8. demos (DEMO_DIR): each preset playing a phrase, a POS sweep per table.
  * 9. against the plugin: eng_void.c's filter and the plugin's own Filter.cpp (build/void_ref, tools/void_ref.cpp:
  *    skipped without it) on the same saw: the level, and the harmonics within 50 dB of the loudest. */
-/* Task 4.5: the engine's table reads and its slow path are instrumented from here (eng_wave.c VOID_AT / VOID_FORCE_SLOW) */
-static unsigned long void_oob;                         /* table reads outside their table */
+/* Task 4.5: the engine's slow path and (VOID_INSTR, a second build: run_tests.sh) its table reads are instrumented from here (eng_wave.c VOID_AT /
+ * VOID_FORCE_SLOW). The hook costs instructions, so the build that measures them has none, and the instrumented one measures no cost. */
 static int void_force_slow;
+#ifdef VOID_INSTR
+static unsigned long void_oob;                         /* table reads outside their table */
 static inline unsigned long void_chk(long i, unsigned long n)
 {
     if (i < 0 || (unsigned long)i >= n) {
@@ -35,6 +40,7 @@ static inline unsigned long void_chk(long i, unsigned long n)
     return (unsigned long)i;
 }
 #define VOID_CHK(i, n) void_chk((long)(i), (n))
+#endif
 #define VOID_FORCE_SLOW void_force_slow
 #define main hostsim_main
 #include "hostsim.c"
@@ -169,7 +175,7 @@ static void test_engine(void)
 {
     const engine_t *e = ENGINES[ENGI_WAVE];
     uint32_t k, hidden = 0;
-    check("engine 1 is WAVE, two EDIT pages of four (TBL1 POS - -, CUT RES - DRV), presets",
+    check("engine 1 is WAVE, two EDIT pages of four (TBL1 POS WARP -, CUT RES - DRV), presets",
           str_eq(e->name, "WAVE") && str_eq(e->edit[0].label, "TBL1") && str_eq(e->edit[1].label, "POS") &&
           str_eq(e->edit[4].label, "CUT") && str_eq(e->edit[5].label, "RES") && str_eq(e->edit[7].label, "DRV") &&
           e->npresets >= 5u && e->mem);
@@ -177,10 +183,13 @@ static void test_engine(void)
      * not move, but are hidden: label "-" (a blank card on the pages, "E3" in the matrix: mod.c mod_dst_name) and no
      * range (a knob turn does nothing, a matrix destination adds nothing: the convention of the inert G_DRLVL) */
     for (k = 0; k < 8u; k++)
-        if (k == 2u || k == 3u || k == 6u)
+        if (k == 3u || k == 6u)
             hidden += e->edit[k].label && e->edit[k].label[0] == '-' && e->edit[k].min == 0 && e->edit[k].max == 0 &&
                       e->edit[k].def == 0;
-    check("WAVE: TBL2, MIX and OSC2 (E3, E4, E7 in the matrix) are hidden: label \"-\", range 0..0, default 0", hidden == 3u);
+    check("WAVE: MIX and OSC2 (E4, E7 in the matrix) are hidden: label \"-\", range 0..0, default 0", hidden == 2u);
+    check("WAVE: E2 is WARP, 9..127, default 64 (off); TYPE has a VOWEL as its 7th",
+          str_eq(e->edit[2].label, "WARP") && e->edit[2].min == 9 && e->edit[2].max == 127 && e->edit[2].def == 64 &&
+          TP[P_FTYPE].max == 6 && str_eq(TP[P_FTYPE].names[6], "VOWEL"));
 }
 
 /* ----------------------------------------------------------------- 1b --- */
@@ -243,7 +252,7 @@ static void test_pitch(void)
 }
 
 /* ----------------------------------------------------------------- 2b --- */
-/* One oscillator (Task 4.4): TBL2 (P_E2), MIX (P_E3) and OSC2 (P_E6) are dead. Every factory preset, rendered for 0.5 s with a
+/* One oscillator (Task 4.4): MIX (P_E3) and OSC2 (P_E6) are dead (TBL2, P_E2, is WARP since Task 4.5, held at 64 = off here). Every factory preset, rendered for 0.5 s with a
  * 3-note chord through the part's own path, must come out the same sample for sample with those three at 0 and with
  * each at the far end of what they once held (TBL2 8, MIX 127, OSC2 MORPH = 69, then +12 st = 62). A project or a user preset
  * from before the change carries such values: they must not sound. The real render is compared, not a flag. */
@@ -273,16 +282,16 @@ static void test_one_osc(void)
     uint32_t k, bad_n = 0;
     char msg[160];
     for (k = 0; k < ENGINES[ENGI_WAVE]->npresets; k++) {
-        uint64_t a = chord_hash(k, 0, 0, 0);
-        if (a != chord_hash(k, 8, 127, 69) || a != chord_hash(k, 4, 64, 62) || a != chord_hash(k, 0, 127, 0) ||
-            a != chord_hash(k, 8, 0, 0) || a != chord_hash(k, 0, 0, 69)) {
+        uint64_t a = chord_hash(k, 64, 0, 0);
+        if (a != chord_hash(k, 64, 127, 69) || a != chord_hash(k, 64, 64, 62) || a != chord_hash(k, 64, 127, 0) ||
+            a != chord_hash(k, 64, 0, 69)) {
             printf("void: OSC2 still sounds: %s\n", ENGINES[ENGI_WAVE]->presets[k].name);
             bad_n++;
         }
-        if (chord_hash(k, 0, 0, 0) == 1469598103934665603ull)   /* (the render must have run: hashed something) */
+        if (chord_hash(k, 64, 0, 0) == 1469598103934665603ull)   /* (the render must have run: hashed something) */
             bad_n++;
     }
-    snprintf(msg, sizeof msg, "one oscillator: TBL2, MIX and OSC2 at any value change no sample of any preset (%u of %u differ)",
+    snprintf(msg, sizeof msg, "one oscillator: MIX and OSC2 at any value change no sample of any preset (%u of %u differ)",
              bad_n, (unsigned)ENGINES[ENGI_WAVE]->npresets);
     check(msg, bad_n == 0u);
 }
@@ -292,8 +301,9 @@ static void test_one_osc(void)
  * with the cutoff held and again swept (a triangle over the blocks, through the closing region), a 4-note chord, the first two released
  * part-way: 144 renders of 64 blocks, hashed together. The WAVE_RENDER_HASH rows were recorded from the tree at 1a5b3df/e1acdb7 (before
  * Task 4.5). The LP24 ladder is untouched (the user kept it), so every type that existed is bit for bit as before, and WARP at 64 (off) keeps it so. */
-static const uint64_t SCEN_HASH[6] = {0x89c9d66272840c8aull, 0x723981c818e6fee8ull, 0xb82f2a46533caa75ull, 0xd106dfad484512ccull,
-                                      0x1695f2cbd027b44dull, 0x4f6e5c2300649526ull};   /* LP24 BP HP LP12 HP24 NOTCH */
+static const uint64_t SCEN_HASH[7] = {0x89c9d66272840c8aull, 0x723981c818e6fee8ull, 0xb82f2a46533caa75ull, 0xd106dfad484512ccull,
+                                      0x1695f2cbd027b44dull, 0x4f6e5c2300649526ull,
+                                      0xc119b16700c137c2ull};   /* LP24 BP HP LP12 HP24 NOTCH, VOWEL (the same with the WARP code compiled out: WARP at 64 keeps it) */
 static uint64_t scen_hash(uint32_t ft)
 {
     static const uint8_t TB[3] = {1, 2, 3}, N[4] = {36, 43, 60, 84}, CUT[4] = {0, 1, 64, 127}, RES[3] = {0, 64, 127};
@@ -334,28 +344,29 @@ static void test_scen(void)
 {
     uint32_t ft, bad_n = 0, forced = 0;
     char msg[200];
-    for (ft = 0; ft < 6u; ft++) {
+    for (ft = 0; ft < 7u; ft++) {
         uint64_t h = scen_hash(ft);
         if (h != SCEN_HASH[ft]) {
             printf("void: type %u renders %016llx, was %016llx\n", ft, (unsigned long long)h, (unsigned long long)SCEN_HASH[ft]);
             bad_n++;
         }
     }
-    snprintf(msg, sizeof msg, "bit for bit: the six filter types x 144 renders (held and swept cutoff, closing, drain) are as before Task 4.5 (%u differ)", bad_n);
+    snprintf(msg, sizeof msg, "bit for bit: the seven filter types x 144 renders (held and swept cutoff, closing, drain) are as before Task 4.5 (%u differ)", bad_n);
     check(msg, bad_n == 0u);
     /* the slow loop for every block (VOID_FORCE_SLOW) must give what the dispatch gave: a fast loop used while a note fades in or the
      * cutoff closes (or drains) would differ here. The scenarios reach CUT 0 (shut), CUT 1 at RES 127 (close 1170: the drain) and the sweeps */
     void_force_slow = 1;
-    for (ft = 0; ft < 6u; ft++)
+    for (ft = 0; ft < 7u; ft++)
         forced += scen_hash(ft) != SCEN_HASH[ft];
     void_force_slow = 0;
-    snprintf(msg, sizeof msg, "slow path: forcing it for every block changes no sample of the same scenarios (%u of 6 types differ)", forced);
+    snprintf(msg, sizeof msg, "slow path: forcing it for every block changes no sample of the same scenarios (%u of 7 types differ)", forced);
     check(msg, forced == 0u);
 }
 
 /* Task 4.5 (the 4.4 review's Minor 3): switching the filter TYPE while notes sound fed the SVF's state (|f| up to 150000) into the
  * ladder's void_tanh1, which indexes VOID_TANH1[257] by (x + 32768) >> 8: a read past the table. Every pair of types, in a row, one
  * switch a block; RES 0 / 127, DRV 0 / 127, MIDI 24..99. VOID_AT counts any read of a signal-indexed table outside it. */
+#ifdef VOID_INSTR
 static void test_oob(void)
 {
     uint32_t nft = (uint32_t)TP[P_FTYPE].max + 1u, a, b, n, r, d, k, runs = 0;
@@ -386,6 +397,7 @@ static void test_oob(void)
              nft, runs, void_oob);
     check(msg, void_oob == 0ul && pk > 0);
 }
+#endif
 
 /* ------------------------------------------------------------------ 3 --- */
 /* the share of rec[a, a + n) that is not within +-3 bins of a harmonic of f0 (Hann window, DFT on harmonics) */
@@ -397,6 +409,28 @@ static double alias_db(uint32_t a, uint32_t n, double f0)
     for (i = 0; i < n; i++)
         w[i] = rec[a + i] * (0.5 - 0.5 * cos(2 * M_PI * i / n));
     for (k = 1; k < n / 2u; k++) {
+        double re = 0, im = 0, fk = (double)k * FS / n, h = fk / f0, p;
+        for (i = 0; i < n; i++) {
+            re += w[i] * cos(2 * M_PI * k * i / n);
+            im -= w[i] * sin(2 * M_PI * k * i / n);
+        }
+        p = re * re + im * im;
+        tot += p;
+        if (fabs(h - floor(h + 0.5)) * f0 < 3.0 * FS / n && h > 0.5)
+            harm += p;
+    }
+    return 10 * log10((tot - harm) / tot + 1e-12);
+}
+
+/* the same without the DC: a warped cycle is asymmetric and has a mean, whose window leakage (bins 1 .. 2) is not aliasing */
+static double alias_db_nodc(uint32_t a, uint32_t n, double f0)
+{
+    double tot = 0, harm = 0;
+    uint32_t i, k;
+    static double w[16384];
+    for (i = 0; i < n; i++)
+        w[i] = rec[a + i] * (0.5 - 0.5 * cos(2 * M_PI * i / n));
+    for (k = 3; k < n / 2u; k++) {
         double re = 0, im = 0, fk = (double)k * FS / n, h = fk / f0, p;
         for (i = 0; i < n; i++) {
             re += w[i] * cos(2 * M_PI * k * i / n);
@@ -708,6 +742,321 @@ static void test_cost(void)
     check(msg, worst < 1.75);
 }
 
+
+/* ---------------------------------------------------------------- 2c: VOWEL --- */
+/* the filter alone: the response to a sine of frequency f (a Hann-windowed single-bin DFT: no DC, no other partial), dB against the input's */
+static double flt_gain(uint32_t ft, int knob, int res, double f)
+{
+    void_flt_t fl;
+    int32_t st[4] = {0, 0, 0, 0};
+    uint32_t n = 24000, i, c = 0;
+    double re = 0, im = 0;
+    void_flt_set(&fl, ft, VOID_CUT_Q8[knob], res, 0, 0);
+    for (i = 0; i < n; i++) {
+        int32_t y = void_flt_run(&fl, st, (int32_t)lround(0.05 * 32768 * sin(2 * M_PI * f * i / FS)));
+        if (i >= n / 2u) {
+            double w = 0.5 - 0.5 * cos(2 * M_PI * (i - n / 2u) / (n / 2u));
+            re += w * y * cos(2 * M_PI * f * i / FS);
+            im += w * y * sin(2 * M_PI * f * i / FS);
+            c++;
+        }
+    }
+    return 20 * log10(2 * sqrt(re * re + im * im) / (c * 0.5) / (0.05 * 32768) + 1e-12);
+}
+/* the RMS of the band-limited saw (tests/void_ref_cfg.h) through the filter, DC removed (the voice has a DC blocker) */
+static double flt_rms(uint32_t ft, int knob, int res, double f0)
+{
+    static int32_t y[FS];
+    void_flt_t fl;
+    int32_t st[4] = {0, 0, 0, 0};
+    uint32_t i, n = FS, c = 0;
+    double m = 0, s = 0;
+    void_flt_set(&fl, ft, VOID_CUT_Q8[knob], res, 0, 0);
+    for (i = 0; i < n; i++) {
+        y[i] = void_flt_run(&fl, st, (int32_t)lround(void_ref_input(i, f0) * 32768.0));
+        if (i >= n / 2u) {
+            m += y[i];
+            c++;
+        }
+    }
+    m /= c;
+    for (i = n / 2u; i < n; i++)
+        s += (y[i] - m) * (y[i] - m);
+    return sqrt(s / c);
+}
+
+static void test_vowel(void)
+{
+    static const int KNOB[3] = {0, 64, 127};
+    static const double V[5][2] = {{300, 870}, {450, 800}, {730, 1090}, {530, 1840}, {270, 2290}};   /* U O A E I (the spec's table) */
+    double worst = 0, lvl = 0;
+    uint32_t q, i, found_ok = 1, r, c;
+    char msg[240];
+    for (q = 0; q < 3u; q++) {                         /* F1 and F2 at RES 127 (Q 12: sharp), within +-1 semitone of the table at CUT 0, 64, 127 */
+        double pos = KNOB[q] / 127.0 * 4.0, fr[400], g[400], want[2], got[2] = {0, 0};
+        uint32_t n = 0, nf = 0, j = (uint32_t)pos, k;
+        double t = pos - j, f;
+        if (j > 3u) { j = 3; t = 1.0; }
+        for (k = 0; k < 2u; k++)
+            want[k] = V[j][k] + t * (V[j + 1u][k] - V[j][k]);
+        for (f = 150; f < 4500 && n < 400u; f *= pow(2, 1 / 48.0), n++) {
+            fr[n] = f;
+            g[n] = flt_gain(VF_VOWEL, KNOB[q], 127, f);
+        }
+        for (i = 1; i + 1u < n && nf < 2u; i++)
+            if (g[i] > g[i - 1u] && g[i] >= g[i + 1u] && g[i] > -30.0)
+                got[nf++] = fr[i];
+        printf("void: VOWEL CUT %3d: F1 %.0f (want %.0f) F2 %.0f (want %.0f) Hz\n", KNOB[q], got[0], want[0], got[1], want[1]);
+        for (k = 0; k < 2u; k++) {
+            double st = got[k] > 0 ? fabs(12 * log2(got[k] / want[k])) : 99.0;
+            worst = st > worst ? st : worst;
+        }
+        found_ok &= nf == 2u;
+    }
+    snprintf(msg, sizeof msg, "VOWEL: F1 and F2 within +-1 semitone of the vowel table at CUT 0 / 64 / 127 (worst %.2f st)", worst);
+    check(msg, found_ok && worst <= 1.0);
+    for (c = 1; c < 3u; c++)                           /* the level against LP24 at the same CUT where LP24 is open (the saw at 110 Hz) */
+        for (r = 0; r < 3u; r++) {
+            static const int RES[3] = {0, 64, 127};
+            double d = 20 * log10(flt_rms(VF_VOWEL, KNOB[c], RES[r], 110) / flt_rms(VF_LP24, KNOB[c], RES[r], 110));
+            lvl = fabs(d) > lvl ? fabs(d) : lvl;
+        }
+    {
+        double d = 20 * log10(flt_rms(VF_VOWEL, 95, 0, 110) / flt_rms(VF_LP24, 95, 0, 110));
+        lvl = fabs(d) > lvl ? fabs(d) : lvl;
+        d = 20 * log10(flt_rms(VF_VOWEL, 95, 127, 110) / flt_rms(VF_LP24, 95, 127, 110));
+        lvl = fabs(d) > lvl ? fabs(d) : lvl;
+    }
+    snprintf(msg, sizeof msg, "VOWEL: level within 2 dB of LP24's at the same CUT (64, 95, 127; RES 0 / 64 / 127; saw 110 Hz): worst %.2f dB", lvl);
+    check(msg, lvl <= 2.0);
+}
+
+/* bounded: VOWEL and LP24 at RES 127 + DRV 127 over MIDI 24..99, CUT 0 / 64 / 127: no wrapped sample, the DC (over whole cycles, after the
+ * blocker) under 1 % of the rms, the part's peak inside the mixer's integer limits. Run with VOID_OVF=1 under -fsanitize=signed-integer-overflow
+ * (run_tests.sh), the same loop proves that no int32 in the filter, the voice or the mix wraps. */
+static double bounded_run(uint32_t ft, int *wraps, double *worst_dc)
+{
+    static const int CUT[3] = {0, 64, 127};
+    uint32_t n, c, i;
+    double pk = 0;
+    for (c = 0; c < 3u; c++)
+        for (n = 24; n <= 99u; n++) {
+            track_t *t = plain(1, ft);
+            double f = 440.0 * pow(2.0, ((int)n - 69) / 12.0), sum = 0, sq = 0;
+            uint32_t cyc = (uint32_t)(0.4 * f) ? (uint32_t)(0.4 * f) : 1u, len = (uint32_t)(cyc * FS / f + 0.5), cnt;
+            t->p[P_E5] = 127;
+            t->p[P_E7] = 127;
+            t->p[P_E4] = (int16_t)CUT[c];
+            trk_note_on(t, (uint8_t)n, 127);
+            trk_note_on(t, (uint8_t)(n + 7u), 127);
+            blocks(FS / 4u / CTL);
+            nrec = 0;
+            blocks(len / CTL + 1u);
+            cnt = nrec;
+            for (i = 0; i < cnt; i++) {
+                sum += rec[i];
+                sq += (double)rec[i] * rec[i];
+                pk = fabs((double)rec[i]) > pk ? fabs((double)rec[i]) : pk;
+                if (i && (rec[i] - rec[i - 1u] > 6 * VOICE_FS || rec[i] - rec[i - 1u] < -6 * VOICE_FS))
+                    (*wraps)++;
+            }
+            if (sq > 0 && n >= 40u && ft == VF_VOWEL) {        /* (the DC check: from E2 up, whole cycles of the window; below, the window holds < 2) */
+                double d = fabs(sum / cnt) / sqrt(sq / cnt);
+                *worst_dc = d > *worst_dc ? d : *worst_dc;
+            }
+        }
+    return pk;
+}
+static void test_vowel_bounded(void)
+{
+    int wv = 0, wl = 0;
+    double dcv = 0, dcl = 0, pkv, pkl;
+    char msg[300];
+    pkv = bounded_run(VF_VOWEL, &wv, &dcv);
+    pkl = bounded_run(VF_LP24, &wl, &dcl);
+    /* a 2-voice chord peaks at pkv; the mixer takes b (the part's sum, 32768 per full scale) as x = ((b >> 2) * 9713) >> 10 at LEVEL 127 and needs
+     * x * 4096 < 2^31 (x <= 524287); a WAVE part plays 6 voices, so 3 x this chord */
+    snprintf(msg, sizeof msg, "VOWEL, RES 127 + DRV 127, MIDI 24..99: no wrapped sample, DC under 1 %% of the rms (%.3f %%), peak %.0f (LP24: %.0f; x at LEVEL 127 for 6 voices %.0f of 524287)",
+             dcv * 100, pkv, pkl, pkv * 3 * 9713 / 4096.0);
+    check(msg, wv == 0 && dcv < 0.01 && pkv < 1.15 * pkl + 1 && pkv * 3 * 9713 / 4096.0 < 524287.0);
+}
+
+/* the post-filter chain (clamp 110000, VOID_OUT_LEVEL, DC blocker, void_clip) is the one every filter shares: a voice's peak is VOID_CLIP_THR +
+ * VOID_SOFT[256] whatever the filter; three of those is the 6-voice bound the mixer's limits were checked against (task-7.2a-review.md) */
+static void test_headroom(void)
+{
+    int32_t vmax = VOID_CLIP_THR + VOID_SOFT[NELEM(VOID_SOFT) - 1u];
+    int64_t b = (int64_t)VOID_POLY * ((int64_t)vmax * VOICE_FS >> 15 << 2);
+    char msg[240];
+    snprintf(msg, sizeof msg, "headroom: a voice's output is bounded by the shared clipper (%d), whatever the filter (6 voices all there: %lld, the same for LP24 as before)", vmax, (long long)b);
+    check(msg, vmax - void_clip(VOID_CLIP_MAX) <= 1 && vmax - void_clip(VOID_CLIP_MAX) >= 0);
+}
+
+/* ---------------------------------------------------------------- 2c: WARP --- */
+static void test_warp(void)
+{
+    static const int W[2] = {0, 127};
+    double worst = -999;
+    uint32_t k, differ = 0;
+    int32_t v;
+    char msg[240];
+    {   /* WARP's two ends against off, MIDI 36 .. 96 in fourths, on the oscillator alone at a fixed increment (the voice's drift and micro-LFO smear every
+         * harmonic and put a floor of -35 dB under this measure even with WARP off). What is not a harmonic of f0 (DC leakage left out: a warped cycle has a
+         * mean) is aliasing or the linear read's error. The spec's "below -50 dB at MIDI 96" cannot hold: the unwarped SAW at C7 is already -34 dB here,
+         * the darkest level of the tables having 8 harmonics a cycle; the claim kept is that a warp never aliases much worse than the same note unwarped. */
+        static const int WA[3] = {64, 0, 127};
+        static const uint32_t TB[2] = {1, 3};          /* SAW, SPECTRAL (its position 100: bright) */
+        uint32_t tbi, n;
+        double top = -999, over = -999;
+        for (tbi = 0; tbi < 2u; tbi++)
+            for (n = 36; n <= 96u; n += 6) {
+                double f0 = 440.0 * pow(2.0, ((int)n - 69) / 12.0), base = 0;
+                for (k = 0; k < 3u; k++) {
+                    void_osc_t o;
+                    uint32_t inc = (uint32_t)(f0 / FS * 4294967296.0 + 0.5), ph = 0, i;
+                    double d;
+                    void_osc_warp(&o, TB[tbi], tbi ? 100 << 8 : 20 << 8, inc, WA[k]);
+                    for (i = 0; i < 16384u; i++, ph += inc)
+                        rec[i] = void_osc(&o, ph, 1) >> 1;
+                    d = alias_db_nodc(4096, 4096, f0);
+                    if (!k)
+                        base = d;
+                    else {
+                        top = d > top ? d : top;
+                        over = d - base > over ? d - base : over;
+                    }
+                    if (n == 96u)
+                        printf("void: WARP %3d at C7, %s: %.1f dB off the harmonics (off: %.1f)\n", WA[k], tbi ? "SPECTRAL" : "SAW", d, base);
+                }
+            }
+        worst = top;
+        snprintf(msg, sizeof msg, "WARP 0 / 127, MIDI 36..96: off-harmonic energy at most -20 dB (%.1f) and at most 15 dB above the same note unwarped (%+.1f)", top, over);
+        check(msg, top < -20.0 && over < 15.0);
+    }
+    {   /* WARP sounds: 0, 32, 96, 127 each differ from off and from each other; the pitch stays (a SINE at A3) */
+        uint64_t h[5];
+        static const int WV[5] = {64, 0, 32, 96, 127};
+        for (k = 0; k < 5u; k++) {
+            uint32_t i;
+            track_t *t = plain(1, 3);
+            t->p[P_E2] = (int16_t)WV[k];
+            trk_note_on(t, 57, 100);
+            blocks(FS / 4u / CTL);
+            h[k] = 1469598103934665603ull;
+            for (i = 0; i < nrec; i++)
+                h[k] = (h[k] ^ (uint32_t)rec[i]) * 1099511628211ull;
+        }
+        for (k = 1; k < 5u; k++)
+            differ += h[k] != h[0];
+        check("WARP: 0, 32, 96, 127 each render differently from 64 (off)", differ == 4u);
+        {
+            track_t *t = plain(0, 3);
+            double f;
+            t->p[P_E2] = 110;
+            trk_note_on(t, 57, 100);
+            blocks(NREC / CTL);
+            f = freq_of(FS / 4u, NREC);
+            snprintf(msg, sizeof msg, "WARP 110 on a SINE at A3: the pitch is still 220 Hz (%+.2f cents)", cents(f, 220.0));
+            check(msg, fabs(cents(f, 220.0)) < 6.0);
+        }
+    }
+    {   /* the old TBL2 slot: a stored 0..8 is WARP off, 9..127 is itself (param_fit: projects, user presets, motion, the editor all go through it) */
+        const param_desc_t *d = &ENGINES[ENGI_WAVE]->edit[2];
+        uint32_t ok = 1;
+        track_t *t = &trk[0];
+        for (v = 0; v <= 8; v++)
+            ok &= param_fit(d, v) == 64;
+        for (v = 9; v <= 127; v++)
+            ok &= param_fit(d, v) == v;
+        ok &= param_fit(d, 300) == 127;
+        ok &= param_fit(&ENGINES[ENGI_WAVE]->edit[4], 5) == 5;   /* (CUT, another slot, is not touched) */
+        ok &= param_fit(&ENGINES[ENGI_OBX]->edit[2], 3) == 3;    /* (nor is another engine's E2) */
+        fresh(ENGI_WAVE, 0);
+        t->p[P_E2] = 3;                                          /* a preset that carries an old TBL2 */
+        void_track_loaded(t);
+        ok &= t->p[P_E2] == 64;
+        t->p[P_E2] = 40;
+        void_track_loaded(t);
+        ok &= t->p[P_E2] == 40;
+        check("WARP: a stored 0..8 (TBL2) loads as 64 = off (param_fit, void_track_loaded); 9..127 as it was", ok);
+    }
+}
+
+/* OB-Z, ACID and DRIFT have no VOWEL: type 6 (and every other value) must play as the types they do have */
+static uint64_t eng_hash(const char *eng, int ft)
+{
+    static const uint8_t N[3] = {48, 55, 64};
+    uint32_t e = engine_named(eng), i;
+    track_t *t = &trk[0];
+    uint64_t h = 1469598103934665603ull;
+    memset(eng_mem, 0, sizeof eng_mem);
+    memset(eng_mem_owner, 0, sizeof eng_mem_owner);
+    fresh(e, 0);
+    t->p[P_DIST] = t->p[P_CHOR] = t->p[P_DLY] = t->p[P_REV] = 0;
+    t->p[P_FTYPE] = (int16_t)ft;
+    for (i = 0; i < 3u; i++)
+        trk_note_on(t, N[i], 100);
+    nrec = 0;
+    blocks(FS / 4u / CTL);
+    for (i = 0; i < nrec; i++)
+        h = (h ^ (uint32_t)rec[i]) * 1099511628211ull;
+    return h;
+}
+static void test_other_machines(void)
+{
+    uint32_t ok_obz, ok_acid, ok_drift;
+    ok_obz = eng_hash("OB-Z", 6) == eng_hash("OB-Z", 0) && eng_hash("OB-Z", 6) != eng_hash("OB-Z", 1);
+    ok_acid = eng_hash("ACID", 6) == eng_hash("ACID", 0) && eng_hash("ACID", 3) == eng_hash("ACID", 0);
+    ok_drift = eng_hash("DRIFT", 6) == eng_hash("DRIFT", 0) && eng_hash("DRIFT", 6) == eng_hash("DRIFT", 4) && eng_hash("DRIFT", 1) != eng_hash("DRIFT", 0);
+    check("TYPE VOWEL on an OB-Z track plays as LP (its MODE morph is not pinned), on ACID as any TYPE (ignored), on DRIFT as FLAT", ok_obz && ok_acid && ok_drift);
+}
+
+/* host CPU: VOWEL against the ladder (LP24) and WARP on against off, instructions per voice per sample (a chord of 8 at the 6-voice cap) */
+static double costw(uint32_t ft, int drv, int res, int warp)
+{
+    static const uint8_t NOTES[8] = {48, 52, 55, 59, 60, 64, 67, 71};
+    track_t *t = plain(1, ft);
+    uint32_t i, rep;
+    double best = 1e30;
+    t->p[P_E7] = (int16_t)drv;
+    t->p[P_E5] = (int16_t)res;
+    t->p[P_E4] = 80;
+    t->p[P_E1] = 0;
+    t->p[P_E2] = (int16_t)warp;
+    for (i = 0; i < 8u; i++)
+        trk_note_on(t, NOTES[i], 100);
+    blocks(FS / 4u / CTL);
+    for (rep = 0; rep < 3u; rep++) {
+        uint64_t i0 = instr_now();
+        double ipc;
+        blocks(FS / 2u / CTL);
+        ipc = (double)(instr_now() - i0) / (FS / 2u);
+        best = ipc < best ? ipc : best;
+    }
+    return best;
+}
+static double idle_cost(void);
+static void test_cost_45(void)
+{
+    /* The ladder's filter section costs 83 instructions a voice a sample by ablation (the filter bypassed in a scratch build: LP24 voice 1033 -
+     * bypass 534 = 499 over 6 voices); the user's target for VOWEL is within +10 % of that, i.e. 8.3 more a voice than LP24 */
+    double id = idle_cost(), lp = costw(VF_LP24, 0, 0, 64), vw = costw(VF_VOWEL, 0, 0, 64), vw2 = costw(VF_VOWEL, 0, 100, 64), lp2 = costw(VF_LP24, 0, 100, 64);
+    double off = costw(VF_LP12, 0, 0, 64) - id, on = costw(VF_LP12, 0, 0, 127) - id, on2 = costw(VF_LP12, 0, 0, 20) - id;
+    char msg[300];
+    if (!instr_now()) {
+        printf("void: cost: no instruction counter on this host, skipped\n");
+        return;
+    }
+    lp -= id, vw -= id, vw2 -= id, lp2 -= id;
+    printf("void: cost per voice per sample: LP24 %.1f / %.1f (RES 0 / 100), VOWEL %.1f / %.1f; LP12 WARP off %.1f, 127 %.1f, 20 %.1f\n",
+           lp / VOID_POLY, lp2 / VOID_POLY, vw / VOID_POLY, vw2 / VOID_POLY, off / VOID_POLY, on / VOID_POLY, on2 / VOID_POLY);
+    snprintf(msg, sizeof msg, "cost: VOWEL within +10 %% of the ladder's filter section above LP24 (%.1f and %.1f a voice more, limit 8.3)",
+             (vw - lp) / VOID_POLY, (vw2 - lp2) / VOID_POLY);
+    check(msg, (vw - lp) / VOID_POLY <= 8.3 && (vw2 - lp2) / VOID_POLY <= 8.3);
+    snprintf(msg, sizeof msg, "cost: WARP off costs what LP12 cost before (%.1f a voice; before Task 4.5: 132.3), WARP on adds %.1f / %.1f", off / VOID_POLY, (on - off) / VOID_POLY, (on2 - off) / VOID_POLY);
+    check(msg, off / VOID_POLY < 132.3 + 6.0);
+}
+
 /* ------------------------------------------------------------------ 8 --- */
 static void wav16(const char *dir, const char *name)
 {
@@ -909,12 +1258,18 @@ int main(int argc, char **argv)
 {
         if (getenv("VOID_PROF"))                           /* VOID_PROF=1: the cost by feature, and next to the heaviest */
         return prof_main();                            /* presets of the other engines */
+#ifdef VOID_INSTR                                      /* the instrumented build (run_tests.sh, also under -fsanitize=signed-integer-overflow): */
+    test_oob();                                        /* the loops that reach the corners, no cost */
+    test_vowel_bounded();
+    test_warp();
+    printf(bad ? "void: %d FAILED\n" : "void: instrumented run: all ok\n", bad);
+    return bad != 0;
+#endif
     test_engine();
     test_px();
     test_pitch();
     test_one_osc();
     test_scen();
-    test_oob();
     test_bandlimit();
     test_bounded();
     test_dc();
@@ -922,6 +1277,12 @@ int main(int argc, char **argv)
     test_clip_equiv();
     test_presets();
     test_cost();
+    test_vowel();
+    test_vowel_bounded();
+    test_headroom();
+    test_warp();
+    test_other_machines();
+    test_cost_45();
     test_reference(argc > 2 ? argv[2] : "build/void_ref");
     if (argc > 1)
         demos(argv[1]);

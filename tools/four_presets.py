@@ -33,7 +33,7 @@ RANGES = {                                                       # edit[0..7] mi
     "ACID": [(0, 1), (-64, 63)] + [PCT] * 6,
     "DRIFT": [PCT] * 8,
 }
-WAVE_PX = dict(ftype=(0, 5), voice=(0, 3), detune=(0, 128), spread=PCT, glide=PCT)
+WAVE_PX = dict(ftype=(0, 6), voice=(0, 3), detune=(0, 128), spread=PCT, glide=PCT)
 DRIFT_CHOR = (0, 3)                                              # DRIFT's chor: the Juno chorus, 0 OFF, 1 I, 2 II, 3 I+II (absent = 0)
 
 
@@ -48,8 +48,9 @@ def load(m):
 def wave_ranges(tables):
     t = Path(tables).read_text()
     ntbl = int(re.search(r"#define VOID_NTBL (\d+)", t).group(1))
-    hid = (0, 0)                                                 # TBL2 (E2), MIX (E3), OSC2 (E6): hidden since Task 4.4 (eng_wave.c), range 0..0
-    return [(0, ntbl - 1), PCT, hid, hid, PCT, PCT, hid, PCT]
+    hid = (0, 0)                                                 # MIX (E3), OSC2 (E6): hidden since Task 4.4 (eng_wave.c), range 0..0
+    warp = (9, 127)                                              # WARP (E2, was TBL2): 64 = off; 0..8 are the old TBL2 values (eng_wave.c VOID_WARP_MIN)
+    return [(0, ntbl - 1), PCT, warp, hid, PCT, PCT, hid, PCT]
 
 
 def check_range(errs, who, what, v, lo, hi):

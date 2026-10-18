@@ -200,10 +200,10 @@ static void test_filter(void)
     char msg[200];
     track_t *t = &trk[0];
 
-    check("TYPE: a track parameter LP BP HP (then VOID's LP12 HP24 NOTCH), default LP (as before), not recordable (a setting)",
-          d->fmt == F_ENUM && d->min == 0 && d->max == 5 && d->def == 0 && str_eq(d->label, "TYPE") &&
+    check("TYPE: a track parameter LP BP HP (then VOID's LP12 HP24 NOTCH VOWEL), default LP (as before), not recordable (a setting)",
+          d->fmt == F_ENUM && d->min == 0 && d->max == 6 && d->def == 0 && str_eq(d->label, "TYPE") &&
           str_eq(d->names[0], "LP") && str_eq(d->names[1], "BP") && str_eq(d->names[2], "HP") &&
-          str_eq(d->names[3], "LP12") && str_eq(d->names[4], "HP24") && str_eq(d->names[5], "NOTCH") && !motion_param(P_FTYPE));
+          str_eq(d->names[3], "LP12") && str_eq(d->names[4], "HP24") && str_eq(d->names[5], "NOTCH") && str_eq(d->names[6], "VOWEL") && !motion_param(P_FTYPE));
     {
         uint32_t i, k = 0;
         for (i = 0; i < NPAGES; i++)

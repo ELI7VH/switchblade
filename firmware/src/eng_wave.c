@@ -6,6 +6,9 @@
  * pre-saturation, its drive shaper (gain, sine, tanh), and the filter TYPE (the track's P_FTYPE): LP = the
  * plugin's LP24 tanh ladder (fb 4.2 re, makeup 1 + 1.8 re), BP / HP / LP12 / HP24 / NOTCH its Simper SVF
  * (k = 2 (1 - r)^1.5); then its 0.72 soft clipper (VoiceManager.cpp).
+ * Task 4.5, Felucca's own and not in the plugin: TYPE 6 VOWEL (two parallel band-passes at the formants of the vowel CUT stands at: U O A E I
+ * from CUT 0 to 127, RES = their Q, 2 .. 12) and WARP (P_E2, 64 = off: a phase bend of the table read, the knee at 0.5 + 0.45 w; read by the
+ * slow loop, so the fast loops are as they were).
  * The plugin's movement, per voice: pitch drift (+-1.5 cents, a damped random walk), WT drift (up to
  * +-0.055 of the position), and a micro-LFO (0.01-0.25 Hz, 0.4-2.5 cents, 0.5-2 % level), new random
  * values every note; phase 0 at a new note (its FREE mode); a 5 ms fade-in before the filter.
@@ -53,7 +56,13 @@
 
 static const char *const N_VOID_TBL[VOID_NTBL] = {"SINE", "SAW", "SQUARE", "SPECT", "FORMA", "FORME", "BASS1",
                                                   "BASS2", "NOISE"};
-enum { VF_LP24, VF_BP, VF_HP, VF_LP12, VF_HP24, VF_NOTCH };   /* P_FTYPE (params.c N_FTYPE) */
+enum { VF_LP24, VF_BP, VF_HP, VF_LP12, VF_HP24, VF_NOTCH, VF_VOWEL };   /* P_FTYPE (params.c N_FTYPE) */
+#define VOID_VOWEL_G1 4096       /* VOWEL: formant 1's gain, Q12 (peak gain 1 at its centre) */
+#define VOID_VOWEL_G2 2867       /* formant 2's: 0.7 */
+/* both times a trim of 1 + 0.0058 RES + 0.00083 RES^2 (Q12): a band-pass of unit peak passes less of a saw as its Q rises (Q 2 -> 12), 14 dB by RES
+ * 127; this holds the level within 2 dB of LP24's at the same CUT where LP24 is open (CUT 64 and up; below, the ladder is shutting), tests/void_test.c */
+#define VOID_WARP_OFF 64         /* P_E2 = WARP: 64 is off */
+#define VOID_WARP_MIN 9          /* WARP's lowest value: TBL2 (this slot until Task 4.5) held 0..8, which a stored project or user preset then loads as 64 */
 _Static_assert(VOID_N0LOG2_MIN >= VOID_NLEV, "void_osc_at: the level search shifts by n0l - 2 - lv, lv < NLEV, so n0l - 2 >= NLEV - 1");
 #define VOID_SQUARE 2u
 #define VOID_WT_NORM ((int32_t)((32768LL * 32768 + VOID_WT_ONE / 2) / VOID_WT_ONE))   /* table -> Q15 */
@@ -122,6 +131,7 @@ typedef struct {
     uint32_t sh, mask;           /* index = phase >> sh; the level's length - 1 */
     int32_t w;                   /* crossfade a -> b, Q15 */
     uint32_t pw;                 /* SQUARE: the pulse's width as a phase (0: not the SQUARE) */
+    uint32_t kp, m1, m2;         /* WARP: the knee as a phase (0: off), and the slopes 0.5 / k, 0.5 / (1 - k) below and above it, Q16 */
 } void_osc_t;
 
 /* table tb at position pos (frames Q8, 0 .. 255 << 8), for a phase increment inc */
@@ -151,6 +161,39 @@ static void void_osc_at(void_osc_t *o, uint32_t tb, int32_t pos, uint32_t inc)
     }
 }
 
+/* the oscillator for table tb at position pos and phase increment inc, with WARP wv (P_E2, 64 = off): the knee k = 0.5 + 0.45 w, w = (WARP - 64) / 63.
+ * The band limit follows the steepest segment: the level is chosen for inc x max(0.5 / k, 0.5 / (1 - k)), so a heavy warp reads a darker level
+ * instead of aliasing. The darkest level (VOID_NLEV - 1) holds n0 / 4 >> 5 harmonics and is the end of that: a note whose steep segment would
+ * outrun it (inc x m above LIM_INC >> (n0l - 2 - (NLEV - 1))) gets the knee pulled towards 1/2 until it just fits, so a warp fades out up the keyboard
+ * (about 2 kHz and up it does nothing) instead of aliasing worse than the same note unwarped */
+static __attribute__((noinline)) void void_osc_warp(void_osc_t *o, uint32_t tb, int32_t pos, uint32_t inc, int32_t wv)
+{
+    uint32_t einc = inc, kp = 0, m1 = 0, m2 = 0;
+    wv = clamp(wv, 0, 127);
+    if (wv != VOID_WARP_OFF) {
+        int32_t w = clamp((wv - VOID_WARP_OFF) * 520, -32767, 32767);
+        uint32_t k16 = (uint32_t)(32768 + ((w * 29491) >> 15));    /* k, Q16: 0.05 .. 0.95 */
+        uint32_t emax = VOID_LIM_INC >> (VOID_N0LOG2[tb] - 2u - (VOID_NLEV - 1u));
+        uint32_t r8 = ((emax >> 10) << 8) / ((inc >> 10) | 1u);    /* emax / inc, Q8 (the largest slope factor the darkest level takes) */
+        uint32_t kmin;
+        r8 = r8 > 32767u ? 32767u : r8;
+        kmin = r8 > 256u ? (1u << 23) / r8 : 32768u;               /* 0.5 / (that), Q16 */
+        k16 = k16 < kmin ? kmin : k16 > 65536u - kmin ? 65536u - kmin : k16;
+        if (k16 != 32768u) {
+            uint64_t e;
+            m1 = (1u << 31) / k16;
+            m2 = (1u << 31) / (65536u - k16);
+            kp = k16 << 16;
+            e = ((uint64_t)inc * (m1 > m2 ? m1 : m2)) >> 16;
+            einc = e > 0xFFFFFFFFu ? 0xFFFFFFFFu : (uint32_t)e;
+        }
+    }
+    void_osc_at(o, tb, pos, einc);
+    o->kp = kp;
+    o->m1 = m1;
+    o->m2 = m2;
+}
+
 /* one level read at phase ph, linear between its samples */
 VOID_INLINE int32_t void_rd(const int16_t *t, uint32_t ph, uint32_t sh, uint32_t mask)
 {
@@ -160,10 +203,20 @@ VOID_INLINE int32_t void_rd(const int16_t *t, uint32_t ph, uint32_t sh, uint32_t
     return a + (((b - a) * f) >> 15);
 }
 
-/* the oscillator at phase ph, in table units (the SQUARE's pulse halved: it spans twice the table's peak) */
-VOID_INLINE int32_t void_osc(const void_osc_t *o, uint32_t ph)
+/* WARP's phase bend: the phase through a two-segment knee, [0, k) -> [0, 1/2) and [k, 1) -> [1/2, 1), slopes m1 = 0.5 / k and m2 = 0.5 / (1 - k) in Q16 */
+VOID_INLINE uint32_t void_bend(const void_osc_t *o, uint32_t ph)
 {
-    int32_t s = void_rd(o->a, ph, o->sh, o->mask);
+    return ph < o->kp ? (uint32_t)(((uint64_t)ph * o->m1) >> 16)
+                      : 0x80000000u + (uint32_t)(((uint64_t)(ph - o->kp) * o->m2) >> 16);
+}
+
+/* the oscillator at phase ph, in table units (the SQUARE's pulse halved: it spans twice the table's peak) */
+VOID_INLINE int32_t void_osc(const void_osc_t *o, uint32_t ph, const int warp)
+{
+    int32_t s;
+    if (warp && o->kp)                                 /* WARP (warp: a constant 0 in the four fast loops, which are then as they were before it) */
+        ph = void_bend(o, ph);
+    s = void_rd(o->a, ph, o->sh, o->mask);
     if (o->pw)                                         /* (halved: its weight is doubled) */
         return (s - void_rd(o->a, ph - o->pw, o->sh, o->mask)) >> 1;
     if (o->w)
@@ -219,6 +272,8 @@ typedef struct {
     tsvf_t sv;
     int32_t drv, dg, dasym, doff, dk, dm, drec;   /* the drive shaper (drv 0: off) */
     int32_t close;               /* close-gain, Q15 (LP12 / LP24: fades the output as the cutoff reaches 20 Hz) */
+    tsvf_t sv2;                  /* VOWEL: sv = formant 1, sv2 = formant 2 (after the fields the loops read: their offsets stay as they were) */
+    int32_t vg1, vg2;            /* VOWEL: the formants' gains, Q12 */
 } void_flt_t;
 
 /* cut: the cutoff index (CUTOFF_HZ) Q8; res, drv 0..127; shut: the cutoff is at the plugin's 20 Hz (CUT 0, no
@@ -230,7 +285,16 @@ static void void_flt_set(void_flt_t *fl, uint32_t ft, int32_t cut, int32_t res, 
     fl->kq = clamp(p15 >> 2, 40, 8192);                /* SVF k = 2 (1 - r)^1.5, Q12 */
     fl->sat = res * 258 > 25559 ? res * 258 - 25559 : 0;   /* applySVF: above r 0.78 */
     fl->drv = drv;
-    if (ft == VF_LP24) {
+    if (ft == VF_VOWEL) {                              /* two band-passes at the formants of the vowel CUT stands at; Q = 2 + 10 RES / 127 */
+        int32_t i = 2 * ci, fr = cut & 255, a1 = VOID_AT(VOID_VOWEL, i), a2 = VOID_AT(VOID_VOWEL, i + 1),
+                b1 = VOID_AT(VOID_VOWEL, i + 2), b2 = VOID_AT(VOID_VOWEL, i + 3), t;
+        fl->kq = (int32_t)((8192u * 127u) / (uint32_t)(254 + 10 * res));   /* k = 2 / Q, Q12 */
+        tsvf_coef_k(&fl->sv, a1 + (((b1 - a1) * fr) >> 8), fl->kq);
+        tsvf_coef_k(&fl->sv2, a2 + (((b2 - a2) * fr) >> 8), fl->kq);
+        t = 4096 + res * 24 + ((res * res * 53) >> 6);
+        fl->vg1 = (((VOID_VOWEL_G1 * t) >> 12) * fl->kq) >> 12;        /* (k: the band-pass of unit peak gain, v1 times k) */
+        fl->vg2 = (((VOID_VOWEL_G2 * t) >> 12) * fl->kq) >> 12;
+    } else if (ft == VF_LP24) {
         int32_t g = SVF_G[ci], re = 32767 - p15;       /* tan(pi fc / FS) Q12; re = 1 - (1 - r)^1.5 */
         if (ci < 127)
             g += ((SVF_G[ci + 1] - g) * (cut & 255)) >> 8;
@@ -293,9 +357,8 @@ VOID_INLINE int32_t void_svf_sat(int32_t x, int32_t c)
 }
 
 /* Simper SVF on f[o], f[o + 1]: LP v2, BP v1, HP x - k v1 - v2, notch x - k v1 */
-VOID_INLINE int32_t void_svf1(const void_flt_t *fl, int32_t *f, int32_t s, uint32_t ft)
+VOID_INLINE int32_t void_svf1(const tsvf_t *c, const void_flt_t *fl, int32_t *f, int32_t s, uint32_t ft)
 {
-    const tsvf_t *c = &fl->sv;
     int32_t v3 = s - f[1], v1 = (c->a1 * f[0] + c->a2 * v3) >> 13, v2 = f[1] + ((c->a2 * f[0] + c->a3 * v3) >> 13);
     f[0] = clamp(2 * v1 - f[0], -150000, 150000);
     f[1] = clamp(2 * v2 - f[1], -150000, 150000);
@@ -313,8 +376,14 @@ VOID_INLINE int32_t void_svf1(const void_flt_t *fl, int32_t *f, int32_t s, uint3
 }
 VOID_INLINE int32_t void_svf(const void_flt_t *fl, int32_t *f, int32_t s)
 {
-    int32_t y = void_svf1(fl, f, s, fl->ft);
-    return fl->ft == VF_HP24 ? void_svf1(fl, f + 2, y, VF_HP) : y;   /* a second HP, the same coefficients */
+    int32_t y, a;
+    if (fl->ft == VF_VOWEL) {          /* two band-passes side by side on f[0..1] and f[2..3], summed with the gains in vg1, vg2 (k v1 is a band-pass of unit */
+        a = void_svf1(&fl->sv, fl, f, s, VF_BP) >> 1;      /* peak gain, so those carry k: Q12, at most 4096 x the trim / 4096, about 4096 at RES 0 and 3000 at 127). */
+        y = void_svf1(&fl->sv2, fl, f + 2, s, VF_BP) >> 1; /* v1 stays inside the states' +-150000 (a1 f0 + a2 v3 >> 13: at most ~2.5e5), so each product is under */
+        return (a * fl->vg1 + y * fl->vg2) >> 11;          /* 1.3e5 x 4096 = 5.1e8 and the sum under 1.1e9: no clamp needed (void_test.c, run under -fsanitize) */
+    }
+    y = void_svf1(&fl->sv, fl, f, s, fl->ft);
+    return fl->ft == VF_HP24 ? void_svf1(&fl->sv, fl, f + 2, y, VF_HP) : y;   /* a second HP, the same coefficients */
 }
 
 /* the close-gain; nearly shut, the states drain (0.95 a sample) */
@@ -464,7 +533,7 @@ VOID_INLINE void void_block(const void_blk_t *b, voice_t *v, void_vc_t *c, int32
     }
     int32_t amp = m->amp0 << CTL_LOG2, damp = m->amp1 - m->amp0;   /* voice_amp's ramp, stepped */
     for (i = 0; i < n; i++) {
-        int32_t s = void_osc(&o1, ph1) * c1, y;
+        int32_t s = void_osc(&o1, ph1, slow) * c1, y;
         s >>= 14;                                      /* Q15, 1.0 = the plugin's */
         ph1 += inc1;
         if (slow && ramp < 32767) {
@@ -492,7 +561,7 @@ VOID_INLINE void void_block(const void_blk_t *b, voice_t *v, void_vc_t *c, int32
     c->f[3] = f[3];
 }
 
-/* a block that fades in (the first 5 ms of a note) or closes (CUT at 20 Hz): the same loop with every test in it, one
+/* a block that fades in (the first 5 ms of a note), closes (CUT at 20 Hz) or has a WARP: the same loop with every test in it, one
  * copy, lad / drv at run time, out of line. The four fast loops carry neither: void_close's drain, which the host
  * compiler if-converts, cost ~29 instructions a sample in each of them whether it ran or not (it never runs in the
  * factory sounds), the ramp ~8 more, for the first 7 blocks of a note */
@@ -519,7 +588,7 @@ static void void_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
     /* position: the knob, SHAPE (127 steps = the table), the drift */
     pos = p[P_E1] * 255 * 256 / 127 + (m->shape - (64 << 8)) * 255 / 127 + ((c->wd * 255) >> 12);
     pos = clamp(pos, 0, 255 << 8);
-    void_osc_at(&b.o1, (uint32_t)clamp(p[P_E0], 0, VOID_NTBL - 1), pos, b.inc1);
+    void_osc_warp(&b.o1, (uint32_t)clamp(p[P_E0], 0, VOID_NTBL - 1), pos, b.inc1, p[P_E2]);
     /* the weight: the micro-LFO level, table -> Q15 (Q14). The SQUARE's pulse is twice the table's peak: its reading
      * is halved (void_osc) and its weight doubled */
     b.c1 = (int32_t)((((int64_t)g1 * 256) * (VOID_WT_NORM >> 1)) >> 23);
@@ -538,9 +607,9 @@ static void void_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
             mc += k < 512 ? a + (((VOID_LOG2P1[k + 1] - a) * (x & 255)) >> 8) : a;
         }
     }
-    void_flt_set(&b.fl, (uint32_t)p[P_FTYPE] % 6u, clamp((int32_t)VOID_CUT_Q8[cutk] + mc, 0, 127 << 8),
+    void_flt_set(&b.fl, (uint32_t)p[P_FTYPE] % 7u, clamp((int32_t)VOID_CUT_Q8[cutk] + mc, 0, 127 << 8),
                  clamp(p[P_E5], 0, 127), clamp(p[P_E7], 0, 127), !cutk && mc <= 0);
-    if (VOID_FORCE_SLOW || c->ramp < 32767 || b.fl.close < 32767) {
+    if (VOID_FORCE_SLOW || c->ramp < 32767 || b.fl.close < 32767 || b.o1.kp) {   /* (a WARP is read by the slow loop) */
         void_block_slow(&b, v, c, out, n, m);
     } else if (b.fl.ft == VF_LP24) {
         if (b.fl.drv)
@@ -564,7 +633,11 @@ static void void_track_loaded(track_t *t)
 {
     const void_px_t *x;
     uint32_t k;
-    if (t->eng_req % NENGINES != ENGI_WAVE || t->preset >= NELEM(WAVE_PX))
+    if (t->eng_req % NENGINES != ENGI_WAVE)
+        return;
+    if (t->p[P_E2] < VOID_WARP_MIN)                    /* a preset that holds an old TBL2 (0..8) there: WARP off */
+        t->p[P_E2] = VOID_WARP_OFF;
+    if (t->preset >= NELEM(WAVE_PX))
         return;
     x = &WAVE_PX[t->preset];
     t->p[P_FTYPE] = x->ftype;
@@ -598,7 +671,7 @@ static const engine_t ENG_WAVE = {
     .edit = {
         {"TBL1", F_ENUM, 0, VOID_NTBL - 1, 1, N_VOID_TBL, 0},
         {"POS", F_PCT, 0, 127, 0, 0, 0},
-        {"-", F_INT, 0, 0, 0, 0, 0},                /* E2 TBL2 (hidden: one oscillator, Task 4.4) */
+        {"WARP", F_INT, VOID_WARP_MIN, 127, VOID_WARP_OFF, 0, 0},   /* E2: was TBL2 (hidden by Task 4.4); 64 = off */
         {"-", F_INT, 0, 0, 0, 0, 0},                /* E3 MIX (hidden) */
         {"CUT", F_INT, 0, 127, 100, 0, 0},
         {"RES", F_PCT, 0, 127, 0, 0, 0},

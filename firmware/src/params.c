@@ -19,8 +19,8 @@ static const char *const N_SCALE[] = {"CHR", "MAJ", "MIN", "DOR", "MIX", "PEN", 
                                     "PHRY", "LYD", "LOC", "MEL", "BLUES", "WHOLE", "DIMHW", "DIMWH"};
 static const char *const N_ONOFF[] = {"OFF", "ON"};
 /* OB-Z's filter TYPE (1.5, #104; eng_obx.c): the SVF's low-pass (as always), band-pass, high-pass output */
-static const char *const N_FTYPE[] = {"LP", "BP", "HP", "LP12", "HP24", "NOTCH"};   /* WAVE: LP = its LP24 ladder; OB-Z:
-                                                                                     * LP12 -> LP, HP24 -> HP, NOTCH -> LP */
+static const char *const N_FTYPE[] = {"LP", "BP", "HP", "LP12", "HP24", "NOTCH", "VOWEL"};   /* WAVE: LP = its LP24 ladder; OB-Z:
+                                                                                     * LP12 -> LP, HP24 -> HP, NOTCH -> LP, VOWEL -> LP; DRIFT: HP24, NOTCH, VOWEL -> FLAT */
 /* ENV SYNC (1.5, #175; voice.c esync_coef): ATK DEC REL as note values of the tempo, shortest first. 0..127 split
  * evenly over these 25 (param_format's F_INT name list: value v is ESYNC_NAMES[v * 25 / 128]); ESYNC_UNITS: each in
  * 1/384 of a bar of 4/4 (a quarter 96), 0 = the shortest time ATK / DEC / REL 0 has. 0-terminated (param_format) */
@@ -248,6 +248,8 @@ static const param_desc_t *param_desc_of(uint32_t e, uint32_t id)
 /* a stored value as the parameter takes it (projects, user presets, motion): inside d's range */
 static int32_t param_fit(const param_desc_t *d, int32_t v)
 {
+    if (d == &ENGINES[ENGI_WAVE]->edit[2] && v < d->min)
+        return d->def;          /* WAVE's WARP, in the slot that held TBL2 (0..8) up to Task 4.5: a stored 0..8 is WARP off, not the heaviest warp */
     if (d == &TP[P_RSV_LN] && (v < d->min || v > d->max))
         return d->def;          /* CHOR: the 127 every project and user preset saved before it holds in that reserved id means OFF, not "I+II" */
     return clamp(v, d->min, d->max);
