@@ -51,6 +51,8 @@ typedef struct {
     float env, edec;             /* peak follower (noise suppression) and its per-call decay */
     float cfrq, cres;            /* the (frq, res) the coefficients were computed for; cfrq < 0 = none */
     uint32_t seed;               /* the noise PRNG */
+    float ce, h0, tk, c1s, c2s, c3s;   /* the small-signal fast path's constants for g1 (va_ladder_tick, set by va_ladder_coeffs) */
+    float k0, kc, expm;          /* the resonance curve at cres; the k the k-only parts below were made for (kc < 0 = none); exp(logm) of kc */
 } va_ladder_t;
 
 #define VA_OTA_SCALE 0.35f       /* per-stage OTA drive (the donor's kOTAScaleBase) */
@@ -67,6 +69,7 @@ static void va_ladder_reset(va_ladder_t *f)
     f->env = 0.0f;
     f->cfrq = -1.0f;
     f->cres = -1.0f;
+    f->kc = -1.0f;
     f->seed = 123456789u;
     f->noise_lvl = 0.0f;
 }
@@ -114,9 +117,13 @@ static void va_ladder_coeffs(va_ladder_t *f, float cutoff_hz, float res, float s
     float frq = cutoff_hz / (sr * 0.5f);
     float osf = (float)(f->os < 1 ? 1 : f->os), energy, se;
     if (frq != f->cfrq || res != f->cres) {
-        float k = va_res_k(res), over, g, g1, g1_2, G, kfit, logm, fade;
+        float k, over, g, g1, g1_2, G, kfit, logm, fade;
+        if (res != f->cres) {
+            f->k0 = va_res_k(res);
+            f->cres = res;
+        }
         f->cfrq = frq;
-        f->cres = res;
+        k = f->k0;
         /* Anti-aliasing at 1x OS. At 1x there is no decimator after the VCF -- the filter output goes straight to the mix
          * bus. Any resonant peak above frq ~ 0.7 (output Nyquist x 0.7) sits too close to Nyquist and folds audibly. Fade k to
          * zero across frq 0.7 -> 0.9 so even broad (non-self-oscillating) peaks collapse before reaching Nyquist. At 2x and 4x
@@ -125,13 +132,6 @@ static void va_ladder_coeffs(va_ladder_t *f, float cutoff_hz, float res, float s
             fade = 1.0f - (frq - 0.7f) / 0.2f;
             k *= fade > 0.0f ? fade : 0.0f;
         }
-        f->k = k;
-        /* frqOver is clamped at 0.85 as a numerical safety bound: at 0.85, g = tan(0.85 pi/2) ~ 6.3, near the top of where the
-         * bilinear-prewarped integrators stay well-behaved. At 2x OS the largest frq gives frqOver = 0.5, at 4x 0.25, both well
-         * inside; the clamp only engages at 1x, where the k fade above frq 0.7 has already collapsed the resonance. */
-        over = frq / osf;
-        over = over < 0.85f ? over : 0.85f;
-        g = fm_tanf(over * FM_PI * 0.5f);
         /* Peak-pull compensation -- empirical fit from the donor's hardware noise grid. A bilinear 4-pole TPT cascade
          * intrinsically pulls its peak below the nominal cutoff, but the hardware shows only a mild, roughly constant pull
          * (~+150..300 cents across k = 1..3.5, falling to 0 at k >= 4); the theoretical linear-bilinear pull overcompensates at
@@ -139,17 +139,31 @@ static void va_ladder_coeffs(va_ladder_t *f, float cutoff_hz, float res, float s
          * calibrated to the 10 x 10 noise grid. Edge fades: below k = 1 the filter is in the pure-rolloff regime with no
          * resonant peak to compensate, so the correction fades to 0 linearly; above k = 3.7, approaching self-oscillation, the
          * natural pull collapses to 0 on the hardware (the peak sits on the target at R = 127), so it fades to 0 by k = 4.4 to
-         * avoid pushing the self-oscillation pitch above the target. */
-        kfit = k < 0.0f ? 0.0f : k > 5.0f ? 5.0f : k;
-        logm = 0.20646f + kfit * (-0.04140f + kfit * (0.00602f - kfit * 0.00127f));
-        if (k < 1.0f)
-            logm *= k > 0.0f ? k : 0.0f;
-        if (k > 3.7f) {
-            fade = (4.4f - k) / 0.7f;
-            fade = fade < 0.0f ? 0.0f : fade > 1.0f ? 1.0f : fade;
-            logm *= fade;
+         * avoid pushing the self-oscillation pitch above the target. The parts that depend on k alone (this, the feedback scale)
+         * are made only when k moved: the resonance, or the 1x fade at the top of the range; a sweeping cutoff reuses them. */
+        if (k != f->kc) {
+            f->kc = k;
+            f->k = k;
+            kfit = k < 0.0f ? 0.0f : k > 5.0f ? 5.0f : k;
+            logm = 0.20646f + kfit * (-0.04140f + kfit * (0.00602f - kfit * 0.00127f));
+            if (k < 1.0f)
+                logm *= k > 0.0f ? k : 0.0f;
+            if (k > 3.7f) {
+                fade = (4.4f - k) / 0.7f;
+                fade = fade < 0.0f ? 0.0f : fade > 1.0f ? 1.0f : fade;
+                logm *= fade;
+            }
+            f->expm = fm_expf(logm);
+            f->fb_scale = 4.20f * (k - 2.5f < 0.3f ? 0.3f : k - 2.5f > 1.0f ? 1.0f : k - 2.5f);
+            f->inv_fb = 1.0f / f->fb_scale;
         }
-        g *= fm_expf(logm);
+        /* frqOver is clamped at 0.85 as a numerical safety bound: at 0.85, g = tan(0.85 pi/2) ~ 6.3, near the top of where the
+         * bilinear-prewarped integrators stay well-behaved. At 2x OS the largest frq gives frqOver = 0.5, at 4x 0.25, both well
+         * inside; the clamp only engages at 1x, where the k fade above frq 0.7 has already collapsed the resonance. */
+        over = frq / osf;
+        over = over < 0.85f ? over : 0.85f;
+        g = fm_tanf(over * FM_PI * 0.5f);
+        g *= f->expm;
         g = g < 10.0f ? g : 10.0f;
         g1 = g / (1.0f + g);
         g1_2 = g1 * g1;
@@ -159,9 +173,7 @@ static void va_ladder_coeffs(va_ladder_t *f, float cutoff_hz, float res, float s
         f->g1_2 = g1_2;
         f->g1_3 = g1_2 * g1;
         f->G = G;
-        f->inv_den = 1.0f / (1.0f + k * G);
-        f->fb_scale = 4.20f * (k - 2.5f < 0.3f ? 0.3f : k - 2.5f > 1.0f ? 1.0f : k - 2.5f);
-        f->inv_fb = 1.0f / f->fb_scale;
+        f->inv_den = 1.0f / (1.0f + f->k * G);
         {   /* what the sample loop folds: S and the OTA's argument scaled once, here */
             float o = (1.0f - g1) * f->fb_scale;
             f->c0 = o * f->g1_3;
@@ -170,7 +182,16 @@ static void va_ladder_coeffs(va_ladder_t *f, float cutoff_hz, float res, float s
             f->c3 = o;
             f->xa = VA_INPUT_RATIO * f->fb_scale;
             f->xg = VA_DIRECT_GAIN * f->inv_den;
-            f->ko = k * f->inv_den * f->inv_fb;
+            f->ko = f->k * f->inv_den * f->inv_fb;
+        }
+        {   /* the fast path's: the Newton step's series in w = xs^2 (va_ladder_tick), whose coefficients depend on g1 alone */
+            float b = 0.66666667f - 0.77777778f * g1, c = (1.0f - g1) * (1.0f / 9.0f);
+            f->ce = 0.3f * g1;
+            f->h0 = VA_OTA_SCALE * (1.0f - g1);
+            f->tk = (8.0f / (VA_OTA_SCALE * 27.0f)) * g1;
+            f->c1s = 0.33333333f - b;
+            f->c2s = b * b - c - b * 0.33333333f;
+            f->c3s = -b * b * b + 2.0f * b * c + (b * b - c) * 0.33333333f;
         }
     }
     /* Adaptive noise level: runs every call, because the follower and the state energy change with the signal. When the filter
@@ -215,9 +236,40 @@ static inline float va_ota_sat(float x)       /* the feedback OTA's tanh (Pade),
     return x * (27.0f + x2) / (27.0f + 9.0f * x2);
 }
 
-static inline float va_ladder_tick(va_ladder_t *f, float x)
+/* The small-signal stage: va_stage without its divide. In the ordinary playing range (the last stage's a2 = s3^2 below VA_A2MAX, and
+ * each stage's w = xs^2 < 0.25) the Newton step is a short series. With g1nl = g1 + e (e = 0.3 g1 a2 (1 - 0.15 a2), the series of the
+ * describing-function lift below, short of 1e-6 of g1 at a2 = 0.04) one has 1 + gnl = 1 / (1 - g1nl), so the step's
+ *     kg xs w d / dd = (8 / (0.35 * 27)) g1nl xs w S(w),     S(w) = (1 + w / 3) / (1 + b w + c w^2),
+ *     b = 2/3 - 7 g1nl / 9,  c = (1 - g1nl) / 9
+ * and S = 1 + c1 w + c2 w^2 + c3 w^3 is within 4.8e-5 of the exact for w < 0.25. The coefficients c1s .. c3s are made by va_ladder_coeffs
+ * at g1 (the segment's), not at g1nl: e moves S only at order e w, inside a term that is already cubic in xs (tests/drift_test.c (a):
+ * 4.8e-6 of the donor's peak over the 40 cases, against the exact path's 6.0e-6). It is taken on every tick of the 32 presets,
+ * as shipped and with RES at 127 (counted, three-voice chords); a loud or self-oscillating filter falls back to the exact stage and its divide. */
+#define VA_A2MAX 0.04f
+static inline float va_stage_f(float *s, float x, float h, float g1nl, float t0, float c1, float c2, float c3)
 {
-    float S, u, amp, q, sq, g1nl, gnl, lp;
+    float dxs = x - *s, xs = dxs * h, w = xs * xs, y;
+    if (w < 0.25f) {
+        y = *s + g1nl * dxs - t0 * xs * w * (1.0f + w * (c1 + w * (c2 + w * c3)));
+    } else {
+        float gnl = g1nl / (1.0f - g1nl), kg = (8.0f / VA_OTA_SCALE) * gnl, g27 = 27.0f * gnl, gk = gnl * (1.0f / VA_OTA_SCALE);
+        if (xs > 3.0f || xs < -3.0f) {
+            y = xs > 0.0f ? *s + gk : *s - gk;
+        } else {
+            float d = 27.0f + 9.0f * w, dd = d * d + g27 * (27.0f - 3.0f * w);
+            y = *s + g1nl * dxs - kg * xs * w * d / dd;
+        }
+    }
+    *s = 2.0f * y - *s;
+    return y;
+}
+
+/* always_inline: it has one caller (va_ladder_run), and the loop only keeps the state and the coefficients in registers when this
+ * is in it (a build that also calls it from elsewhere, as tests/drift_test.c's tier 1 does, would otherwise measure a slower loop
+ * than the firmware's) */
+static inline __attribute__((always_inline)) float va_ladder_tick(va_ladder_t *f, float x)
+{
+    float S, u, a2, lp;
     union { uint32_t u; float f; } n;
     /* thermal noise: a deterministic LCG, a white float in [-1, 1) */
     f->seed = f->seed * 196314165u + 907633515u;
@@ -241,38 +293,44 @@ static inline float va_ladder_tick(va_ladder_t *f, float x)
      * in a stage effectively lowers its gain, which shifts the pitch; dfGain pushes g1 up when the state amplitude is large.
      * It works alongside the k-based compensation in va_ladder_coeffs, which handles the linear bilinear warping; this
      * handles the nonlinear, saturation-induced pitch shift that only appears in self-oscillation. g1 / dfGain with
-     * dfGain = max(1/sqrt(q), 0.65), q = 1 + 0.6 a^2, is g1 x min(sqrt(q), 1/0.65). For a < 0.1 (a state this small is the
-     * ordinary playing level) sqrt(q) = 1 + 0.3 a^2 - 0.045 a^4 + ..., the series to a^2 with an error under 5e-6. */
-    amp = fm_fabsf(f->s[3]);
-    if (amp < 0.1f)
-        sq = 1.0f + 0.3f * amp * amp;
-    else {
-        q = 1.0f + 0.6f * amp * amp;
-        sq = q * fm_rsqrtf(q);
-    }
-    g1nl = f->g1 * (sq < 1.53846154f ? sq : 1.53846154f);
-    g1nl = g1nl < 0.98f ? g1nl : 0.98f;
-    gnl = g1nl / (1.0f - g1nl);
-    {
-        float h = VA_OTA_SCALE * (1.0f - g1nl), kg = (8.0f / VA_OTA_SCALE) * gnl, g27 = 27.0f * gnl, gk = gnl * (1.0f / VA_OTA_SCALE);
-        lp = va_stage(&f->s[0], u, h, g1nl, kg, g27, gk);
-        lp = va_stage(&f->s[1], lp, h, g1nl, kg, g27, gk);
-        lp = va_stage(&f->s[2], lp, h, g1nl, kg, g27, gk);
-        lp = va_stage(&f->s[3], lp, h, g1nl, kg, g27, gk);
+     * dfGain = max(1/sqrt(q), 0.65), q = 1 + 0.6 a^2, is g1 x min(sqrt(q), 1/0.65). */
+    a2 = f->s[3] * f->s[3];
+    if (a2 < VA_A2MAX) {
+        float e = f->ce * a2 * (1.0f - 0.15f * a2), g1nl = f->g1 + e, h = f->h0 - VA_OTA_SCALE * e, t0 = f->tk + (8.0f / (VA_OTA_SCALE * 27.0f)) * e;
+        lp = va_stage_f(&f->s[0], u, h, g1nl, t0, f->c1s, f->c2s, f->c3s);
+        lp = va_stage_f(&f->s[1], lp, h, g1nl, t0, f->c1s, f->c2s, f->c3s);
+        lp = va_stage_f(&f->s[2], lp, h, g1nl, t0, f->c1s, f->c2s, f->c3s);
+        lp = va_stage_f(&f->s[3], lp, h, g1nl, t0, f->c1s, f->c2s, f->c3s);
+    } else {
+        float q = 1.0f + 0.6f * a2, sq = q * fm_rsqrtf(q), g1nl, gnl;
+        g1nl = f->g1 * (sq < 1.53846154f ? sq : 1.53846154f);
+        g1nl = g1nl < 0.98f ? g1nl : 0.98f;
+        gnl = g1nl / (1.0f - g1nl);
+        {
+            float h = VA_OTA_SCALE * (1.0f - g1nl), kg = (8.0f / VA_OTA_SCALE) * gnl, g27 = 27.0f * gnl, gk = gnl * (1.0f / VA_OTA_SCALE);
+            lp = va_stage(&f->s[0], u, h, g1nl, kg, g27, gk);
+            lp = va_stage(&f->s[1], lp, h, g1nl, kg, g27, gk);
+            lp = va_stage(&f->s[2], lp, h, g1nl, kg, g27, gk);
+            lp = va_stage(&f->s[3], lp, h, g1nl, kg, g27, gk);
+        }
     }
     /* output gain: passband makeup for the 4-pole cascade (direct gain x 8.59 = 1.22: unity near R = 0) */
     return lp * VA_OUT_GAIN;
 }
 
 /* n samples through the filter. The state is copied to locals for the run, so it and the coefficients stay in registers
- * (the same arithmetic as n calls of va_ladder_tick) */
+ * (the same arithmetic as n calls of va_ladder_tick); only the four integrators and the noise seed change, so only they are written back */
 static void va_ladder_run(va_ladder_t *f, const float *x, float *y, int n)
 {
     va_ladder_t l = *f;
     int i;
     for (i = 0; i < n; i++)
         y[i] = va_ladder_tick(&l, x[i]);
-    *f = l;
+    f->s[0] = l.s[0];
+    f->s[1] = l.s[1];
+    f->s[2] = l.s[2];
+    f->s[3] = l.s[3];
+    f->seed = l.seed;
 }
 
 /* ============================================================

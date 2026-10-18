@@ -175,3 +175,61 @@ State: `sizeof(drift_vc_t)` 188 B (OS 1; 284 B at OS 2; was 196 / 292 before the
   keeps running), the DCO resets only when the voice was idle, a retrigger keeps both. Ours resets a finished voice's
   filter as well, because the engine skips an idle voice and a stale resonance would burst out of its next note.
 - **Tier-1 grid**: six OS 1 cases added (40 in all), since OS 1 is what ships.
+
+## Task 6.3 (2026-10-18): three voices, exact ladder and DCO optimisations
+
+The user: "push for 3 voices on the Drift machine". Basis: `.superpowers/sdd/drift-3voice-chorus-investigation.md` (read-only, measured), re-measured
+on the tree after Tasks 4.4 / 4.5 (WAVE is single-oscillator since 4.4, so the dearest legal mixes moved: see below). Report:
+`.superpowers/sdd/task-6.3-report.md`. Host instructions per sample, `-O2 -ffp-contract=off`, regress units; "marginal voice" = (3-voice part - 1-voice part) / 2.
+
+**Landed (all exact to the donor within 1e-5; (a) reads 4.8e-6 of the peak against 6.0e-6 before, 40 of 40 cases under 1e-4):**
+1. the small-signal ladder tick (`dsp_va.c va_ladder_tick`): while the last stage's `s3^2 < 0.04` and each stage's `xs^2 < 0.25` the Newton step is a short series
+   in `w = xs^2` (coefficients made by `va_ladder_coeffs` from g1) and `1 + gnl = 1 / (1 - g1nl)`: no divide but the OTA's. Counted: every tick of the 32 presets
+   (as shipped and with RES 127). A loud or self-oscillating filter takes the exact stage and its divides;
+2. the k-cache in `va_ladder_coeffs`: `va_res_k`, the pull-fit exp, `fb_scale`, `1/fb_scale` only when k moved (bit-identical results);
+3. `1/cps` once a block for `drift_blep` (the 4 divides a window hit become multiplies);
+4. `va_ladder_tick` is `always_inline` (one caller in the firmware; tier 1 of `drift_test.c` also calls it, which kept it out of line and the state out of registers in
+   that build only), and `va_ladder_run` writes back the four integrators and the noise seed only.
+
+| per marginal voice, mean of 32 presets | before | after |
+|---|---:|---:|
+| host instructions / sample (CTRL 8) | 325.1 | **300.1** (-7.7 %) |
+| divides / sample (investigation's counters) | 6.4 | 1.4 |
+| `va_ladder_run` alone (test (a2): 0.3 noise, 1.2 kHz, RES 0.5) | 240 | **156** (-35 %) |
+
+**`DRIFT_POLY 3`, `DRIFT_OS 1`, `DRIFT_CTRL 8` (one `#define` each in `eng_drift.c`; CTL must divide by CTRL).** The 3-voice part, dearest preset (FAT SAW BASS, mix
+included; probe = a build that references nothing but the engine, harness = `drift_test.c (i)`, which carries the DRIFT_IN seam as a real call and whose figure moves a few
+percent with which test functions are in the file, as the compiler's inlining does: re-pin from the same file):
+
+| DRIFT_CTRL | marginal voice, before -> after | 3-voice part, probe, before -> after | harness (i) after |
+|---:|---:|---:|---:|
+| **8 (shipped)** | 325.1 -> **300.1** | 1495.8 -> **1427.1** | 1386 (before: 1654) |
+| 16 | 316.3 -> 290.3 | 1469.0 -> 1397.7 | 1350 |
+| 32 | 306.5 -> 268.7 | 1434.7 -> 1321.4 | 1313 |
+
+CTRL 32 saves a further 10 % of a voice but adds about 9 dB of sideband on a bare sine under a deep, fast LFO on the cutoff (investigation 2.1: -55 -> -45 dB re the
+signal; 8 -> 16 costs the same 8 dB for a third of the saving). That is the user's decision by ear; it stays 8. **No runtime lite mode** (not in this task).
+
+Pins: `DRIFT_COST_MAX` 950 -> **1525** (= the harness 1386 + 10 %, `-O2`); new `LADDER_COST_MAX` 172 (= 156 + 10 %). Tests added: (a2) k-cache bit-exact, `va_ladder_run` = n ticks
+bit for bit, the small-signal stage within 3.5e-5 of the nonlinear term and the exact stage bit for bit outside its range, the fast tick against the pre-6.3 tick within
+5e-6 of the peak; (f) fixed (`hz[2][2 * DRIFT_POLY]`) with a per-voice spread check (any two of a part's 3 voices >= 0.3 % apart at VAR 127, one cutoff at VAR 0); (o) per
+voice (a chord of POLY notes resets, a note past the cap steals and keeps every voice's state, MONO retriggers voice 0); a headroom test with every voice at its +-2 FS clamp.
+
+**Headroom at three voices.** A voice is held to +-2 FS, a part's sum to 3 x 2 = 6 FS: x = 466,224 in `mix_part` (limit 524,287 for `x * gl`), +12 % margin; the 8-voice
+budget gives 3 + 3 + 1 + 1 at the most, 16 FS-equivalents dry. With the chorus on, `chorus_part` holds each channel to the 5 FS guard (x <= 388,520). The new case drives every
+voice into its clamp (100 x square through the DRIFT_IN seam), four DRIFT parts, LEVEL 127, every send 127, REVERB HALL SIZE 127 / DAMP 0: CHOR OFF part x 466,224,
+|mix + wet| 1,743,640 (16.9 % under 2^21); CHOR I+II x 388,531, 1,714,720 (18.2 %). Nothing in DRIFT's clamp or the 5 FS guard had to move. (The same wet-bus exposure existed
+for ACID at 6 FS and was closed separately: `ACID_GUARD_FS` 5, commit 63c0d0d.)
+
+**Dearest legal four-track mixes** (8 voices, each engine's dearest preset, any engine on any part, `tests/drift_test.c (i)` / `docs/BASELINE.md`):
+
+| mix (probe units) | POLY 1 (shipped before) | POLY 3 unoptimised | POLY 3 landed (CTRL 8) | CTRL 16 | CTRL 32 |
+|---|---:|---:|---:|---:|---:|
+| 2 x DRIFT FAT SAW BASS x3 + 2 x ACID OVERDRIVE x1 | | 4000 | **3864** | 3791 | 3650 |
+| ... with CHOR I+II on both DRIFT parts | | | **4268** (II: 4258, I: 4247) | 4195 | 4053 |
+| WAVE NEURO WOBBLE x5 + 3 x ACID OVERDRIVE x1 (no DRIFT) | **3481** | 3481 | 3481 | 3481 | 3481 |
+| one part per engine: OB-Z TAPE STR x1 + WAVE NEURO WOBBLE x3 + ACID OVERDRIVE x1 + DRIFT FAT SAW BASS x3 | 2802 (DRIFT HOOVER x1, WAVE x5) | 3070 | 3002 | 2966 | 2895 |
+
+The investigation's premise (the dearest mix has no DRIFT in it) no longer holds: WAVE became cheaper (Task 4.4), so the DRIFT-free worst fell from 3873 to 3481 and two
+DRIFT x3 parts now top it by +383 (+11 %), +787 (+23 %) with the chorus on both. CTRL 32 would bring that to +169 (+4.9 %) / +572 (+16 %). The shed path (audio.c) is a backstop; Task 8.1's PERF
+on the device is the gate, on the compositions in the report.

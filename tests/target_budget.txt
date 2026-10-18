@@ -29,6 +29,6 @@ ins_drive 277
 ins_swept 230
 acid_render 86
 bass303_render 8524
-drift_render 59764
+drift_render 46616
 void_render 8579
 void_block_slow 1135

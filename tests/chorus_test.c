@@ -451,9 +451,10 @@ static mixr_t mix_run(uint32_t e, uint32_t pi, int chor, uint32_t note, uint32_t
     }
     return r;
 }
-/* the hashes of today's DRIFT output with CHOR OFF (1.5 s, one note, the preset's own sends), recorded from the tree before this task:
- * the OFF path must not move (the golden file pins the same on all 32 presets) */
-static const uint64_t PIN_OFF[3] = {0x8ed17cc72f710e75ull, 0x86d05a877157c0cfull, 0xb2a34c3a9b2314cdull};
+/* the hashes of DRIFT's output with CHOR OFF (1.5 s, one note, the preset's own sends): the OFF path must not move (the golden file pins the
+ * same on all 32 presets). Recorded from the tree before Task 6.2 (8ed17cc7.. 86d05a87.. b2a34c3a..); re-recorded in Task 6.3, which changed
+ * the voice itself on purpose (the ladder's small-signal path and k-cache, the blep's reciprocal: the same filter to 1e-5, not the same bits) */
+static const uint64_t PIN_OFF[3] = {0x0c352095350b31b3ull, 0xed726d2e46a9a57dull, 0xc5f249a37e6af565ull};
 static const uint8_t PIN_PRESET[3] = {0, 22, 21};
 static void test_mix_off(void)
 {

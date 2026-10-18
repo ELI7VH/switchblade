@@ -18,21 +18,27 @@
  *   E4 CUT  the display law (CUTOFF_HZ)                     E5 RES  the J106 resonance curve
  *   E6 DRV  OTA input drive + the BA662's Q compensation    E7 KTR  keyboard tracking, C4 the zero point, 127 = 1:1
  *   ENV (P_ED_FLT) -> cutoff through voice.c, as OB-Z and WAVE (ownenv = 0).   P_FTYPE (0..3): HPF flat / bass boost / 236 Hz / 754 Hz.
- * Cost: the filter is most of it (a Newton step per stage, six divides a sample at DRIFT_OS times the base rate). */
+ * Cost: the filter is most of it (a Newton step per stage; since 6.3 its small-signal series leaves one divide a sample, the OTA's, at
+ * DRIFT_OS times the base rate; the exact step and its six stay for a loud or self-oscillating filter). */
 #include "dsp_va.c"
 #include "dsp_chorus.c"       /* the Juno chorus: one instance per part, after the voices (drift_part_fx) */
 
-/* DRIFT_OS and DRIFT_POLY are the plan's measured choice (docs/plans/2026-10-17-drift-juno.md "Measured result", tests/drift_test.c (i)):
- * the brief's fallback ladder ran OS 2 -> 1 (not enough: 4parts_full 2299 against the 2137 bound with two voices), then POLY 2 -> 1
- * (2018: inside). Raise them when the device's PERF run (Task 8.1) shows the room; every other line follows from the two. */
+/* DRIFT_OS, DRIFT_POLY and DRIFT_CTRL are the plan's measured choices (docs/plans/2026-10-17-drift-juno.md "Measured result", "Task 6.3";
+ * tests/drift_test.c (i)). OS 1: the brief's fallback ladder took 2 -> 1. POLY: 1 shipped (6.1); 3 since 6.3, once the ladder's
+ * small-signal path, the coefficient k-cache and the blep's reciprocal (dsp_va.c, here; all of them exact to the donor within 1e-5) took
+ * a marginal voice from 325 to 300 host instructions a sample and left the dearest legal four-track mix where it was without DRIFT.
+ * CTRL: the coefficients are made every 8 base samples (5.5 kHz). 32 would save a further 10 % of a voice (mean marginal 300 -> 269;
+ * 16: 290) at the price of about 9 dB more sideband on a bare sine under a deep, fast LFO on the cutoff (-55 -> -45 dB re the signal;
+ * masked on a saw); that is a matter of ear, so it stays 8 and is this one number (CTL must divide by it). Raise them when the device's
+ * PERF run (Task 8.1) shows the room, or lower them when it does not; every other line follows. */
 #ifndef DRIFT_OS
 #define DRIFT_OS 1               /* the filter's and the DCO's oversampling: 1 or 2 */
 #endif
 #ifndef DRIFT_POLY
-#define DRIFT_POLY 1             /* voices a DRIFT part plays at most (POLY, UNISON) */
+#define DRIFT_POLY 3             /* voices a DRIFT part plays at most (POLY, UNISON) */
 #endif
 #ifndef DRIFT_CTRL
-#define DRIFT_CTRL 8             /* base-rate samples between two filter coefficient updates (CTL / DRIFT_CTRL per block) */
+#define DRIFT_CTRL 8             /* base-rate samples between two filter coefficient updates (CTL / DRIFT_CTRL per block): 8, 16 or 32 */
 #endif
 /* test seam: the oscillator's output as the filter's input. tests/drift_test.c replaces it with silence, an impulse, a sine or
  * noise, to measure the filter alone; the product's is the identity */
@@ -110,21 +116,22 @@ static chorus_t *drift_chorus(const track_t *t)
 static inline float drift_exp2f(float x) { return fm_expf(x * FM_LN2); }
 
 /* the 4th-order polyBLEP residual of a step of height 2 (KR106Oscillators.h PolyBLEP): t the phase [0, 1), dt the increment.
- * 4 samples wide (2 before and 2 after the transition). Derived from the integrated cubic B-spline */
-static inline float drift_blep(float t, float dt)
+ * 4 samples wide (2 before and 2 after the transition). Derived from the integrated cubic B-spline. rdt = 1 / dt, made once a block by the
+ * caller: a divide per window hit (up to four a sample at a high note) is dearer than the multiply it replaces */
+static inline float drift_blep(float t, float dt, float rdt)
 {
     float dt2 = dt + dt;
     if (t < dt) {
-        float n = t / dt, n2 = n * n;
+        float n = t * rdt, n2 = n * n;
         return 0.25f * n2 * n2 - 0.66666667f * n2 * n + 1.33333333f * n - 1.0f;
     } else if (t < dt2) {
-        float u = 1.0f - (t - dt) / dt, u2 = u * u;
+        float u = 1.0f - (t - dt) * rdt, u2 = u * u;
         return -0.08333333f * u2 * u2;
     } else if (t > 1.0f - dt) {
-        float n = (t - 1.0f) / dt, n2 = n * n;
+        float n = (t - 1.0f) * rdt, n2 = n * n;
         return -0.25f * n2 * n2 - 0.66666667f * n2 * n + 1.33333333f * n + 1.0f;
     } else if (t > 1.0f - dt2) {
-        float u = 1.0f + (t - 1.0f + dt) / dt, u2 = u * u;
+        float u = 1.0f + (t - 1.0f + dt) * rdt, u2 = u * u;
         return 0.08333333f * u2 * u2;
     }
     return 0.0f;
@@ -281,7 +288,7 @@ static void drift_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
         float xin[DRIFT_CTRL * DRIFT_OS], yout[DRIFT_CTRL * DRIFT_OS];
         float pos = c->pos, dc1 = c->dc1, dc2 = c->dc2, hp0 = c->hp[0], hp1 = c->hp[1], peak = c->peak;
         int sub_state = c->sub_state;
-        const float dt2 = cps + cps, hi = 1.0f - dt2;
+        const float dt2 = cps + cps, hi = 1.0f - dt2, rcps = 1.0f / cps;
         uint32_t k = 0;
         for (seg = 0; seg < nseg; seg++) {
             va_ladder_env(l, peak);
@@ -296,14 +303,14 @@ static void drift_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
                     sub_state ^= 1;
                 }
                 if (pos < dt2 || pos > hi)
-                    bl = drift_blep(pos, cps);
+                    bl = drift_blep(pos, cps, rcps);
                 if (gsaw != 0.0f)                        /* saw: the linear ramp and the reset blep */
                     s += (2.0f * pos - 1.0f - bl) * gsaw;
                 if (gpul != 0.0f) {                      /* pulse: the comparator on the ramp, a blep at each edge */
                     float pw2 = pos - effpw, b2 = 0.0f;
                     pw2 += pw2 < 0.0f ? 1.0f : 0.0f;
                     if (pw2 < dt2 || pw2 > hi)
-                        b2 = drift_blep(pw2, cps);
+                        b2 = drift_blep(pw2, cps, rcps);
                     s += ((pos < effpw ? -1.0f : 1.0f) + b2 - bl) * gpul;
                 }
                 if (gsub != 0.0f)                        /* sub: the CD4013's half-rate square, its transitions smoothed by the blep */

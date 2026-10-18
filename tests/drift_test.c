@@ -29,11 +29,12 @@
 #include <string.h>
 #include "dsp_va.c"
 #include "drift_ref_cfg.h"
-enum { INJ_OFF, INJ_SILENCE, INJ_IMPULSE, INJ_SINE, INJ_NOISE };
+enum { INJ_OFF, INJ_SILENCE, INJ_IMPULSE, INJ_SINE, INJ_NOISE, INJ_SQUARE };
 static int inj_mode, inj_pending;
 static float inj_amp, inj_step;
 static double inj_phase;
 static uint32_t inj_rng = 0x2545F491u;
+static uint32_t inj_t, inj_n, inj_half = 1, inj_blk = 1, inj_os = 1;   /* INJ_SQUARE: the sample count (set per block), the call within the block (per voice), the half period */
 static float drift_in(float s)
 {
     switch (inj_mode) {
@@ -46,6 +47,8 @@ static float drift_in(float s)
     case INJ_SINE:
         inj_phase += (double)inj_step;
         return inj_amp * (float)sin(inj_phase);
+    case INJ_SQUARE:                               /* the same square in every voice (test_headroom): CTL calls a voice and block at DRIFT_OS 1 */
+        return (((inj_t + inj_n++ % inj_blk / inj_os) / inj_half) & 1u) ? inj_amp : -inj_amp;
     case INJ_NOISE:
         inj_rng = inj_rng * 1664525u + 1013904223u;
         return inj_amp * ((float)(int32_t)inj_rng * (1.0f / 2147483648.0f));
@@ -271,6 +274,175 @@ static void test_ladder_ref(void)
           DRIFT_REF_NCFG, worst, worst_c);
 }
 
+/* ------------------------------------------------------------ (a2) the exact optimisations (Task 6.3) --- */
+/* The k-cache in va_ladder_coeffs only skips what a repeat of the same k would recompute, so it is exact: after any walk of (cutoff,
+ * resonance) every coefficient equals, bit for bit, what a filter that had never seen anything else computes for the final pair. A
+ * wrong invalidation (the resonance moved but the k-parts kept; the 1x fade at the top of the range) shows as a differing field. */
+static int coef_same(const va_ladder_t *a, const va_ladder_t *b)
+{
+    return a->k == b->k && a->g == b->g && a->g1 == b->g1 && a->g1_2 == b->g1_2 && a->g1_3 == b->g1_3 && a->G == b->G && a->inv_den == b->inv_den &&
+           a->fb_scale == b->fb_scale && a->inv_fb == b->inv_fb && a->c0 == b->c0 && a->c1 == b->c1 && a->c2 == b->c2 && a->c3 == b->c3 && a->xa == b->xa &&
+           a->xg == b->xg && a->ko == b->ko && a->noise_lvl == b->noise_lvl && a->ce == b->ce && a->h0 == b->h0 && a->tk == b->tk && a->c1s == b->c1s &&
+           a->c2s == b->c2s && a->c3s == b->c3s;
+}
+static void test_ladder_cache(void)
+{
+    static const float RES[8] = {0.0f, 0.3f, 0.55f, 0.7f, 0.8f, 0.9f, 0.97f, 1.0f};
+    uint32_t r = 0x2545F491u;
+    unsigned os, n, bad = 0, steps = 0;
+    for (os = 1; os <= 2u; os++) {
+        va_ladder_t a;
+        float res = 0.5f;
+        memset(&a, 0, sizeof a);
+        va_ladder_reset(&a);
+        va_ladder_setup(&a, (int)os, 8, FSF);
+        for (n = 0; n < 6000u; n++) {
+            va_ladder_t b;
+            float hz;
+            r = r * 1664525u + 1013904223u;
+            hz = 25.0f * powf(2.0f, (float)(r >> 8) * (1.0f / 16777216.0f) * 10.2f);          /* 25 Hz .. 22 kHz: the 1x fade zone is in it */
+            if ((r & 7u) == 0)                                                                  /* a resonance move one time in eight, else a sweep */
+                res = RES[(r >> 4) & 7u];
+            va_ladder_coeffs(&a, hz, res, FSF);
+            memset(&b, 0, sizeof b);
+            va_ladder_reset(&b);
+            va_ladder_setup(&b, (int)os, 8, FSF);
+            va_ladder_coeffs(&b, hz, res, FSF);
+            bad += !coef_same(&a, &b);
+            steps++;
+        }
+    }
+    check(bad == 0, "(a2) the coefficient k-cache is exact: %u of %u steps of a cutoff sweep with the resonance moving (OS 1 and 2, up to the 1x fade) equal a cold filter's, bit for bit", steps - bad, steps);
+}
+
+/* va_ladder_run writes back only the four integrators and the noise seed (nothing else changes in a tick): over several blocks it equals the same
+ * number of va_ladder_tick calls, outputs and the whole state, bit for bit */
+static void test_ladder_run(void)
+{
+    va_ladder_t a, b;
+    float x[32], ya[32], yb[32];
+    uint32_t r = 0x9E3779B9u, blk, i;
+    int same = 1;
+    memset(&a, 0, sizeof a);
+    va_ladder_reset(&a);
+    va_ladder_setup(&a, 1, 8, FSF);
+    b = a;
+    for (blk = 0; blk < 200u; blk++) {
+        for (i = 0; i < 32u; i++) {
+            r = r * 1664525u + 1013904223u;
+            x[i] = (0.4f + (float)(blk % 5u)) * ((float)(int32_t)r * (1.0f / 2147483648.0f));
+        }
+        va_ladder_coeffs(&a, 300.0f + 40.0f * (float)blk, 0.3f + 0.003f * (float)blk, FSF);
+        b = a;
+        va_ladder_run(&a, x, ya, 32);
+        for (i = 0; i < 32u; i++)
+            yb[i] = va_ladder_tick(&b, x[i]);
+        same &= !memcmp(ya, yb, sizeof ya) && !memcmp(&a, &b, sizeof a);
+    }
+    check(same, "(a2) va_ladder_run is 32 calls of va_ladder_tick: outputs and the whole state (integrators, noise seed, coefficients) equal bit for bit over 200 blocks");
+}
+
+/* The small-signal path of va_ladder_tick against the exact tick it replaces (the arithmetic of the tick before 6.3, kept here as the
+ * reference): the same input and coefficients through both, over levels, cutoffs and resonances short of self-oscillation. The fast
+ * path's series is within 4.8e-5 of the exact step, a small term of the output: the output must agree within 1.5e-5 of its peak. */
+static float ref_tick(va_ladder_t *f, float x)
+{
+    float S, u, amp, q, sq, g1nl, gnl, lp;
+    union { uint32_t u; float f; } n;
+    f->seed = f->seed * 196314165u + 907633515u;
+    n.u = (f->seed >> 9) | 0x40000000u;
+    x += (n.f - 3.0f) * f->noise_lvl;
+    f->s[0] += 1e-20f;
+    S = f->s[0] * f->c0 + f->s[1] * f->c1 + f->s[2] * f->c2 + f->s[3] * f->c3;
+    u = x * f->xg + va_ota_sat(x * f->xa - S) * f->ko;
+    amp = fm_fabsf(f->s[3]);
+    if (amp < 0.1f)
+        sq = 1.0f + 0.3f * amp * amp;
+    else {
+        q = 1.0f + 0.6f * amp * amp;
+        sq = q * fm_rsqrtf(q);
+    }
+    g1nl = f->g1 * (sq < 1.53846154f ? sq : 1.53846154f);
+    g1nl = g1nl < 0.98f ? g1nl : 0.98f;
+    gnl = g1nl / (1.0f - g1nl);
+    {
+        float h = VA_OTA_SCALE * (1.0f - g1nl), kg = (8.0f / VA_OTA_SCALE) * gnl, g27 = 27.0f * gnl, gk = gnl * (1.0f / VA_OTA_SCALE);
+        lp = va_stage(&f->s[0], u, h, g1nl, kg, g27, gk);
+        lp = va_stage(&f->s[1], lp, h, g1nl, kg, g27, gk);
+        lp = va_stage(&f->s[2], lp, h, g1nl, kg, g27, gk);
+        lp = va_stage(&f->s[3], lp, h, g1nl, kg, g27, gk);
+    }
+    return lp * VA_OUT_GAIN;
+}
+/* the small-signal stage by itself, step by step over xs = 0.35 (1 - g1) (x - s) from -4 to 4 at several cutoffs: inside the series' range (xs^2 < 0.25) it is within
+ * 5e-5 of the exact stage's step (the series, relative to the term it replaces), outside it is the exact stage, bit for bit */
+static void test_stage_fast(void)
+{
+    static const float HZ[5] = {80.0f, 400.0f, 2000.0f, 7000.0f, 14000.0f};
+    unsigned ih, k, nin = 0, nout = 0, bad_out = 0;
+    double worst = 0.0;
+    for (ih = 0; ih < 5u; ih++) {
+        va_ladder_t l;
+        float g1, h, gnl, kg, g27, gk;
+        memset(&l, 0, sizeof l);
+        va_ladder_reset(&l);
+        va_ladder_setup(&l, 1, 8, FSF);
+        va_ladder_coeffs(&l, HZ[ih], 0.3f, FSF);
+        g1 = l.g1;
+        h = VA_OTA_SCALE * (1.0f - g1);
+        gnl = g1 / (1.0f - g1), kg = (8.0f / VA_OTA_SCALE) * gnl, g27 = 27.0f * gnl, gk = gnl * (1.0f / VA_OTA_SCALE);
+        for (k = 0; k <= 800u; k++) {
+            float xs = -4.0f + 0.01f * (float)k, s0 = 0.3f, sf = s0, se = s0, yf, ye, x = s0 + xs / h, w = xs * xs;
+            yf = va_stage_f(&sf, x, h, g1, l.tk, l.c1s, l.c2s, l.c3s);
+            ye = va_stage(&se, x, h, g1, kg, g27, gk);
+            if (w < 0.24f) {
+                double t = fabs((double)ye - (double)(s0 + g1 * (x - s0))) + 1e-9, d = fabs((double)yf - (double)ye);   /* (the nonlinear term the series replaces) */
+                worst = d / t > worst ? d / t : worst;
+                nin++;
+            } else if (w > 0.26f) {                                                   /* (the gate's own rounding in between) */
+                bad_out += !(yf == ye && sf == se);
+                nout++;
+            }
+        }
+    }
+    check(worst < 5e-5 && bad_out == 0, "(a2) the small-signal stage: inside xs^2 < 0.25 (%u steps) within %.2g of the nonlinear term it replaces (< 5e-5); outside (%u steps) the exact stage, bit for bit (%u differ)", nin, worst, nout, bad_out);
+}
+
+static void test_ladder_fast(void)
+{
+    static const float AMP[6] = {0.02f, 0.1f, 0.3f, 0.6f, 1.0f, 2.5f}, HZ[4] = {120.0f, 600.0f, 2500.0f, 9000.0f}, RES[4] = {0.0f, 0.4f, 0.6f, 0.8f};
+    unsigned ia, ih, ir, i;
+    uint64_t fast = 0, all = 0;
+    double worst = 0.0;
+    for (ia = 0; ia < 6u; ia++)
+        for (ih = 0; ih < 4u; ih++)
+            for (ir = 0; ir < 4u; ir++) {
+                va_ladder_t a, b;
+                double e = 0.0, m = 0.0;
+                memset(&a, 0, sizeof a);
+                va_ladder_reset(&a);
+                va_ladder_setup(&a, 1, 1, FSF);
+                for (i = 0; i < 12000u; i++) {
+                    float x = AMP[ia] * (0.7f * sinf((float)i * 0.0431f * (1.0f + HZ[ih] * 0.0004f)) + 0.3f * sinf((float)i * 0.31f)), ya, yb;
+                    if (i == 0) {
+                        va_ladder_coeffs(&a, HZ[ih], RES[ir], FSF);
+                        b = a;
+                    }
+                    va_ladder_coeffs(&a, HZ[ih], RES[ir], FSF);
+                    b.noise_lvl = a.noise_lvl;                                        /* (the noise level follows the filter's own state) */
+                    fast += a.s[3] * a.s[3] < VA_A2MAX;
+                    all++;
+                    ya = va_ladder_tick(&a, x);
+                    yb = ref_tick(&b, x);
+                    e = fabs((double)ya - (double)yb) > e ? fabs((double)ya - (double)yb) : e;
+                    m = fabs((double)yb) > m ? fabs((double)yb) : m;
+                }
+                worst = m > 0.0 && e / m > worst ? e / m : worst;
+            }
+    check(worst < 1.5e-5 && fast > all / 2u, "(a2) the small-signal ladder path against the exact tick it replaces: 96 settings (6 levels x 4 cutoffs x 4 resonances), worst %.2g of the peak (< 1.5e-5); the path is taken on %.0f %% of the samples (> 50)",
+          worst, 100.0 * (double)fast / (double)all);
+}
+
 /* ------------------------------------------------------------ halfband --- */
 static void test_halfband(void)
 {
@@ -492,7 +664,7 @@ static void direct_voice(unsigned i, unsigned note, unsigned nblk, int32_t *out)
 }
 static void test_variance(void)
 {
-    double hz[2][4], lo, hi;
+    double hz[2][2 * DRIFT_POLY], lo, hi;
     unsigned var, i, part, k;
     int ok0, ok1;
     for (var = 0; var < 2u; var++) {
@@ -525,6 +697,21 @@ static void test_variance(void)
     }
     ok1 = hi / lo - 1.0 > 0.01;
     check(ok1, "(f) VAR 127: the %u voices self-oscillate at %.1f .. %.1f Hz (%.2f %% apart, >= 1)", k, lo, hi, 100.0 * (hi / lo - 1.0));
+    {   /* and within each part the voices differ from one another (each voice has its own tolerances), not only part from part: the smallest
+         * gap between any two of a part's DRIFT_POLY voices, and VAR 0 puts them all on one cutoff */
+        double gap = 1e9, gap0 = 0.0;
+        unsigned a, c;
+        for (part = 0; part < 2u; part++)
+            for (a = 0; a < DRIFT_POLY; a++)
+                for (c = a + 1u; c < DRIFT_POLY; c++) {
+                    double x = hz[1][part * DRIFT_POLY + a], y = hz[1][part * DRIFT_POLY + c], r = x > y ? x / y : y / x;
+                    double x0 = hz[0][part * DRIFT_POLY + a], y0 = hz[0][part * DRIFT_POLY + c], r0 = x0 > y0 ? x0 / y0 : y0 / x0;
+                    gap = r - 1.0 < gap ? r - 1.0 : gap;
+                    gap0 = r0 - 1.0 > gap0 ? r0 - 1.0 : gap0;
+                }
+        check(DRIFT_POLY < 2 || (gap > 0.003 && gap0 < 0.002),
+              "(f) VAR 127: within a part any two of its %d voices self-oscillate at least %.2f %% apart (> 0.3); VAR 0: at most %.2f %% apart (< 0.2)", (int)DRIFT_POLY, 100.0 * gap, 100.0 * gap0);
+    }
 }
 
 /* ------------------------------------------------------------ (g) --- */
@@ -888,30 +1075,54 @@ static void test_dc(void)
  * a voice that has finished starts from the reset. Ours: a fresh voice (voice.c leaves env 0 only then) zeroes the whole state and
  * seeds s[0]; a sounding one is not touched. (The donor never resets its filter, since its idle voice is not skipped; ours is, so
  * a stale resonance would otherwise burst out of the next note.) */
+/* At DRIFT_POLY voices: a chord of DRIFT_POLY notes (voice.c's round robin puts them on voices 0 .. POLY-1, and back on the same ones after
+ * a full round), every voice of it checked; a note past the cap steals one (a sounding voice), and MONO retriggers voice 0. */
 static void test_voice_start(void)
 {
-    drift_vc_t ref, before;
-    unsigned i;
-    int ok_fresh, ok_keep, live;
+    static const uint8_t CH[8] = {60, 64, 67, 71, 55, 52, 48, 72};
+    drift_vc_t ref[DRIFT_POLY], before[DRIFT_POLY], mref, mbefore;
+    unsigned i, b, on;
+    int ok_fresh, ok_keep, ok_mono, live;
     drift_fresh();
     pots(127, 64, 127, 127, 100, 127, 40, 64);
     T->p[P_REL] = 20;
-    trk_note_on(T, 60, 100);
-    ref = *vc_of(0);
-    run(0, 22050);                                           /* loud, resonant, the filter ringing */
-    live = vc_of(0)->l.s[1] != 0.0f && vc_of(0)->pos != 0.0f;
-    trk_note_off(T, 60);
-    for (i = 0; i < 400u && T->v[0].active; i++)
+    for (i = 0; i < DRIFT_POLY; i++)
+        trk_note_on(T, CH[i], 100);
+    memcpy(ref, vc_of(0), sizeof ref);
+    run(0, 22050);                                           /* loud, resonant, the filters ringing */
+    for (live = 1, i = 0; i < DRIFT_POLY; i++)
+        live &= vc_of(i)->l.s[1] != 0.0f && vc_of(i)->pos != 0.0f;
+    for (i = 0; i < DRIFT_POLY; i++)
+        trk_note_off(T, CH[i]);
+    for (b = 0; b < 400u; b++) {
+        for (on = 0, i = 0; i < DRIFT_POLY; i++)
+            on |= T->v[i].active;
+        if (!on)
+            break;
         run(0, CTL);
-    live &= !T->v[0].active;
-    trk_note_on(T, 60, 100);
-    ok_fresh = live && !memcmp(vc_of(0), &ref, sizeof ref);
-    check(ok_fresh, "(o) a new note on a finished voice starts from the reset: the state equals a never-played voice's (after %u blocks of release, state was dirty: %d)", i, live);
+    }
+    live &= !on;
+    for (i = 0; i < DRIFT_POLY; i++)
+        trk_note_on(T, CH[i], 100);
+    ok_fresh = live && !memcmp(vc_of(0), ref, sizeof ref);
+    check(ok_fresh, "(o) %d new note(s) on finished voices start from the reset: every voice's state equals a never-played voice's (after %u blocks of release, state was dirty: %d)", (int)DRIFT_POLY, b, live);
     run(0, 8192);
-    before = *vc_of(0);
-    trk_note_on(T, 64, 100);                                 /* a retrigger / steal of the sounding voice (DRIFT has one voice) */
-    ok_keep = before.pos != 0.0f && before.l.s[1] != 0.0f && !memcmp(vc_of(0), &before, sizeof before);
-    check(ok_keep, "(o) a retrigger of a sounding voice keeps the phase (%.3f) and the filter states (s1 %.3g): untouched", (double)before.pos, (double)before.l.s[1]);
+    memcpy(before, vc_of(0), sizeof before);
+    trk_note_on(T, CH[DRIFT_POLY], 100);                     /* a note past the cap: a steal of a sounding voice */
+    for (ok_keep = 1, i = 0; i < DRIFT_POLY; i++)
+        ok_keep &= before[i].pos != 0.0f && before[i].l.s[1] != 0.0f;
+    ok_keep &= !memcmp(vc_of(0), before, sizeof before);
+    check(ok_keep, "(o) a note past the voice cap steals a sounding voice and keeps every voice's phase (%.3f ..) and filter states (s1 %.3g ..): untouched", (double)before[0].pos, (double)before[0].l.s[1]);
+    drift_fresh();                                           /* MONO: the next note retriggers voice 0 */
+    pots(127, 64, 127, 127, 100, 127, 40, 64);
+    T->p[P_VOICE] = V_MONO;
+    trk_note_on(T, 60, 100);
+    mref = *vc_of(0);
+    run(0, 8192);
+    mbefore = *vc_of(0);
+    trk_note_on(T, 64, 100);
+    ok_mono = mref.l.s[1] == 0.0f && mbefore.pos != 0.0f && mbefore.l.s[1] != 0.0f && !memcmp(vc_of(0), &mbefore, sizeof mbefore);
+    check(ok_mono, "(o) MONO: a retrigger of the sounding voice keeps its phase (%.3f) and filter states (s1 %.3g)", (double)mbefore.pos, (double)mbefore.l.s[1]);
 }
 
 /* ------------------------------------------------------------ P_FTYPE beyond DRIFT's four positions (I2) --- */
@@ -950,12 +1161,12 @@ static uint64_t instr_now(void)
     return 0;
 }
 static int32_t mix_out[2 * CTL];
-/* regress.c's job_cpu: parts[k] = {engine, preset, notes} (POLY, SUS 127, they ring out), 0.5 s to settle, then 1 s counted */
-static double mix_cost(const uint8_t (*parts)[3])
+static int mix_chor;                                         /* the chorus mode of every DRIFT part in mix_prepare: OFF unless a caller says (tests/chorus_test.c has its cost) */
+/* regress.c's job_cpu: parts[k] = {engine, preset, notes} (POLY, SUS 127, they ring out); the notes are on and nothing has rendered yet */
+static void mix_prepare(const uint8_t (*parts)[3])
 {
     static const uint8_t NOTES[8] = {48, 52, 55, 59, 60, 64, 67, 71};
-    uint32_t p, i, k, nb = FS / CTL;
-    uint64_t i0 = 0;
+    uint32_t p, i, k;
     memset(dly_buf, 0, sizeof dly_buf);
     memset(cho_buf, 0, sizeof cho_buf);
     memset(rev_comb, 0, sizeof rev_comb);
@@ -982,7 +1193,7 @@ static double mix_cost(const uint8_t (*parts)[3])
     song.g[G_BPM] = 120;
     for (p = 0; p < NPART; p++) {
         host_preset(&trk[p], parts[p][0], parts[p][1]);
-        trk[p].p[P_RSV_LN] = 0;                    /* CHOR OFF: this is the voice's cost and its pin (the chorus' is tests/chorus_test.c) */
+        trk[p].p[P_RSV_LN] = parts[p][0] == ENGI_DRIFT ? (int16_t)mix_chor : 0;   /* CHOR OFF: this is the voice's cost and its pin (the chorus' is tests/chorus_test.c) */
         trk[p].p[P_VOICE] = V_POLY;
         trk[p].p[P_SUS] = 127;
         trk[p].p[P_AMODE] = 0;
@@ -991,6 +1202,13 @@ static double mix_cost(const uint8_t (*parts)[3])
         if (!parts[p][2])
             trk[p].p[P_MUTE] = 1;
     }
+}
+/* 0.5 s to settle, then 1 s counted */
+static double mix_cost(const uint8_t (*parts)[3])
+{
+    uint32_t k, nb = FS / CTL;
+    uint64_t i0 = 0;
+    mix_prepare(parts);
     for (k = 0; k < nb / 2u + nb; k++) {
         if (k == nb / 2u)
             i0 = instr_now();
@@ -1007,9 +1225,9 @@ static double mix_cost(const uint8_t (*parts)[3])
  *    at -O2 (the units of regress.c and acid_test.c; another compiler or -O level moves it: re-measure and move the pin with a stated
  *    reason, never to hide a regression), as ACID's (f) does for its voice;
  *  - it MEASURES and prints the dearest legal four-track mix it can construct (the figure Task 8.1 must check on the device,
- *    recorded in docs/BASELINE.md): the engines' dearest presets, every split of the shared 8-voice budget over one part per engine
- *    (each engine within its own voice cap), the dearest total. 4parts_light and 4parts_full are printed for reference. */
-#define DRIFT_COST_MAX 950.0   /* the measured worst (HOOVER, 860 at DRIFT_POLY 1, DRIFT_OS 1, -O2) + 10 % */
+ *    recorded in docs/BASELINE.md): the engines' dearest presets, every split of the shared 8-voice budget over the four parts, any engine
+ *    on any part (the same one on several), the dearest total; 4parts_light and 4parts_full are printed for reference. */
+#define DRIFT_COST_MAX 1525.0  /* the measured worst (FAT SAW BASS, 1386 at DRIFT_POLY 3, DRIFT_OS 1, DRIFT_CTRL 8, -O2) + 10 % */
 
 static uint32_t engine_cap(uint32_t e)
 {
@@ -1036,11 +1254,45 @@ static uint32_t dearest_preset(uint32_t e, uint32_t v, double *cost)
     return best;
 }
 
+/* a candidate mix: engine and voices of each of the four parts, and its cost (measured, or the sum of the parts' own costs) */
+typedef struct { double c; uint8_t e[4], v[4]; } mixc_t;
+static double mixc_cost(const mixc_t *m, const uint32_t *pre, const uint8_t *ENG)
+{
+    uint8_t parts[NPART][3];
+    uint32_t i;
+    memset(parts, 0, sizeof parts);
+    for (i = 0; i < 4u; i++)
+        parts[i][0] = ENG[m->e[i]], parts[i][1] = (uint8_t)pre[m->e[i]], parts[i][2] = m->v[i];
+    return mix_cost((const uint8_t(*)[3])parts);
+}
+static void mixc_print(const char *tag, const mixc_t *m, const uint32_t *pre, const uint8_t *ENG)
+{
+    uint32_t i, n = 0;
+    printf("drift: (i) %s %.0f =", tag, m->c);
+    for (i = 0; i < 4u; i++)
+        if (m->v[i])
+            printf("%s %s %s x%u", n++ ? " +" : "", ENGINES[ENG[m->e[i]]]->name, ENGINES[ENG[m->e[i]]]->presets[pre[m->e[i]]].name, m->v[i]);
+    printf("\n");
+}
+#define NTOP 6u
+static void top_add(mixc_t *top, const mixc_t *m)          /* the NTOP dearest by estimate, dearest first */
+{
+    uint32_t i, j;
+    for (i = 0; i < NTOP; i++)
+        if (m->c > top[i].c) {
+            for (j = NTOP - 1u; j > i; j--)
+                top[j] = top[j - 1u];
+            top[i] = *m;
+            return;
+        }
+}
+
 static void test_cost(void)
 {
     uint8_t parts[NPART][3];
-    double idle, full, light, worst, wmix = 0.0;
-    uint32_t pre[4], k, drift_k, v[4], w[4] = {0, 0, 0, 0};
+    double idle, full, light, worst, c1[4][NVOICE + 1u], wone = 0.0, ctop = 0.0;
+    uint32_t pre[4], k, drift_k, v[4], e[4], i;
+    mixc_t top[NTOP], topnd[NTOP], one = {0}, bd, bnd;
     static const uint8_t ENG[4] = {ENGI_OBX, ENGI_WAVE, ENGI_ACID, ENGI_DRIFT};
     if (!instr_now()) {
         printf("drift: SKIP (i) cost: NOT CHECKED, there is no instruction counter on this host (macOS proc_pid_rusage only); "
@@ -1057,37 +1309,180 @@ static void test_cost(void)
     parts[0][2] = 3, parts[1][2] = 3, parts[2][2] = 2, parts[3][2] = 1;
     light = mix_cost((const uint8_t(*)[3])parts);
     drift_k = dearest_preset(ENGI_DRIFT, DRIFT_POLY, &worst);
-    printf("drift: (i) DRIFT_POLY %d, DRIFT_OS %d: the mix alone %.0f; the DRIFT part alone, worst preset %s %.0f (%.0f per voice)\n", (int)DRIFT_POLY,
-           (int)DRIFT_OS, idle, ENGINES[ENGI_DRIFT]->presets[drift_k].name, worst, (worst - idle) / DRIFT_POLY);
-    check(worst <= DRIFT_COST_MAX, "(i) the DRIFT part %.0f (%s, %d voice) is within its pin %.0f (the measured worst + 10 %%, -O2)", worst,
+    printf("drift: (i) DRIFT_POLY %d, DRIFT_OS %d, DRIFT_CTRL %d: the mix alone %.0f; the DRIFT part alone, worst preset %s %.0f (%.0f per voice)\n", (int)DRIFT_POLY,
+           (int)DRIFT_OS, (int)DRIFT_CTRL, idle, ENGINES[ENGI_DRIFT]->presets[drift_k].name, worst, (worst - idle) / DRIFT_POLY);
+    check(worst <= DRIFT_COST_MAX, "(i) the DRIFT part %.0f (%s, %d voices) is within its pin %.0f (the measured worst + 10 %%, -O2)", worst,
           ENGINES[ENGI_DRIFT]->presets[drift_k].name, (int)DRIFT_POLY, DRIFT_COST_MAX);
-    /* the dearest legal mix: each engine's dearest preset at its cap (for the ranking), every split of the 8 voices */
+    /* the dearest legal mix: each engine's dearest preset at its cap (for the ranking), the cost of v voices of it alone (above the idle mix),
+     * every assignment of engines to parts (a nondecreasing engine per part: the order of the parts is only the notes' octave) and every split
+     * of the 8 voices (each engine within its own voice cap), ranked by the sum of the single-part costs; the NTOP dearest are then measured as mixes */
     for (k = 0; k < 4u; k++) {
         double c;
         pre[k] = dearest_preset(ENG[k], engine_cap(ENG[k]), &c);
+        c1[k][0] = 0.0;
+        for (i = 1; i <= engine_cap(ENG[k]); i++) {
+            memset(parts, 0, sizeof parts);
+            parts[0][0] = ENG[k], parts[0][1] = (uint8_t)pre[k], parts[0][2] = (uint8_t)i;
+            c1[k][i] = mix_cost((const uint8_t(*)[3])parts) - idle;
+        }
     }
-    for (v[0] = 0; v[0] <= engine_cap(ENG[0]); v[0]++)
-        for (v[1] = 0; v[1] <= engine_cap(ENG[1]); v[1]++)
-            for (v[2] = 0; v[2] <= engine_cap(ENG[2]); v[2]++)
-                for (v[3] = 0; v[3] <= engine_cap(ENG[3]); v[3]++) {
-                    double c;
-                    uint32_t i, tot = v[0] + v[1] + v[2] + v[3];
-                    if (tot != NVOICE)               /* the dearest has the whole budget in play (more voices never cost less) */
-                        continue;
-                    memset(parts, 0, sizeof parts);
-                    for (i = 0; i < 4u; i++)
-                        parts[i][0] = ENG[i], parts[i][1] = (uint8_t)pre[i], parts[i][2] = (uint8_t)v[i];
-                    c = mix_cost((const uint8_t(*)[3])parts);
-                    if (c > wmix) {
-                        wmix = c;
-                        for (i = 0; i < 4u; i++)
-                            w[i] = v[i];
+    memset(top, 0, sizeof top);
+    memset(topnd, 0, sizeof topnd);
+    for (e[0] = 0; e[0] < 4u; e[0]++)
+        for (e[1] = e[0]; e[1] < 4u; e[1]++)
+            for (e[2] = e[1]; e[2] < 4u; e[2]++)
+                for (e[3] = e[2]; e[3] < 4u; e[3]++)
+                    for (v[0] = 0; v[0] <= engine_cap(ENG[e[0]]); v[0]++)
+                        for (v[1] = 0; v[1] <= engine_cap(ENG[e[1]]); v[1]++)
+                            for (v[2] = 0; v[2] <= engine_cap(ENG[e[2]]); v[2]++)
+                                for (v[3] = 0; v[3] <= engine_cap(ENG[e[3]]); v[3]++) {
+                                    mixc_t m;
+                                    int nd = 0, distinct = 1;
+                                    if (v[0] + v[1] + v[2] + v[3] != NVOICE)   /* the dearest has the whole budget in play (more voices never cost less) */
+                                        continue;
+                                    m.c = idle;
+                                    for (i = 0; i < 4u; i++) {
+                                        m.e[i] = (uint8_t)e[i], m.v[i] = (uint8_t)v[i];
+                                        m.c += c1[e[i]][v[i]];
+                                        nd |= e[i] == 3u && v[i];
+                                        distinct &= i == 0 || e[i] != e[i - 1u];
+                                    }
+                                    top_add(nd ? top : topnd, &m);
+                                    if (distinct) {
+                                        mixc_t mm = m;
+                                        mm.c = mixc_cost(&m, pre, ENG);
+                                        if (mm.c > wone) {
+                                            wone = mm.c;
+                                            one = mm;
+                                        }
+                                    }
+                                }
+    bd = bnd = top[0];
+    bd.c = bnd.c = 0.0;
+    for (i = 0; i < NTOP; i++) {
+        mixc_t m = top[i];
+        m.c = mixc_cost(&m, pre, ENG);
+        if (m.c > bd.c)
+            bd = m;
+        m = topnd[i];
+        m.c = mixc_cost(&m, pre, ENG);
+        if (m.c > bnd.c)
+            bnd = m;
+    }
+    printf("drift: (i) measured, not asserted (Task 8.1 checks the device): 4parts_light %.0f, 4parts_full %.0f (idle mix %.0f)\n", light, full, idle);
+    mixc_print("the dearest legal mix (8 voices, any engine on any part):", bd.c > bnd.c ? &bd : &bnd, pre, ENG);
+    mixc_print("the dearest with DRIFT in it:", &bd, pre, ENG);
+    mixc_print("the dearest without a DRIFT voice:", &bnd, pre, ENG);
+    mixc_print("the dearest with one part per engine:", &one, pre, ENG);
+    mix_chor = 2;                                            /* the chorus (Task 6.2) on every DRIFT part: II, the dearest by a few instructions */
+    ctop = mixc_cost(&bd, pre, ENG);
+    mix_chor = 0;
+    printf("drift: (i) the dearest with DRIFT in it, the chorus (CHOR II) on every DRIFT part: %.0f (+%.0f)\n", ctop, ctop - bd.c);
+}
+
+/* ------------------------------------------------------------ (a2) the ladder's cost (Task 6.3) --- */
+/* The filter alone, 32-sample blocks of a steady 0.3 x noise at 1.2 kHz, RES 0.5 (the small-signal ladder, as the presets play it): va_ladder_run, the
+ * firmware's loop, pinned at +10 % of its measured cost, -O2 (host instructions a sample, the units of (i)): 240 before Task 6.3 (the exact tick, not
+ * inlined, the whole state written back), 156 with the small-signal path, always_inline and the short write-back. The exact tick it replaced (ref_tick in
+ * registers) is printed for comparison; how a compiler lays that one out is not asserted. */
+#define LADDER_COST_MAX 172.0   /* the measured va_ladder_run (156 at -O2, DRIFT_OS 1) + 10 % */
+static double ladder_cost(int exact)
+{
+    static float x[32], y[32];
+    va_ladder_t l;
+    uint32_t r = 0x2545F491u, b, i;
+    uint64_t i0 = 0;
+    memset(&l, 0, sizeof l);
+    va_ladder_reset(&l);
+    va_ladder_setup(&l, 1, 8, FSF);
+    for (b = 0; b < 400u + 3000u; b++) {
+        if (b == 400u)
+            i0 = instr_now();
+        for (i = 0; i < 32u; i++) {
+            r = r * 1664525u + 1013904223u;
+            x[i] = 0.3f * ((float)(int32_t)r * (1.0f / 2147483648.0f));
+        }
+        va_ladder_coeffs(&l, 1200.0f, 0.5f, FSF);
+        if (exact) {                                         /* (in registers, as va_ladder_run does) */
+            va_ladder_t t = l;
+            for (i = 0; i < 32u; i++)
+                y[i] = ref_tick(&t, x[i]);
+            l = t;
+        } else
+            va_ladder_run(&l, x, y, 32);
+    }
+    return i0 ? (double)(instr_now() - i0) / (3000.0 * 32.0) : 0.0;
+}
+static void test_ladder_cost(void)
+{
+    double fast = ladder_cost(0), exact = ladder_cost(1);
+    if (!instr_now()) {
+        printf("drift: SKIP (a2) ladder cost: NOT CHECKED, there is no instruction counter on this host\n");
+        return;
+    }
+    printf("drift: (a2) the ladder alone, instructions a sample: va_ladder_run %.0f; the exact tick it replaced, in registers, %.0f\n", fast, exact);
+    check(fast <= LADDER_COST_MAX, "(a2) va_ladder_run costs %.0f instructions a sample, within its pin %.0f (the measured + 10 %%, -O2)", fast, LADDER_COST_MAX);
+}
+
+/* ------------------------------------------------------------ the integer headroom at DRIFT_POLY voices (Task 6.3) --- */
+/* A DRIFT voice is held to +-2 FS before the integer conversion (drift_render), so a part's sum is at most DRIFT_POLY x 2 FS: 6 FS at three voices, which is
+ * x = 466,224 in mix_part (fx.c: x = ((b >> 2) * 9713) >> 10, 77,704 per FS; x * gl needs x <= 524,287). With the chorus on, chorus_part holds each of L and R
+ * to the 5 FS guard (dsp_chorus.c CHORUS_GUARD_FS), x <= 388,520. The master forms ((mix + wet) >> 2) * mg and needs |mix + wet| < 2^21 over four parts and
+ * the wet bus; the budget of 8 voices means 3 + 3 + 1 + 1 at the most for DRIFT parts. Here every voice is driven into its clamp (the oscillator replaced by a
+ * 100 x square, the same in every voice, through the seam) with LEVEL 127, PAN centre, every send 127, REVERB HALL at SIZE 127 / DAMP 0 and the delay's
+ * feedback up, CHOR OFF and I+II, and the real mix_block's buses are read back. */
+static void test_headroom(void)
+{
+    enum { NBLK = 1000 };
+    static const uint32_t HALF[5] = {7, 40, 97, 211, 1500};
+    static const uint8_t NV[2][4] = {{3, 3, 1, 1}, {3, 3, 2, 0}};
+    int32_t worst[2] = {0, 0}, wx[2] = {0, 0};
+    uint32_t chor, h, p, b, i, cfg;
+    for (chor = 0; chor < 2u; chor++)
+        for (cfg = 0; cfg < 2u; cfg++)
+            for (h = 0; h < 5u; h++) {
+                uint8_t parts[NPART][3];
+                memset(parts, 0, sizeof parts);
+                mix_chor = chor ? 3 : 0;
+                for (p = 0; p < 4u; p++)
+                    parts[p][0] = ENGI_DRIFT, parts[p][1] = 8, parts[p][2] = 0;
+                mix_prepare((const uint8_t(*)[3])parts);
+                song.g[G_RTYPE] = 2, song.g[G_RSIZE] = 127, song.g[G_RDAMP] = 0, song.g[G_DTIME] = 3, song.g[G_DFDBK] = 120;
+                song.master_q12 = 4096;
+                for (p = 0; p < 4u; p++) {
+                    T = &trk[p];
+                    T->p[P_MUTE] = 0, T->p[P_PAN] = 0, T->p[P_SPRD] = 0, T->p[P_LEVEL] = 127, T->p[P_DIST] = 0;
+                    T->p[P_CHOR] = T->p[P_DLY] = T->p[P_REV] = 127;
+                    T->p[P_RSV_LN] = chor ? 3 : 0;
+                    pots(64, 64, 0, 0, 127, 127, 0, 0);
+                    for (i = 0; i < NV[cfg][p]; i++)
+                        trk_note_on(T, 36 + 7 * i + p, 127);
+                }
+                T = &trk[0];
+                inj_mode = INJ_SQUARE, inj_amp = 100.0f, inj_half = HALF[h], inj_t = 0, inj_os = DRIFT_OS, inj_blk = CTL * DRIFT_OS;
+                for (b = 0; b < NBLK; b++) {
+                    inj_n = 0;
+                    mix_block(mix_out, CTL);
+                    inj_t += CTL;
+                    for (p = 0; p < 4u; p++) {
+                        wx[chor] = trk[p].peak > wx[chor] ? trk[p].peak : wx[chor];
+                    }
+                    for (i = 0; i < CTL; i++) {
+                        int64_t sl_ = (int64_t)mix_l[i] + wet[i], sr_ = (int64_t)mix_r[i] + wet[i];
+                        sl_ = sl_ < 0 ? -sl_ : sl_, sr_ = sr_ < 0 ? -sr_ : sr_;
+                        worst[chor] = (int32_t)(sl_ > worst[chor] ? sl_ : worst[chor]);
+                        worst[chor] = (int32_t)(sr_ > worst[chor] ? sr_ : worst[chor]);
                     }
                 }
-    printf("drift: (i) measured, not asserted (Task 8.1 checks the device): 4parts_light %.0f, 4parts_full %.0f; the dearest legal mix (8 voices) %.0f = "
-           "OB-Z %s x%u + WAVE %s x%u + ACID %s x%u + DRIFT %s x%u, one part each (idle mix %.0f)\n", light, full, wmix,
-           ENGINES[ENGI_OBX]->presets[pre[0]].name, w[0], ENGINES[ENGI_WAVE]->presets[pre[1]].name, w[1], ENGINES[ENGI_ACID]->presets[pre[2]].name, w[2],
-           ENGINES[ENGI_DRIFT]->presets[pre[3]].name, w[3], idle);
+                inj_mode = INJ_OFF;
+            }
+    mix_chor = 0;
+    printf("drift: headroom, 4 DRIFT parts at %d voices (3+3+1+1, 3+3+2), LEVEL 127, sends 127, HALL SIZE 127 DAMP 0, every voice driven into its +-2 FS clamp: CHOR OFF part x %d (6 FS = 466224), |mix + wet| %d; "
+           "CHOR I+II part x %d (5 FS = 388520), |mix + wet| %d (limit 2097151)\n", (int)DRIFT_POLY, wx[0], worst[0], wx[1], worst[1]);
+    check(wx[0] <= 524287 && worst[0] < 2097151 && wx[0] >= 466224 - 16,
+          "headroom: CHOR OFF, the voices at their clamp (3 x 2 FS a part): part x %d <= 524287 (x * gl stays in int32; the clamp reached: >= 466208), |mix + wet| %d < 2097151 (%.1f %% left)", wx[0], worst[0], 100.0 * (2097151.0 - (double)worst[0]) / 2097151.0);
+    check(wx[1] <= 388520 + 16 && worst[1] < 2097151 && wx[1] >= 388520 - 16,
+          "headroom: CHOR I+II, the chorus input at 6 FS held to the 5 FS guard: part x %d <= 388536, |mix + wet| %d < 2097151 (%.1f %% left)", wx[1], worst[1], 100.0 * (2097151.0 - (double)worst[1]) / 2097151.0);
 }
 
 int main(int argc, char **argv)
@@ -1096,6 +1491,10 @@ int main(int argc, char **argv)
     if (argc > 1)
         refdir = argv[1];
     test_ladder_ref();
+    test_ladder_cache();
+    test_ladder_run();
+    test_stage_fast();
+    test_ladder_fast();
     test_halfband();
     test_slope();
     test_thd();
@@ -1113,7 +1512,9 @@ int main(int argc, char **argv)
     test_dc();
     test_voice_start();
     test_ftype_fallback();
+    test_headroom();
     test_cost();
+    test_ladder_cost();
     printf("drift_test: %s\n", bad ? "FAIL" : "ok");
     return bad ? 1 : 0;
 }

@@ -64,6 +64,34 @@ Measured on this Mac. Plan and derivation: `docs/plans/2026-10-17-drift-juno.md`
     divides a sample (one instruction here) are dearer on the FPU.
   - `cpu/DRIFT/*` re-recorded (HOOVER 784 in regress units, was 806); `cpu/mix/4parts_light` untouched (the user's 55c58e2).
 
+## Task 6.3: DRIFT at three voices (2026-10-18)
+
+Plan: `docs/plans/2026-10-17-drift-juno.md` "Task 6.3". Measured on this Mac, `-O2 -ffp-contract=off`, host instructions per sample (regress units); the idle mix reads 358.
+
+- **`DRIFT_POLY 3`** (was 1), `DRIFT_OS 1`, `DRIFT_CTRL 8` (unchanged; 16 / 32 measured in the plan). Exact optimisations: the ladder's small-signal path, the coefficient k-cache,
+  `1/cps` once a block, `va_ladder_tick` always_inline. Marginal voice (mean of 32 presets) **325.1 -> 300.1**; (a) against the donor 6.0e-6 -> 4.8e-6 of the peak.
+- **DRIFT part alone, dearest preset (FAT SAW BASS, 3 voices, mix included): 1427** (probe, firmware-like inlining; 1496 before the optimisations) / **1386** in `tests/drift_test.c (i)`
+  (1654 before; pinned at 1525). One voice (HOOVER) reads 775 in the harness (was 865).
+- **Dearest legal four-track mix** (8 voices, each engine's dearest preset, **any engine on any part**; `drift_test.c (i)` now enumerates this, not only one part per engine):
+
+  | | probe | `drift_test.c (i)` |
+  |---|---:|---:|
+  | **ACID OVERDRIVE x1 + ACID OVERDRIVE x1 + DRIFT FAT SAW BASS x3 + DRIFT FAT SAW BASS x3** | **3864** | **3767** |
+  | the same with CHOR (Task 6.2) on both DRIFT parts (I+II / II) | 4268 / 4258 | 4178 (II) |
+  | no DRIFT voice: WAVE NEURO WOBBLE x5 + ACID OVERDRIVE x1 on each of three parts | 3481 | 3454 |
+  | one part per engine: OB-Z TAPE STR x1 + WAVE NEURO WOBBLE x3 + ACID OVERDRIVE x1 + DRIFT FAT SAW BASS x3 | 3002 | 2940 |
+  | before this task (DRIFT mono): the DRIFT-free worst above | 3481 | |
+
+  The worst legal mix is now a DRIFT one (the investigation found it DRIFT-free, with WAVE at its Task 4.3 cost): **+383 (+11 %) over the old worst, +787 (+23 %) with the chorus on both DRIFT parts.**
+  **Task 8.1 must run these on the device** (PERF): the 3864 mix with CHOR OFF and with CHOR I+II on both DRIFT parts (JUNO page), and the 3481 mix. `4parts_light` 2094, `4parts_full` 2207 (harness).
+- Memory: `sizeof(drift_vc_t)` 224 B; `DRIFT_MEM` = 3 x 224 + the chorus 1,124 = 1,796 B, now the largest, so `ENG_MEM_PART` 1,312 -> 1,796 B: **pool 277,672 -> 279,608 B** of 368,640.
+  `.data+.bss` 43,508 B of 73,728 (unchanged). **Image 369,980 -> 372,656 B** of APP_SLOT 581,564. `build.py check()`: no soft-double routines. `drift_render` target count 59,764 -> 46,616 (structural).
+- `regress`: 141 goldens, **34 moved** (the 32 DRIFT presets, `song/4track_mix_four`, `slicer/song_gate_stut_four`); no OB-Z, WAVE or ACID line. `union_golden.txt`: all 168 sequences
+  (each plays DRIFT on part 3). `chorus_test.c`'s three CHOR OFF hash pins re-recorded (they pinned the pre-6.2 DRIFT voice).
+- `cpu_baseline.txt` replaced by hand (no BUDGET_UPDATE): the 32 `cpu/DRIFT/*` lines (they measure 3 voices now), the 3 `cpu/DRIFT_CHOR/*` lines, and `cpu/mix/4parts_full` 1705 -> 2248
+  (DRIFT plays 3 voices of its 4 notes there; `4parts_light` untouched).
+- ACID: `ACID_GUARD_FS` 6 -> 5 (four ACID parts at the guard with every send at 127 and HALL: |mix + wet| 2,353,498 at 6 FS, 2,042,682 at 5); no ACID golden or cost line moved.
+
 ## Host tests (`sh tests/run_tests.sh`, ~6 min) failures that exist before any FM1-Four change
 These are environment failures on this Mac, not regressions. Later tasks may not add to this list.
 1. `perform: FLANGER over REPEAT 1/16 ... PHASER ... FAIL` (perform_test cost check, host timing).
