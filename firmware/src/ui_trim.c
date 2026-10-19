@@ -18,6 +18,7 @@
 #define TG_HOME 2u                                      /* HOME's strips: tabs, the sound, the cards */
 #define TG_EDIT 4u                                      /* EDIT's two strips */
 #define TG_BOTH (TG_HOME | TG_EDIT)                     /* ... and the footer, shared by both */
+#define TG_FOOTE 8u                                     /* the footer of EDIT only (OB-Z's cheeks) */
 typedef struct { uint8_t pg, x, y, w, h; uint16_t c; uint8_t k; } trim_t;   /* screen pixels; k: 0 a flat colour c, 1 wood (ui_ctl.c ctl_wood; c is its mean) */
 #define TK_WOOD 1u
 #define TRIM_N(a) ((uint32_t)(sizeof(a) / sizeof((a)[0])))
@@ -28,7 +29,7 @@ typedef struct { uint8_t pg, x, y, w, h; uint16_t c; uint8_t k; } trim_t;   /* s
 static const trim_t TRIM_OBZ[] = {
     {TG_HEAD, 0, 1, 240, 1, OB_STRIPE},   {TG_HEAD, 0, 22, 240, 1, OB_STRIPE},
     {TG_EDIT, 0, 24, 8, 188, OB_WOOD, TK_WOOD}, {TG_EDIT, 232, 24, 8, 188, OB_WOOD, TK_WOOD},   /* EDIT: the OB-6's cheeks, 8 px, grained */
-    {TG_EDIT, 0, 212, 2, 28, OB_WOOD, TK_WOOD}, {TG_EDIT, 238, 212, 2, 28, OB_WOOD, TK_WOOD},
+    {TG_FOOTE, 0, 212, 2, 28, OB_WOOD, TK_WOOD}, {TG_FOOTE, 238, 212, 2, 28, OB_WOOD, TK_WOOD},
     {TG_EDIT, 8, 24, 224, 1, OB_STRIPE},  {TG_EDIT, 8, 118, 224, 1, OB_STRIPE},
     {TG_EDIT, 8, 211, 224, 1, OB_STRIPE}, {TG_BOTH, 2, 237, 236, 1, OB_STRIPE},
 };

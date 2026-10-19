@@ -3735,6 +3735,19 @@ static int test_rack(void)
         if (!ok) printf("    activity: off %u on %u after %u\n", off, on, scr_count(HU_AX - 3, 24 + 40 + HU_AY - 3, HU_AX + 4, 24 + 40 + HU_AY + 4, p->accent));
         bad += check("  the activity LED lights while the track sounds (its meter) and goes out after", ok);
     }
+    {   /* the footer: OB-Z's cheeks only under EDIT, not under HOME */
+        uint32_t w_home = 0, w_edit = 0, y;
+        ui_power_on(); go_home(); set_engine_of(TSEL, ENGI_OBX); ui.force = 1; frame(); frame();
+        for (y = 214; y < 238u; y++) w_home += host_screen[y * 240 + 0] != host_screen[y * 240 + 120] && host_screen[y * 240 + 0] != swap16(T_BG) ? 1u : 0u;
+        press(B_EDIT); frames(320); ui.force = 1; frame();
+        for (y = 214; y < 238u; y++) {
+            uint16_t px = swap16(host_screen[y * 240 + 0]);
+            uint32_t t;
+            for (t = 0; t <= 16u && px != ctl_blend(WOOD_LO, WOOD_HI, t); t++) ;
+            w_edit += t <= 16u;
+        }
+        bad += check("  OB-Z's wood cheeks reach the footer under EDIT, not under HOME", w_home == 0u && w_edit >= 20u);
+    }
     return bad;
 }
 

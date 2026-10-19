@@ -791,7 +791,7 @@ static void draw_foot(void)
     ui.foot_sig = sig;
     cv_begin(240, big ? BIG_FOOT_H : H_FOOT, T_BG);
     if (big)
-        trim_cv(TG_BOTH, 0, BIG_FOOT_Y, 240, BIG_FOOT_H);
+        trim_cv(TG_BOTH | (big_page() ? TG_FOOTE : 0u), 0, BIG_FOOT_Y, 240, BIG_FOOT_H);   /* (EDIT's footer has the cheeks too) */
     cv_oy = oy;                                       /* (EDIT: row 1 lower) */
     if (help) {                                       /* row 1: the hint in place of the steps or the OCT+ / OCT- hint */
         help_row(help, 2);

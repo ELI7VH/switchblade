@@ -2167,6 +2167,20 @@ int main(int argc, char **argv)
             fprintf(rep, "  %-16s %15.1f %13llu %15llu\n", S_NAME[COST[k]], (double)(clock() - c0) / CLOCKS_PER_SEC / N * 1e6,
                     (unsigned long long)nt, (unsigned long long)px);
         }
+        {   /* UI.4: HOME (the selected track of each machine) and EDIT of each machine in MACHINE mode: a full redraw, all strips */
+            static const int C2[] = {S_HOME_BIG, S_HOME_BIG, S_HOME_BIG, S_HOME_BIG, S_EDIT_BIG_OBX, S_EDIT_BIG_WAVE, S_EDIT_BIG_ACID, S_EDIT_BIG_DRIFT};
+            static const char *const N2[] = {"HOME on OB-Z", "HOME on WAVE", "HOME on ACID", "HOME on DRIFT", "EDIT OB-Z", "EDIT WAVE", "EDIT ACID", "EDIT DRIFT"};
+            for (k = 0; k < sizeof C2 / sizeof C2[0]; k++) {
+                clock_t c0;
+                setup(C2[k]);
+                if (k < 4u) eng(k);
+                machine_mode();
+                draw(C2[k]);
+                c0 = clock();
+                for (i = 0; i < N; i++) { ui.force = 1; draw(C2[k]); }
+                fprintf(rep, "  cost2 %-14s %9.1f us (a forced full redraw)\n", N2[k], (double)(clock() - c0) / CLOCKS_PER_SEC / N * 1e6);
+            }
+        }
         {
             clock_t c0;
             setup(S_HOME); pal(1); draw(S_HOME);
