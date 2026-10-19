@@ -420,7 +420,15 @@ static void trim_check(int32_t x, int32_t y)
         n_trim_checked++;
         for (py = t[1]; py < t[3]; py++)
             for (px = t[0]; px < t[2]; px++)
-                bad += cv_px[(uint32_t)py * cv_w + (uint32_t)px] != swap16(trim_c[i]);
+            {
+                uint16_t px16 = swap16(cv_px[(uint32_t)py * cv_w + (uint32_t)px]);
+                if (trim_c[i]) bad += px16 != trim_c[i];
+                else {                                       /* wood: any shade between its two ends */
+                    uint32_t wi;
+                    for (wi = 0; wi <= 16u && px16 != ctl_blend(WOOD_LO, WOOD_HI, wi); wi++) ;
+                    bad += wi > 16u;
+                }
+            }
         if (bad) {
             n_trim_bad++;
             finding("trim drawn over (under content)", &o, 0);
@@ -577,8 +585,7 @@ static void machine_mode(void)
     palette_apply();
     if (ux.trim != 1u + TSEL->eng_req % NENGINES || T_BG != UI_MACHINE_PALS[TSEL->eng_req % NENGINES].bg) mach_bad++;
 }
-static int32_t sweep_machine = -1;                /* the value sweeps: a machine's palette, or (-1) OB-Z's */
-static void pal_sweep(void) { pal(sweep_machine >= 0 ? (uint32_t)sweep_machine : 0u); }
+static void pal_sweep(void) { pal(TSEL->eng_req % NENGINES); }   /* the value sweeps: the palette of the machine on the selected track (as the UI sets it) */
 static void state(void)                          /* a playing song with steps on every track */
 {
     uint32_t i;
@@ -1526,8 +1533,8 @@ static void sweep_columns(void)
     for (e = 0; e < NENGINES; e++) {
         for (i = 0; i < NPAGES; i++) {
             state();
-            pal_sweep();
             eng(e);
+            pal_sweep();
             TSEL->p[P_ESYNC] = (int16_t)esync_pass;
             ui.home = 0; ui.page = (uint8_t)i; page_entered();
             if (!page_visible(i)) continue;
@@ -1562,7 +1569,7 @@ static void sweep_columns(void)
                 esync_pass = 0;
             }
         }
-        state(); pal_sweep(); eng(e); go_home();   /* HOME's four knobs of this engine */
+        state(); eng(e); pal_sweep(); go_home();   /* HOME's four knobs of this engine */
         snprintf(name, sizeof name, "%s%s/HOME", large_on ? "LARGE " : "", ENGINES[e]->name);
         cur_name = name;
         draw(-1);
@@ -1586,7 +1593,7 @@ static void sweep_columns(void)
             lint();
             nsweep++;
         }
-        state(); pal_sweep(); eng(e); go_home();   /* HOME, this machine on every track, every one muted */
+        state(); eng(e); pal_sweep(); go_home();   /* HOME, this machine on every track, every one muted */
         for (i = 0; i < NTRK; i++)
             trk[i].p[P_MUTE] = 1, set_engine_of(&trk[i], e);
         snprintf(name, sizeof name, "%s%s/HOME MUTED", large_on ? "LARGE " : "", ENGINES[e]->name);
@@ -2017,9 +2024,8 @@ int main(int argc, char **argv)
         fprintf(rep, "(self-test: %u findings above are expected)\n\n", nfind);
         nfind = 0;
     }
-    {   /* the machines' palettes and trims (the one colour scheme): every screen with each machine's palette forced; then in
-         * MACHINE mode on each machine's track (every screen with the selected track set to the machine); then in MACHINE mode as
-         * each screen sets its own track. HOME and EDIT of each machine: OUTDIR/ppm/<MACHINE>_<screen>.ppm. 0 lint findings,
+    {   /* the machines' palettes and trims (the one colour scheme): every screen with the selected track set to each machine
+         * (its palette and trim), then in MACHINE mode as each screen sets its own track. HOME and EDIT of each machine: OUTDIR/ppm/<MACHINE>_<screen>.ppm. 0 lint findings,
          * and no trim under a text, icon or card (hk_trim) */
         static const char *const SHOT[] = {"home_big", "home_big_playing", "edit_big_obx", "edit_big_wave", "edit_big_acid",
                                            "edit_big_drift", "home", "menu", "presets", "step"};
@@ -2028,26 +2034,15 @@ int main(int argc, char **argv)
         for (m = 0; m < UI_NMACHINE; m++)
             for (s = 0; s < S_COUNT; s++) {
                 char name[64];
-                snprintf(name, sizeof name, "MACHINE-%s/%s", UI_MACHINE_PALS[m].name, S_NAME[s]);
-                cur_name = name;
-                setup((int)s);
-                palm(m);
-                if (m == 0u) aud = audf;                  /* (the text and font audits: OB-Z's, the layout is the same in every palette) */
-                draw((int)s);
-                lint();
-                if (m == 0u) { audit_scene(S_NAME[s]); font_scene("FLAT", S_NAME[s]); aud = 0; }
-                nm++;
-            }
-        for (m = 0; m < UI_NMACHINE; m++)
-            for (s = 0; s < S_COUNT; s++) {
-                char name[64];
                 snprintf(name, sizeof name, "TRACK-%s/%s", UI_MACHINE_PALS[m].name, S_NAME[s]);
                 cur_name = name;
                 setup((int)s);
                 eng(m);
                 machine_mode();
+                if (m == 0u) aud = audf;                  /* (the text and font audits: OB-Z's, the layout is the same in every palette) */
                 draw((int)s);
                 lint();
+                if (m == 0u) { audit_scene(S_NAME[s]); font_scene("FLAT", S_NAME[s]); aud = 0; }
                 nm++;
             }
         for (s = 0; s < S_COUNT; s++) {
@@ -2073,15 +2068,11 @@ int main(int argc, char **argv)
             write_ppm(out, UI_MACHINE_PALS[m].name, "home_big");
             nshot++;
         }
-        for (m = 0; m < UI_NMACHINE; m++) {          /* the value sweeps (every page, engine and column value) in each machine's palette */
-            sweep_machine = (int32_t)m;
-            sweep_columns();
-        }
-        sweep_machine = -1;
-        printf("ui_render: MACHINE mode: %u screens (4 machine palettes forced, on each machine's track, as set up) and the value sweeps; "
+        sweep_columns();                             /* the value sweeps: every page, engine and column value, each in its machine's palette */
+        printf("ui_render: MACHINE mode: %u screens (each machine's palette, on its machine's track, as set up) and the value sweeps; "
                "%u trim rectangles drawn, each still whole at the blit (%u checks); %u wrong palettes\n",
                nm, n_trim_rects, n_trim_checked, mach_bad);
-        fprintf(rep, "MACHINE mode (every screen, 4 machine palettes forced, on each track, as set up; the value sweeps): %u screens, "
+        fprintf(rep, "MACHINE mode (every screen on each machine's track, as set up; the value sweeps): %u screens, "
                 "%u trim rectangles drawn, %u checked against the texts and cards of their canvas; %u lint findings; %u wrong palettes\n",
                 nm, n_trim_rects, n_trim_checked, nfind - n0, mach_bad);
         if (n_trim_rects < 1000u) { fprintf(stderr, "ui_render: the trim was drawn %u times only\n", n_trim_rects); nfind++; }
@@ -2100,6 +2091,7 @@ int main(int argc, char **argv)
                     snprintf(name, sizeof name, "%s/%s", tag, S_NAME[s]);
                     cur_name = name;
                     setup((int)s);
+                    eng(p);
                     pal(p);
                     ui_style = (uint8_t)st; style_apply();
                     draw((int)s);
@@ -2128,6 +2120,7 @@ int main(int argc, char **argv)
                     cur_name = name;
                     setup((int)s);
                     ui_prefs |= PREF_LARGE;
+                    eng(p);
                     pal(p);
                     ui_style = (uint8_t)st; style_apply();
                     draw((int)s);

@@ -91,6 +91,11 @@ static int big_face_of(const char *v)
         return 1;
     return 2;
 }
+/* the same inside a ring of inner radius r (WAVE's: no XL) */
+static int big_face_of_r(const char *v, int32_t r)
+{
+    return large_face_has(v) && big_fits(&AF_L, v, AF_L_CAP_Y, AF_L_CAP_H, r) ? 1 : 2;
+}
 
 /* card k (116 x 92) into the strip being drawn, its top-left at (x, y) */
 static void draw_big_card(uint32_t k, uint32_t x, uint32_t y)
@@ -169,30 +174,271 @@ static uint32_t big_card_sig(uint32_t k)
     return h;
 }
 
+/* ---------------------------------------------------- the machines' own controls (UI.4) ---
+ * FLAT draws each machine's panel as the hardware it is modelled on (assets/refs/): OB-Z the OB-6's chunky knobs with their 11 ticks
+ * on bevelled cards between wood cheeks (the trim), WAVE the plugin's glowing amber rings, ACID the TB-303's black skirted knobs on
+ * brushed silver with corner screws, DRIFT the Juno-106's four vertical faders (tan caps, 11 ticks each) under a red band with
+ * a VCF bracket. OB-Z, ACID and DRIFT read their value on a 7-segment LED under the control (ui_led.c; the unit beside it), WAVE
+ * inside its ring in Exo 2. A value an LED cannot spell ("OFF") goes in the recess as text. STYLE LINE keeps the old cards
+ * (draw_big_card). The K pills are gone here: the position is the knob (left to right, top to bottom), the label and the
+ * LED turn to the accent / hot colour while a knob is turned. */
+#define EC_CW 104                                       /* a card (OB-Z, WAVE): 104 x 92 at x 13 and 123 */
+#define EC_CX(k) (13 + 110 * (int32_t)((k) & 1u))
+#define EC_LABY 5                                       /* a label's capitals: M rows 5 .. 15 of the strip */
+typedef struct {
+    const param_desc_t *d;
+    int16_t *vp;
+    const char *label, *unit;
+    char val[12];
+    int hot;
+    uint16_t vc, lc;
+    int32_t frac;                                       /* the value's place in its range, 0 .. 256 */
+} edit_card_t;
+static int edit_card_get(uint32_t k, edit_card_t *c)
+{
+    const track_t *t = TSEL;
+    int32_t v, span;
+    int mot;
+    c->d = page_desc(cur_page(), k, &c->vp);
+    c->label = big_label(t, k);
+    c->unit = "";
+    c->val[0] = 0;
+    c->hot = k == ui.hot_col && ui.hot_t;
+    c->vc = VAL(k);
+    c->frac = 0;
+    if (!c->d || !c->vp)
+        return 0;
+    big_format(c->d, *c->vp, c->val, &c->unit);
+    card_mot_of(c->vp);
+    mot = card_mot_next;
+    card_mot_next = 0;
+    card_mot = (uint8_t)((card_mot & ~(1u << k)) | (uint32_t)mot << k);
+    c->lc = c->hot ? T_ACCENT : mot ? T_THEME : T_MID;
+    v = c->d->fmt == F_ENUM ? enum_rank(c->d, *c->vp) : *c->vp;
+    span = c->d->max - c->d->min;
+    c->frac = span > 0 ? (v - c->d->min) * 256 / span : 0;
+    if (c->frac < 0) c->frac = 0;
+    if (c->frac > 256) c->frac = 256;
+    return 1;
+}
+/* a label centred over [x, x + w), its capitals from row top: M when it fits, else S */
+static void edit_label(int32_t x, int32_t w, int32_t top, const char *label, uint16_t col, uint16_t under)
+{
+    const aafont_t *f = w >= 100 && ink_w(&AF_M, label) <= w - 6 ? &AF_M : &AF_S;       /* (a narrow column: S) */
+    GFX_HOOK_ALIGN(x, 0, x + w, 0, AL_H, "edit label centred");
+    cv_text_in(x, top - (f == &AF_M ? AF_M_CAP_Y : AF_S_CAP_Y), w, f, label, col, under);
+}
+static int edit_numeric(const char *s)                  /* digits, a sign and points only (an LED can spell it) */
+{
+    int digit = 0;
+    for (; *s; s++) {
+        if (*s >= '0' && *s <= '9') digit = 1;
+        else if (*s != '-' && *s != '.' && *s != '+') return 0;
+    }
+    return digit;
+}
+/* the LED readout of a value with its unit, the pair centred on cx, the recess's top at y */
+static void edit_led(int32_t cx, int32_t y, const edit_card_t *c, uint16_t under)
+{
+    uint32_t n = c->val[0] && edit_numeric(c->val) ? led_cells(c->val) : 4u;
+    int32_t w, uw = c->unit[0] ? text_w(&AF_S, c->unit) + 3 : 0, x;
+    if (n < 3u) n = 3u;
+    if (n > 5u) n = 5u;
+    w = led_w(LED_S, n);
+    x = cx - HALF_UP(w + uw);
+    if (c->val[0] && edit_numeric(c->val)) {
+        cv_led(x, y, LED_S, n, c->val, under, c->hot ? LED_HOT : LED_ON);
+    } else {                                            /* a word: in the recess, in S */
+        cv_rrect(x, y, w, led_h(LED_S), 2, LED_BG, under);
+        cv_text_in(x, y + CAP_IN(S, led_h(LED_S)), w, &AF_S, c->val, c->hot ? LED_HOT : LED_ON, LED_BG);
+    }
+    if (c->unit[0]) {
+        GFX_HOOK_ALIGN(0, y, 0, y + led_h(LED_S), AL_V, "edit unit beside its LED");
+        cv_text_on(x + w + 3, y + CAP_IN(S, led_h(LED_S)), &AF_S, c->unit, T_MID, under);
+    }
+}
+
+/* OB-Z: the OB-6's knob at (cx, cy): 11 ticks over 270 degrees, a dark ring with a rim, a lighter cap with a highlight, a white
+ * pointer at the value's angle (the accent while it is turned) */
+static void edit_knob_obz(int32_t cx, int32_t cy, int32_t frac, int hot)
+{
+    int32_t cx8 = cx * 8 + 4, cy8 = cy * 8 + 4, i, a = -135 + 270 * frac / 256, x0, y0, x1, y1;
+    uint16_t ring = ux_mix(T_BG, T_TEXT, 7), rim = ux_mix(T_BG, T_TEXT, 30), cap = ux_mix(T_BG, T_TEXT, 22),
+             hi = ux_mix(T_BG, T_TEXT, 40), ptr = hot ? T_ACCENT : T_TEXT;
+    for (i = 0; i < 11; i++) {
+        ctl_pt(cx8, cy8, 25 * 8, -135 + 27 * i, &x0, &y0);
+        ctl_pt(cx8, cy8, 28 * 8, -135 + 27 * i, &x1, &y1);
+        cv_stroke(x0, y0, x1, y1, 5, T_MID);
+    }
+    cv_disc(cx8, cy8, 19 * 8 + 5, rim);
+    cv_disc(cx8, cy8, 19 * 8, ring);
+    cv_disc(cx8, cy8, 14 * 8, cap);
+    cv_arc(cx8, cy8, 14 * 8, 12 * 8 + 4, -140, -40, hi);
+    ctl_pt(cx8, cy8, 4 * 8, a, &x0, &y0);
+    ctl_pt(cx8, cy8, 14 * 8, a, &x1, &y1);
+    cv_stroke(x0, y0, x1, y1, 7, ptr);
+}
+/* ACID: the TB-303's knob: a black skirt with a lighter rim, the black body, a silver cap, a white pointer on the body */
+static void edit_knob_acid(int32_t cx, int32_t cy, int32_t frac, int hot)
+{
+    int32_t cx8 = cx * 8 + 4, cy8 = cy * 8 + 4, a = -135 + 270 * frac / 256, x0, y0, x1, y1;
+    uint16_t skirt = T_TEXT, rim = ux_mix(T_TEXT, T_BG, 28), body = ux_mix(T_TEXT, T_BG, 10), cap = ux_mix(T_BG, T_SURF, 25),
+             ptr = hot ? T_ACCENT : T_BG;
+    cv_disc(cx8, cy8 + 8, 22 * 8, ux_mix(T_BG, T_SURF, 70));    /* its shadow */
+    cv_disc(cx8, cy8, 21 * 8, skirt);
+    cv_arc(cx8, cy8, 21 * 8, 19 * 8 + 4, -150, 30, rim);
+    cv_disc(cx8, cy8, 17 * 8, body);
+    cv_disc(cx8, cy8, 11 * 8, T_SURF);
+    cv_disc(cx8, cy8, 10 * 8, cap);
+    ctl_pt(cx8, cy8, 12 * 8, a, &x0, &y0);
+    ctl_pt(cx8, cy8, 19 * 8, a, &x1, &y1);
+    cv_stroke(x0, y0, x1, y1, 8, ptr);
+}
+/* WAVE: the plugin's ring: a faint track over 270 degrees, the value's arc in the theme colour with two wider, fainter ones under it (the glow) */
+#define EW_RO 27                                        /* the ring's outer and inner radius */
+#define EW_RI 21
+static void edit_ring_wave(int32_t cx, int32_t cy, int32_t frac, int bipolar, uint16_t col, uint16_t under)
+{
+    int32_t cx8 = cx * 8 + 4, cy8 = cy * 8 + 4, a1 = -135 + 270 * frac / 256, s0 = bipolar ? (a1 < 0 ? a1 : 0) : -135,
+            s1 = bipolar ? (a1 < 0 ? 0 : a1) : a1;       /* (a bipolar value's arc runs from 12 o'clock) */
+    cv_arc(cx8, cy8, EW_RO * 8, EW_RI * 8, -135, 135, ux_mix(under, T_TEXT, 7));
+    if (s1 > s0) {
+        cv_arc(cx8, cy8, (EW_RO + 2) * 8, (EW_RI - 2) * 8, s0, s1, ux_mix(under, col, 16));
+        cv_arc(cx8, cy8, (EW_RO + 1) * 8, (EW_RI - 1) * 8, s0, s1, ux_mix(under, col, 38));
+        cv_arc(cx8, cy8, EW_RO * 8, EW_RI * 8, s0, s1, col);
+    }
+}
+/* DRIFT's geometry (screen rows): the red band 24 .. 26, the VCF bracket at 36, the labels' capitals from 45, the faders' travel
+ * 66 .. 178 (cap centres), the LEDs 191 .. 205 */
+#define ED_BAND_Y 24
+#define ED_VCF_Y 36
+#define ED_LAB_Y 45
+#define ED_F0 66
+#define ED_F1 178
+#define ED_LED_Y 191
+#define ED_FX(k) (30 + 60 * (int32_t)(k))
+static void edit_fader_drift(int32_t cx, int32_t frac, int hot)
+{
+    int32_t y, i, ty = ED_F1 - (ED_F1 - ED_F0) * frac / 256;
+    uint16_t slot = ux_mix(T_BG, T_TEXT, 7), key = T_KEY, khi = ux_mix(T_KEY, T_TEXT, 30), ksh = ux_mix(T_KEY, T_BG, 45);
+    cv_rrect(cx - 2, ED_F0 - 6, 4, ED_F1 - ED_F0 + 12, 2, slot, T_BG);
+    for (i = 0; i < 11; i++) {                          /* the ticks, left of the slot */
+        y = ED_F0 + (ED_F1 - ED_F0) * i / 10;
+        cv_rect(cx - 15, y, 5, 1, T_MID);
+    }
+    cv_rrect(cx - 10, ty - 6, 20, 12, 2, key, T_BG);
+    cv_rect(cx - 9, ty - 6, 18, 1, khi);
+    cv_rect(cx - 9, ty + 5, 18, 1, ksh);
+    cv_rect(cx - 9, ty, 18, 1, hot ? T_ACCENT : T_BG);   /* the dark line across the middle */
+}
+
+/* one OB-Z / WAVE card (104 x 92) at x in the strip being drawn */
+static void edit_card_card(uint32_t k, int32_t x, uint32_t wave)
+{
+    edit_card_t c;
+    int32_t cx = x + EC_CW / 2;
+    uint16_t under = T_BG;
+    ctl_card(x, 1, EC_CW, 92, 6, T_SURF, under);
+    if (!edit_card_get(k, &c))
+        return;
+    edit_label(x, EC_CW, 1 + EC_LABY, c.label, c.lc, T_SURF);
+    if (!wave) {
+        edit_knob_obz(cx, 1 + 47, c.frac, c.hot);
+        edit_led(cx, 1 + 73, &c, T_SURF);
+        BIG_HOOK(k, c.label, c.val, c.val[0] && edit_numeric(c.val) ? 3 : 4);
+    } else {
+        int face;
+        char val[12];
+        str_cpy(val, c.val, sizeof val);
+        edit_ring_wave(cx, 1 + 52, c.frac, c.d->min < 0 && c.d->max > 0, c.vc, T_SURF);
+        face = big_face_of_r(val, EW_RI - 3);
+        if (face == 2 && val[0] == '+' && big_face_of_r(val + 1, EW_RI - 3) < 2) {
+            str_cpy(val, val + 1, sizeof val);
+            face = big_face_of_r(val, EW_RI - 3);
+        }
+        BIG_HOOK(k, c.label, val, face);
+        GFX_HOOK_ALIGN(cx - EW_RI, 1 + 52 - EW_RI, cx + EW_RI, 1 + 52 + EW_RI, AL_HV, "edit wave value centred in its ring");
+        cv_text_in(cx - EW_RI, 1 + 52 - EW_RI + (face == 1 ? CAP_IN(L, 2 * EW_RI) : CAP_IN(M, 2 * EW_RI)), 2 * EW_RI,
+                   face == 1 ? &AF_L : &AF_M, val, c.vc, T_SURF);
+        if (c.unit[0]) {
+            GFX_HOOK_ALIGN(cx - EW_RI, 0, cx + EW_RI, 0, AL_H, "edit wave unit centred");
+            cv_text_in(cx - EW_RI, 1 + 52 + 14 - AF_S_CAP_Y, 2 * EW_RI, &AF_S, c.unit, T_MID, T_SURF);
+        }
+    }
+}
+/* ACID: a knob over its label and LED, on the brushed silver, at column centre cx */
+static void edit_card_acid(uint32_t k, int32_t cx)
+{
+    edit_card_t c;
+    if (!edit_card_get(k, &c))
+        return;
+    edit_label(cx - 56, 112, EC_LABY, c.label, c.hot ? T_ACCENT : T_TEXT, T_BG);
+    edit_knob_acid(cx, 46, c.frac, c.hot);
+    edit_led(cx, 71, &c, T_BG);
+    BIG_HOOK(k, c.label, c.val, c.val[0] && edit_numeric(c.val) ? 3 : 4);
+}
+/* DRIFT: the whole page into the strip being drawn (cv_oy set to the strip's top: everything clips) */
+static void edit_page_drift(void)
+{
+    uint32_t k;
+    int32_t y = ED_VCF_Y;
+    GFX_HOOK_ALIGN(0, 0, 240, 0, AL_H, "edit VCF label centred");
+    cv_text_in(0, y - 4 - AF_S_CAP_Y, 240, &AF_S, "VCF", T_MID, T_BG);
+    for (k = 0; k < 2u; k++) {                          /* the bracket: rules either side with a tick at each end */
+        int32_t x0 = k ? 134 : 10, x1 = k ? 230 : 106;
+        cv_rect(x0, y, x1 - x0, 1, T_LINE);
+        cv_rect(k ? x1 - 1 : x0, y, 1, 5, T_LINE);
+    }
+    for (k = 0; k < 4u; k++) {
+        edit_card_t c;
+        int32_t cx = ED_FX(k);
+        if (!edit_card_get(k, &c))
+            continue;
+        edit_label(cx - 30, 60, ED_LAB_Y, c.label, c.lc, T_BG);   /* (S: 'RESONANCE' fills its column) */
+        edit_fader_drift(cx, c.frac, c.hot);
+        edit_led(cx, ED_LED_Y, &c, T_BG);
+        BIG_HOOK(k, c.label, c.val, c.val[0] && edit_numeric(c.val) ? 3 : 4);
+    }
+}
+
 /* the page's two strips (draw_columns), each when it changed */
 static void draw_edit_big(void)
 {
-    uint32_t r, k;
+    uint32_t r, k, e = TSEL->eng_req % NENGINES;
     (void)motion_mask(song.sel, card_mot_mask);
     for (k = 0; k < 4u; k++)                            /* (no rolling digits here: a roll the last page left, done) */
         ui.roll[k].from[0] = 0;
     for (r = 0; r < 2u; r++) {
         uint32_t sig = str_hash(TSEL->eng_req * 977u + song.sel * 31u + ux.gen * 7u + ux.style + 1u, "EDIT");
-        for (k = 2u * r; k < 2u * r + 2u; k++)
+        uint32_t lo = !ux.style && e == ENGI_DRIFT ? 0u : 2u * r, hi = !ux.style && e == ENGI_DRIFT ? 4u : 2u * r + 2u;   /* (DRIFT: the faders cross the seam) */
+        for (k = lo; k < hi; k++)
             sig = sig * 2654435761u + big_card_sig(k);
         if (!ui.force && sig == big_sig[r])
             continue;
         big_sig[r] = sig;
         cv_begin(240, BIG_SH, T_BG);
+        if (!ux.style && e == ENGI_ACID)
+            ctl_brushed(0, 240, BIG_Y0 + (int32_t)r * BIG_SH, BIG_SH);
         trim_cv(TG_EDIT, 0, BIG_Y0 + (int32_t)r * BIG_SH, 240, BIG_SH);
-        for (k = 2u * r; k < 2u * r + 2u; k++)
-            draw_big_card(k, (uint32_t)BIG_CX(k), 1u);
-        if (ux.style) {                                 /* LINE: the dividers (no SURF): between the cards, under the
-                                                         * header, between the strips, above the footer */
-            cv_rect(BIG_CX(1) - 2, 1, 1, BIG_CH, T_RULE);
-            cv_rect(BIG_CX(0), r ? BIG_SH - 1 : 0, BIG_CX(1) + BIG_CW - BIG_CX(0), 1, T_RULE);
+        if (ux.style) {
+            for (k = 2u * r; k < 2u * r + 2u; k++)
+                draw_big_card(k, (uint32_t)BIG_CX(k), 1u);
+            cv_rect(BIG_CX(1) - 2, 1, 1, BIG_CH, T_RULE);   /* LINE: the dividers (no SURF): between the cards, under the */
+            cv_rect(BIG_CX(0), r ? BIG_SH - 1 : 0, BIG_CX(1) + BIG_CW - BIG_CX(0), 1, T_RULE);   /* header, between the strips, above the footer */
             if (!r)
                 cv_rect(BIG_CX(0), BIG_SH - 1, BIG_CX(1) + BIG_CW - BIG_CX(0), 1, T_RULE);
+        } else if (e == ENGI_DRIFT) {
+            cv_oy = -(BIG_Y0 + (int32_t)r * BIG_SH);
+            edit_page_drift();
+            cv_oy = 0;
+        } else if (e == ENGI_ACID) {
+            for (k = 2u * r; k < 2u * r + 2u; k++)
+                edit_card_acid(k, (k & 1u) ? 174 : 66);
+            ctl_screw(7, r ? 87 : 6, ux_mix(T_BG, T_SURF, 60), T_TEXT);
+            ctl_screw(233, r ? 87 : 6, ux_mix(T_BG, T_SURF, 60), T_TEXT);
+        } else {
+            for (k = 2u * r; k < 2u * r + 2u; k++)
+                edit_card_card(k, EC_CX(k), e == ENGI_WAVE);
         }
         cv_blit(0, BIG_Y0 + r * BIG_SH);
     }

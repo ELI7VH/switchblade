@@ -18,7 +18,8 @@
 #define TG_HOME 2u                                      /* HOME's strips: tabs, the sound, the cards */
 #define TG_EDIT 4u                                      /* EDIT's two strips */
 #define TG_BOTH (TG_HOME | TG_EDIT)                     /* ... and the footer, shared by both */
-typedef struct { uint8_t pg, x, y, w, h; uint16_t c; } trim_t;   /* screen pixels */
+typedef struct { uint8_t pg, x, y, w, h; uint16_t c; uint8_t k; } trim_t;   /* screen pixels; k: 0 a flat colour c, 1 wood (ui_ctl.c ctl_wood; c is its mean) */
+#define TK_WOOD 1u
 #define TRIM_N(a) ((uint32_t)(sizeof(a) / sizeof((a)[0])))
 
 /* OB-Z, the OB-6: fine blue pinstripes on the free rows, wood end cheeks down both edges of HOME and EDIT */
@@ -26,11 +27,13 @@ typedef struct { uint8_t pg, x, y, w, h; uint16_t c; } trim_t;   /* screen pixel
 #define OB_WOOD RGB(0x3c, 0x2e, 0x30)
 static const trim_t TRIM_OBZ[] = {
     {TG_HEAD, 0, 1, 240, 1, OB_STRIPE},   {TG_HEAD, 0, 22, 240, 1, OB_STRIPE},
-    {TG_BOTH, 0, 24, 2, 216, OB_WOOD},    {TG_BOTH, 238, 24, 2, 216, OB_WOOD},
+    {TG_HOME, 0, 24, 2, 216, OB_WOOD},    {TG_HOME, 238, 24, 2, 216, OB_WOOD},
+    {TG_EDIT, 0, 24, 8, 188, OB_WOOD, TK_WOOD}, {TG_EDIT, 232, 24, 8, 188, OB_WOOD, TK_WOOD},   /* EDIT: the OB-6's cheeks, 8 px, grained */
+    {TG_EDIT, 0, 212, 2, 28, OB_WOOD},    {TG_EDIT, 238, 212, 2, 28, OB_WOOD},
     {TG_HOME, 2, 24, 236, 1, OB_STRIPE},  {TG_HOME, 2, 68, 236, 1, OB_STRIPE},
     {TG_HOME, 2, 148, 236, 1, OB_STRIPE}, {TG_HOME, 2, 211, 236, 1, OB_STRIPE},
-    {TG_EDIT, 2, 24, 236, 1, OB_STRIPE},  {TG_EDIT, 2, 118, 236, 1, OB_STRIPE},
-    {TG_EDIT, 2, 211, 236, 1, OB_STRIPE}, {TG_BOTH, 2, 237, 236, 1, OB_STRIPE},
+    {TG_EDIT, 8, 24, 224, 1, OB_STRIPE},  {TG_EDIT, 8, 118, 224, 1, OB_STRIPE},
+    {TG_EDIT, 8, 211, 224, 1, OB_STRIPE}, {TG_BOTH, 2, 237, 236, 1, OB_STRIPE},
 };
 /* WAVE, the plugin: a 1 px amber rule with its glow under the header, a dim one over the footer */
 #define WV_AMBER RGB(0xf5, 0xa6, 0x23)
@@ -60,8 +63,7 @@ static const trim_t TRIM_DRIFT[] = {
     {TG_HOME, 3, 68, 188, 1, JU_RED},   {TG_HOME, 193, 68, 44, 1, JU_BLUE},
     {TG_HOME, 3, 148, 188, 1, JU_RED},  {TG_HOME, 193, 148, 44, 1, JU_BLUE},
     {TG_HOME, 3, 211, 188, 1, JU_RED},  {TG_HOME, 193, 211, 44, 1, JU_BLUE},
-    {TG_EDIT, 3, 24, 188, 1, JU_RED},   {TG_EDIT, 193, 24, 44, 1, JU_BLUE},
-    {TG_EDIT, 3, 118, 188, 1, JU_RED},  {TG_EDIT, 193, 118, 44, 1, JU_BLUE},
+    {TG_EDIT, 0, 24, 240, 3, JU_RED},                                  /* EDIT: the Juno's red band under the header */
     {TG_EDIT, 3, 211, 188, 1, JU_RED},  {TG_EDIT, 193, 211, 44, 1, JU_BLUE},
 };
 /* by engine (ENGI_OBX WAVE ACID DRIFT), the palette's trim index - 1 (gfx.c palette_set) */
@@ -86,8 +88,11 @@ static void trim_cv(uint32_t mask, int32_t x0, int32_t y0, int32_t w, int32_t h)
         int32_t by = r[i].y + r[i].h < y0 + h ? r[i].y + r[i].h : y0 + h;
         if (!(r[i].pg & mask) || bx <= ax || by <= ay)
             continue;
-        GFX_HOOK_TRIM(ax - x0, ay - y0, bx - x0, by - y0, r[i].c);
-        cv_rect(ax - x0, ay - y0, bx - ax, by - ay, r[i].c);
+        GFX_HOOK_TRIM(ax - x0, ay - y0, bx - x0, by - y0, r[i].k == TK_WOOD ? 0u : r[i].c);   /* (0: wood, a grain of shades) */
+        if (r[i].k == TK_WOOD)
+            ctl_wood(ax - x0, ay - y0, bx - ax, by - ay, ax, ay);
+        else
+            cv_rect(ax - x0, ay - y0, bx - ax, by - ay, r[i].c);
     }
 }
 /* a rectangle of colour c straight onto the screen with the trim of the pages in mask (TG_*) in it: each pixel written once (the

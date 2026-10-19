@@ -1687,49 +1687,89 @@ static int test_information(void)
  * trim's colours, or a blend of two of them (an anti-aliased edge: on the segment between two of them, within 1 of each channel's
  * 5-6-5 rounding). It finds a colour the firmware draws that is not the palette's (the check that every screen in GREY was gray
  * made for the fixed palettes) */
-static int on_palette_px(uint16_t c, const uint16_t *tok, uint32_t n)
+static int on_palette_seg(int32_t *cc, const int32_t (*t3)[3], uint32_t i, uint32_t j)
 {
-    uint32_t i, j;
-    int32_t cc[3] = {c >> 11, (c >> 5) & 63, c & 31};
-    for (i = 0; i < n; i++) {
+    const int32_t *a = t3[i], *b = t3[j];
+    int32_t k, big = 0;
+    for (k = 1; k < 3; k++)
+        if (abs(b[k] - a[k]) > abs(b[big] - a[big])) big = k;
+    if (a[big] == b[big]) return 0;
+    {   /* t in 0..1024 along the segment, from the channel that moves most */
+        int32_t t = (cc[big] - a[big]) * 1024 / (b[big] - a[big]);
+        if (t < -16 || t > 1040) return 0;
+        for (k = 0; k < 3; k++)
+            if (abs(cc[k] - (a[k] + (b[k] - a[k]) * t / 1024)) > 1) return 0;
+    }
+    return 1;
+}
+/* c inside the triangle of tokens i, j, l (three colours one on top of another: a pointer's edge over a cap over a ring) */
+static int on_palette_tri(const int32_t *cc, const int32_t (*t3)[3], uint32_t i, uint32_t j, uint32_t l)
+{
+    double u[3], v[3], w[3], det = 0, s, t;
+    int k, c0 = 0, c1 = 1, best = -1;
+    for (k = 0; k < 3; k++) { u[k] = t3[j][k] - t3[i][k]; v[k] = t3[l][k] - t3[i][k]; w[k] = cc[k] - t3[i][k]; }
+    for (k = 0; k < 3; k++) {              /* the two channels with the best-conditioned system */
+        int p = (k + 1) % 3, q = (k + 2) % 3;
+        double d = u[p] * v[q] - u[q] * v[p];
+        if (d < 0) d = -d;
+        if (d > best) { best = (int)d; c0 = p; c1 = q; }
+    }
+    det = u[c0] * v[c1] - u[c1] * v[c0];
+    if (det < 0.5 && det > -0.5) return 0;
+    s = (w[c0] * v[c1] - w[c1] * v[c0]) / det;
+    t = (u[c0] * w[c1] - u[c1] * w[c0]) / det;
+    if (s < -0.04 || t < -0.04 || s + t > 1.04) return 0;
+    for (k = 0; k < 3; k++) {
+        double e = w[k] - (s * u[k] + t * v[k]);
+        if (e > 1.6 || e < -1.6) return 0;
+    }
+    return 1;
+}
+static int on_palette_px(uint16_t c, const uint16_t *tok, uint32_t n, uint32_t ntri)
+{
+    int32_t t3[96][3], cc[3] = {c >> 11, (c >> 5) & 63, c & 31};
+    uint32_t i, j, l;
+    for (i = 0; i < n && i < 96u; i++) {
+        t3[i][0] = tok[i] >> 11; t3[i][1] = (tok[i] >> 5) & 63; t3[i][2] = tok[i] & 31;
         if (tok[i] == c)
             return 1;
-        for (j = i + 1u; j < n; j++) {
-            int32_t a[3] = {tok[i] >> 11, (tok[i] >> 5) & 63, tok[i] & 31}, b[3] = {tok[j] >> 11, (tok[j] >> 5) & 63, tok[j] & 31};
-            int32_t k, big = 0, ok = 1;
-            for (k = 1; k < 3; k++)
-                if (abs(b[k] - a[k]) > abs(b[big] - a[big])) big = k;
-            if (a[big] == b[big]) continue;
-            {   /* t in 0..1024 along the segment, from the channel that moves most */
-                int32_t t = (cc[big] - a[big]) * 1024 / (b[big] - a[big]);
-                if (t < -16 || t > 1040) continue;
-                for (k = 0; k < 3 && ok; k++) {
-                    int32_t want = a[k] + (b[k] - a[k]) * t / 1024;
-                    ok = abs(cc[k] - want) <= 1;
-                }
-                if (ok) return 1;
-            }
-        }
     }
+    for (i = 0; i < n; i++)
+        for (j = i + 1u; j < n; j++)
+            if (on_palette_seg(cc, (const int32_t (*)[3])t3, i, j)) return 1;
+    for (i = 0; i < ntri; i++)
+        for (j = i + 1u; j < ntri; j++)
+            for (l = j + 1u; l < ntri; l++)
+                if (on_palette_tri(cc, (const int32_t (*)[3])t3, i, j, l)) return 1;
     return 0;
 }
 static int screen_on_palette(void)
 {
-    uint16_t tok[64], seen[512];
-    uint32_t n = 0, ns = 0, i, k, e;
+    uint16_t tok[96], seen[512];
+    uint32_t n = 0, ns = 0, i, k, e, ntri;
     const uint16_t *u = &ux.bg;
     for (i = 0; i < 16u; i++) tok[n++] = u[i];
-    tok[n++] = UI_REC_DARK; tok[n++] = UI_REC_LIGHT; tok[n++] = UI_QR_LIGHT; tok[n++] = UI_QR_DARK;
-    for (e = 0; e < NENGINES; e++)
-        for (i = 0; i < TRIM[e].n && n < 64u; i++) {
+    tok[n++] = UI_REC_DARK; tok[n++] = UI_REC_LIGHT;
+    tok[n++] = LED_ON; tok[n++] = LED_HOT; tok[n++] = LED_OFF; tok[n++] = LED_BG;   /* (the LEDs' own colours, the same in every palette) */
+    ntri = n;                                                                       /* (three colours over one another: the palette's own) */
+    tok[n++] = UI_QR_LIGHT; tok[n++] = UI_QR_DARK; tok[n++] = WOOD_LO; tok[n++] = WOOD_HI;
+    for (e = 0; e < NENGINES; e++) {                                                /* the trims' colours, the other machines' palettes (HOME's rack) */
+        const ui_pal_t *p = &UI_MACHINE_PALS[e];
+        uint16_t pc[6] = {p->bg, p->surf, p->text, p->theme, p->accent, p->key};
+        for (i = 0; i < 6u && n < 96u; i++) {
+            for (k = 0; k < n && tok[k] != pc[i]; k++) ;
+            if (k == n && pc[i]) tok[n++] = pc[i];
+        }
+        for (i = 0; i < TRIM[e].n && n < 96u; i++) {
             for (k = 0; k < n && tok[k] != TRIM[e].r[i].c; k++) ;
             if (k == n) tok[n++] = TRIM[e].r[i].c;
         }
+    }
     for (i = 0; i < 240u * 240u; i++) {
         uint16_t c = swap16(host_screen[i]);
         for (k = 0; k < ns && seen[k] != c; k++) ;
         if (k < ns) continue;
-        if (!on_palette_px(c, tok, n))
+        if (!on_palette_px(c, tok, n, ntri))
             return 0;
         if (ns < 512u) seen[ns++] = c;
     }
@@ -1778,6 +1818,76 @@ static int test_mono_screens(void)
         ok = screen_on_palette();
         host_screen[5 * 240 + 100] = swap16(0x07E0u);   /* pure green on OB-Z's blue / red / black */
         bad += check("... and finds a colour that is not the palette's", ok && !screen_on_palette());
+    }
+    return bad;
+}
+
+/* Switch Blade UI.4 Part B: the 7-segment LED readouts (ui_led.c cv_led): every digit lights exactly its segments (a count of the
+ * lit pixels from the geometry), the unlit segments stay visible, the twelve characters (0 .. 9, '-', blank) are twelve
+ * different pictures in both sizes, a short number leaves its left cells dim, and the colours are the LED's whatever the machine
+ * palette */
+static int test_led(void)
+{
+    static const char CH[] = "0123456789- ";
+    static uint16_t pic[2][12][40 * 30];
+    int bad = 0, ok = 1;
+    uint32_t sz, c, i, e, lit, dim, bg;
+    for (sz = 0; sz < LED_NSZ; sz++) {
+        const led_sz_t *z = &LED_SZ[sz];
+        int32_t hv = (z->h - 3 * z->t) / 2, hs = (z->w - 2 * z->t) * z->t, vs = hv * z->t;
+        for (c = 0; c < 12u; c++) {
+            char s1[2] = {CH[c], 0};
+            uint32_t m = led_mask(CH[c]), want = 0;
+            cv_begin(40, 30, T_BG);
+            cv_led(2, 2, sz, 1, s1, T_BG, LED_ON);
+            for (i = 0, lit = dim = bg = 0; i < 40u * 30u; i++) {
+                uint16_t px = swap16(cv_px[i]);
+                pic[sz][c][i] = px;
+                lit += px == LED_ON;
+                dim += px == LED_OFF;
+                bg += px == LED_BG;
+            }
+            want = ((m & LED_A) ? hs : 0u) + ((m & LED_G) ? hs : 0u) + ((m & LED_D) ? hs : 0u) +
+                   ((m & LED_F) ? vs : 0u) + ((m & LED_B) ? vs : 0u) + ((m & LED_E) ? vs : 0u) + ((m & LED_C) ? vs : 0u);
+            ok &= lit == want && lit + dim == 3u * (uint32_t)hs + 4u * (uint32_t)vs + (uint32_t)(z->t * z->t) && bg > 20u;   /* (+ the decimal point) */
+            if (!ok) printf("    LED size %u '%c': lit %u (want %u) dim %u bg %u\n", sz, CH[c], lit, want, dim, bg);
+        }
+        for (c = 0; c < 12u; c++)
+            for (e = c + 1u; e < 12u; e++)
+                ok &= memcmp(pic[sz][c], pic[sz][e], sizeof pic[sz][c]) != 0;
+        ok &= led_w(sz, 1u) == 2 * z->padx + z->w && led_h(sz) == 2 * z->pady + z->h;
+    }
+    ok &= led_w(LED_S, 3u) == 31 && led_h(LED_S) == 15 && led_w(LED_L, 1u) == 19 && led_h(LED_L) == 24;
+    bad += check("LED: each digit lights exactly its segments (the lit pixels from the geometry), the unlit ones stay, "
+                 "0 .. 9, '-' and blank are twelve different pictures, in both sizes", ok);
+    {   /* a short number: its left cells dim; a long one: its last cells; the recess's corner is rounded */
+        uint32_t x0, x1;
+        cv_begin(40, 20, T_BG);
+        cv_led(0, 0, LED_S, 3u, "7", T_BG, LED_ON);
+        for (i = 0, x0 = 99, x1 = 0; i < 40u * 20u; i++)
+            if (swap16(cv_px[i]) == LED_ON) { if (i % 40u < x0) x0 = i % 40u; if (i % 40u > x1) x1 = i % 40u; }
+        ok = x0 >= (uint32_t)(LED_SZ[LED_S].padx + 2 * LED_SZ[LED_S].adv) && x1 < (uint32_t)led_w(LED_S, 3u);
+        ok &= swap16(cv_px[0]) != LED_BG;                                          /* (the recess's corner: blended with what is under it) */
+        cv_begin(40, 20, T_BG);
+        cv_led(0, 0, LED_S, 2u, "1234", T_BG, LED_ON);                                     /* "34": 3 = a g d b c (3 x 5 + 2 x 4), 4 = f g b c (5 + 3 x 4) */
+        for (i = 0, lit = 0; i < 40u * 20u; i++) lit += swap16(cv_px[i]) == LED_ON;
+        ok &= lit == (3u * 5u + 2u * 4u) + (5u + 3u * 4u);
+        bad += check("LED: a short number is right aligned in its cells (the left ones dim), a long one shows its last digits", ok);
+    }
+    {   /* the same in every machine's palette */
+        uint16_t first[40 * 20];
+        for (e = 0, ok = 1; e < NPALETTES; e++) {
+            palette_set(e);
+            cv_begin(40, 20, T_BG);
+            cv_led(0, 0, LED_S, 3u, "124", T_BG, LED_ON);
+            if (!e) memcpy(first, cv_px, sizeof first);
+            else {   /* (everything but the recess's corner pixels, which blend with the palette's background) */
+                for (i = 0; i < 40u * 20u; i++)
+                    if (cv_px[i] != first[i] && (i % 40u > 2u && i % 40u < 28u && i / 40u > 2u && i / 40u < 12u)) ok = 0;
+            }
+        }
+        palette_apply();
+        bad += check("LED: the same colours and shapes in every machine's palette", ok);
     }
     return bad;
 }
@@ -1889,24 +1999,25 @@ static int test_roll(void)
     ok = roll_diff(STRIP(3), 0) == 0 && roll_diff(STRIP(3), 1) > 20u && !ui.roll[3].from[0];
     bad += check("roll: a mid-roll frame differs from the static render inside the value strip only", ok);
 
-    /* BPM 120 -> 121 (SELECT): the header rolls, the digits 1 and 2 stay; the BPM card too (no unit:
-     * the label says BPM: set in M, it rolls like any number) */
+    /* BPM 120 -> 121 (SELECT): the BPM card rolls (no unit: the label says BPM: set in M, it rolls like any number), the digits 1
+     * and 2 stay; the header's LED readout does not roll: it shows 121 at once, so mid-roll nothing outside the card's strip
+     * differs from the static render (UI.4: LEDs switch instantly) */
     ui_power_on(); roll_settle();
     turn(EN_SELECT, 1);
-    ok = song.g[G_BPM] == 121 && str_eq(ui.roll[ROLL_BPM].from, "120") && ui.roll[ROLL_BPM].dir == 1 &&
-         str_eq(ui.roll[0].from, "120") && ui.roll[0].dir == 1;
+    ok = song.g[G_BPM] == 121 && !ui.roll[ROLL_BPM].from[0] && str_eq(ui.roll[0].from, "120") && ui.roll[0].dir == 1;
     frame(); frame();
     memcpy(roll_shot, host_screen, sizeof roll_shot);
     ui.force = 1; ui_draw();
-    {   /* the header's strip: from the metronome's ink to the lock's place (ui_draw.c draw_head) */
+    {   /* the header's LED readout: lit segments of "121" are there from the first frame */
         head_geo_t g;
-        int32_t x0, x1;
+        uint32_t lit = 0;
+        int32_t x, y;
         head_geo(&g, "121");
-        x0 = g.sx0; x1 = g.sx1;
-        n = roll_diff(x0, 0, x1, H_HEAD, 1);
-        ok &= n > 20u && roll_diff(x0, 0, x1, H_HEAD, 0) == roll_diff(STRIP(0), 1);   /* (+ the card's strip) */
-        ok &= roll_diff(g.bx, 0, g.bx + text_w(&AF_M, "12"), H_HEAD, 1) == 0;
-        ok &= x0 < g.bx && x1 <= 160 && x1 - x0 <= 40;   /* (1.5.6: the group centred, the BPM right of x 120) */
+        for (y = 0; y < H_HEAD; y++)
+            for (x = g.bx; x < g.bx + g.b[2]; x++)
+                lit += host_screen[y * 240 + x] == swap16(LED_HOT);      /* (the BPM was just turned: the hot colour) */
+        ok &= lit == 8u + 23u + 8u;                                      /* 1 = b c (2 x 4), 2 = a g d (3 x 5) + b e (2 x 4), 1 */
+        ok &= roll_diff(STRIP(0), 0) == 0 && roll_diff(STRIP(0), 1) > 20u;
     }
     ok &= roll_diff(CARD_X(0), Y_LABEL + ROLL_Y, CARD_X(0) + 5 + text_w(&AF_M, "12"), Y_LABEL + ROLL_Y + ROLL_H, 1) == 0;
     /* TUNE 10 -> 11 on a card: the 1 stays */
@@ -1916,7 +2027,7 @@ static int test_roll(void)
     ui.force = 1; ui_draw();
     ok &= song.g[G_TUNE] == 11 && roll_diff(STRIP(3), 1) > 20u && roll_diff(STRIP(3), 0) == 0;
     ok &= roll_diff(CARD_X(3), Y_LABEL + ROLL_Y, CARD_X(3) + 5 + text_w(&AF_M, "1"), Y_LABEL + ROLL_Y + ROLL_H, 1) == 0;
-    bad += check("roll: header BPM 120 -> 121 and a card 10 -> 11: only the strip changes, unchanged digits stay put", ok);
+    bad += check("roll: the BPM card 120 -> 121 and a card 10 -> 11: only the strip changes, unchanged digits stay put; the header LED shows 121 at once", ok);
 
     /* the direction: 5 -> 6 and -5 -> -6 at frame 4: the new digit comes from below (up) / above (down) */
     ui_power_on(); song.g[G_TUNE] = 5; roll_settle();
@@ -1969,9 +2080,9 @@ static int test_roll(void)
     }
     ui_power_on(); roll_settle();
     turn(EN_SELECT, 1);
-    ok &= ui.roll[ROLL_BPM].from[0] != 0;
+    ok &= !ui.roll[ROLL_BPM].from[0] && ui.roll[0].from[0] != 0;    /* (the header's LED never rolls; the BPM card does) */
     ui.force = 1; frame();
-    ok &= !ui.roll[ROLL_BPM].from[0];
+    ok &= !ui.roll[ROLL_BPM].from[0] && !ui.roll[0].from[0];
     bad += check("roll: a page, track, palette or engine change and ui.force snap", ok);
     palette_apply();
 
@@ -3349,15 +3460,15 @@ static int test_edit_big(void)
         ok &= ui.hot_col == 3u && ui.hot_t != 0u;
         bad += check("  the knob just turned is hot (its accent)", ok);
         turn(EN_K3, 6); frame();
-        bad += check("  K3 turns ENV (bipolar): \"+\" before a positive value",
-                     TSEL->p[P_ED_FLT] > env0 && big_val[2][0] == '+');
+        bad += check("  K3 turns ENV (bipolar): a positive value has no minus (the LED has no plus: it is in the string handed to the card, and dropped by WAVE's ring when it is what keeps the digits out of L)",
+                     TSEL->p[P_ED_FLT] > env0 && big_val[2][0] != '-' && (e == ENGI_WAVE ? big_val[2][0] != 0 : big_val[2][0] == '+'));
         turn(EN_K3, -12); frame();
         bad += check("  .. \"-\" before a negative one", TSEL->p[P_ED_FLT] < 0 && big_val[2][0] == '-');
         bad += check("  labels CUTOFF RESONANCE ENV and the machine's, spelled out",
                      screen_has_text("CUTOFF") && screen_has_text("RESONANCE") && screen_has_text("ENV") &&
                      screen_has_text(MLBL[e]) && str_eq(big_lbl[3], MLBL[e]));
-        bad += check("  a two-figure value in XL", (TSEL->p[ENGINES[e]->knob[3]] = 40, ui.force = 1, frame(),
-                                                   str_len(big_val[3]) == 2u && big_face[3] == 0));
+        bad += check("  a two-figure value: on the LED (OB-Z, ACID, DRIFT), in L inside WAVE's ring", (TSEL->p[ENGINES[e]->knob[3]] = 40, ui.force = 1, frame(),
+                                                   str_len(big_val[3]) == 2u && (e == ENGI_WAVE ? big_face[3] == 1 : big_face[3] == 3)));
         {   /* MIDI LEARN: a turn picks the parameter of the card (ml_knob), as on every page */
             ml_toggle(); turn(EN_K2, 1); frame();
             bad += check("  MIDI LEARN: K2 picks RES (P_E5)", ui.ml.on && ui.ml.id == P_E5);
@@ -3370,9 +3481,9 @@ static int test_edit_big(void)
         ui_power_on(); song.sel = 0; set_engine_of(TSEL, ENGI_OBX); frame();
         press(B_EDIT); frame();
         TSEL->p[P_E4] = 127; TSEL->p[P_ED_FLT] = 63; ui.force = 1; frame();
-        bad += check("  CUT at the top (16 kHz): \"16\" in L or XL", CUTOFF_HZ[127] >= 16000u && str_eq(big_val[0], "16") &&
-                     big_face[0] <= 1);
-        bad += check("  ENV +100: \"100\" in L or XL", str_eq(big_val[2], "100") && big_face[2] <= 1);
+        bad += check("  CUT at the top (16 kHz): \"16\" on the LED", CUTOFF_HZ[127] >= 16000u && str_eq(big_val[0], "16") &&
+                     big_face[0] == 3);
+        bad += check("  ENV +100: \"+100\" on the LED (three cells: the LED has no plus)", str_eq(big_val[2], "+100") && big_face[2] == 3 && led_cells(big_val[2]) == 3u);
         TSEL->p[P_ED_FLT] = -64; ui.force = 1; frame();
         ok = str_eq(big_val[2], "-100");
         TSEL->p[P_ED_FLT] = 20; ui.force = 1; frame();
@@ -3389,6 +3500,87 @@ static int test_edit_big(void)
         press(B_EDIT); frames(320); press(B_EDIT); frames(320);
         bad += check("EDIT again: MACHINE 1, then MACHINE 2", str_eq(cur_page()->title, "MACHINE 1") &&
                      (press(B_EDIT), frames(320), str_eq(cur_page()->title, "MACHINE 2")));
+    }
+    return bad;
+}
+
+/* Switch Blade UI.4 Part C: each machine's EDIT page as its hardware. Pixels read off the screen: OB-Z's grained wood cheeks,
+ * knob pointers; ACID's brushed rows and screws; DRIFT's caps at the value's place (the fader position is the value); WAVE's
+ * amber ring. */
+static uint32_t scr_count(int32_t x0, int32_t y0, int32_t x1, int32_t y1, uint16_t c)
+{
+    uint32_t n = 0;
+    int32_t x, y;
+    for (y = y0; y < y1; y++)
+        for (x = x0; x < x1; x++)
+            n += host_screen[y * 240 + x] == swap16(c);
+    return n;
+}
+static int test_edit_controls(void)
+{
+    int bad = 0, ok;
+    uint32_t e, k, i;
+    for (e = 0; e < NENGINES; e++) {
+        ui_power_on(); song.sel = (uint8_t)e; set_engine_of(TSEL, e); frame();
+        press(B_EDIT); frames(320);
+        TSEL->p[P_E4] = 40; TSEL->p[P_E5] = 100; TSEL->p[P_ED_FLT] = 0; TSEL->p[ENGINES[e]->knob[3]] = 64; ui.force = 1; frame();
+        if (e == ENGI_OBX) {
+            uint32_t wood = 0, lit = 0, flat = 0;
+            for (i = 24; i < 212u; i++)
+                for (k = 0; k < 8u; k++) {
+                    uint16_t px = swap16(host_screen[i * 240 + k]);
+                    uint32_t t;
+                    for (t = 0; t <= 16u && px != ctl_blend(WOOD_LO, WOOD_HI, t); t++) ;
+                    wood += t <= 16u;
+                }
+            ok = wood == 8u * 188u;                                                  /* every pixel of the left cheek is wood */
+            for (i = 24; i < 212u; i++) {                                           /* ... with a grain: several shades per column */
+                uint16_t first = host_screen[i * 240 + 3];
+                flat += first != host_screen[24 * 240 + 3];
+            }
+            ok &= flat > 20u;
+            lit = scr_count(0, 24, 240, 212, LED_ON) + scr_count(0, 24, 240, 212, LED_HOT);
+            ok &= lit > 80u;                                                         /* the four readouts lit */
+            ok &= scr_count(13, 25, 227, 117, T_TEXT) > 12u;                         /* the knobs' pointers (3 white, the hot one the accent) */
+            bad += check("EDIT OB-Z: grained wood cheeks, knobs with pointers and LED readouts", ok);
+        } else if (e == ENGI_ACID) {
+            uint32_t shades[8], ns = 0;
+            for (i = 30; i < 110u; i++) {                                           /* the brushed panel: horizontal lines of a few shades */
+                uint16_t px = host_screen[i * 240 + 120];
+                uint32_t j;
+                for (j = 0; j < ns && shades[j] != px; j++) ;
+                if (j == ns && ns < 8u) shades[ns++] = px;
+            }
+            ok = ns >= 3u;
+            ok &= scr_count(0, 24, 20, 40, T_TEXT) >= 3u && scr_count(220, 24, 240, 40, T_TEXT) >= 3u;   /* the corner screws' slots */
+            ok &= scr_count(40, 45, 200, 100, T_TEXT) > 400u;                         /* the black skirts */
+            bad += check("EDIT ACID: brushed silver (several shades of horizontal lines), corner screws, black skirted knobs", ok);
+        } else if (e == ENGI_DRIFT) {
+            static const int16_t V[3] = {0, 64, 127};
+            int32_t cy[3];
+            for (i = 0, ok = 1; i < 3u; i++) {                                      /* CUT at its minimum, middle, maximum: the cap's centre row */
+                int32_t cx = ED_FX(0), yy, first = -1, last = -1;
+                TSEL->p[P_E4] = V[i]; ui.force = 1; frame();
+                for (yy = ED_F0 - 10; yy <= ED_F1 + 10; yy++)
+                    if (host_screen[yy * 240 + cx - 8] == swap16(T_KEY)) { if (first < 0) first = yy; last = yy; }
+                cy[i] = first < 0 ? -1 : (first + last) / 2;
+            }
+            ok &= cy[0] >= ED_F1 - 1 && cy[0] <= ED_F1 && cy[2] >= ED_F0 - 1 && cy[2] <= ED_F0 && cy[1] > cy[2] && cy[1] < cy[0];   /* (the cap's rows 5 .. 4 of 12) */
+            for (k = 1; k < 4u; k++)                                                 /* the other three faders carry a cap each */
+                ok &= scr_count(ED_FX(k) - 9, ED_F0 - 8, ED_FX(k) + 10, ED_F1 + 8, T_KEY) > 100u;
+            bad += check("EDIT DRIFT: four tan-capped faders; the cap's place is the value (min bottom, max top)", ok);
+        } else {
+            ok = scr_count(13, 25, 227, 118, T_THEME) > 150u;                        /* WAVE: the amber arcs */
+            bad += check("EDIT WAVE: the amber glowing rings", ok);
+        }
+    }
+    {   /* STYLE LINE keeps the cards it had (K pills: the label and the value in the ring's face) */
+        ui_power_on(); song.sel = 0; set_engine_of(TSEL, ENGI_OBX); ui_style = ST_LINE; style_apply(); frame();
+        press(B_EDIT); frames(320);
+        ui.force = 1; frame();
+        ok = big_face[0] <= 2 && scr_count(0, 24, 8, 212, LED_ON) == 0u && ux.style == ST_LINE;
+        bad += check("EDIT in STYLE LINE: the old cards (the ring, the value in its face), no wood, no LED", ok);
+        ui_style = ST_FLAT; style_apply();
     }
     return bad;
 }
@@ -7629,8 +7821,8 @@ static int test_menu_prefs(void)
     turn(EN_K4, 1);
     ok &= song.g[G_TUNE] == 1 && !ui.roll[3].from[0] && roll_static_now();   /* OFF: the value at once, static */
     turn(EN_SELECT, 1);
-    ok &= !ui.roll[ROLL_BPM].from[0];
-    bad += check("#46 ANIM OFF: the card values and the header BPM snap (no rolling digits), the frame is static", ok);
+    ok &= !ui.roll[ROLL_BPM].from[0] && !ui.roll[0].from[0];
+    bad += check("#46 ANIM OFF: the card values and the BPM card snap (no rolling digits), the header's LED never rolls, the frame is static", ok);
     {   /* the piano roll's view: ON glides toward the notes over frames, OFF jumps there at once */
         track_t *t = TSEL;
         uint32_t lo_on;
@@ -8477,6 +8669,7 @@ int main(void)
     bad += test_head_slot();
     bad += test_product_ux();
     bad += test_page_cycles();
+    bad += test_led();
     bad += test_mono_screens();
     bad += test_roll();
     bad += test_soak_cards();
@@ -8505,6 +8698,7 @@ int main(void)
     bad += test_name();
     bad += test_edit_cycle();
     bad += test_edit_big();
+    bad += test_edit_controls();
     bad += test_home_big();
     bad += test_pages_four();
     bad += test_edit_layer_four();

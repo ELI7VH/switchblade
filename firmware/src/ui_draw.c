@@ -13,6 +13,8 @@ static void draw_menu(void);
 static int name_on(void);                              /* NAME (ui_name.c) */
 static uint64_t lock_held(void);                       /* parameter locks: the steps held on STEP (ui_input.c) */
 static void name_draw(void);
+#include "ui_led.c"                                    /* 7-segment LED readouts: the BPM, EDIT, HOME */
+#include "ui_ctl.c"                                    /* the machines' controls: discs, arcs, bevels, brushed silver, wood */
 #include "ui_trim.c"                                   /* MACHINE mode: the machines' trim (header, HOME, EDIT) */
 #include "ui_help.c"                                   /* 1.5: HELP's hints (draw_foot, ui_layer.c draw_layer) */
 
@@ -70,8 +72,6 @@ static void draw_battery(int32_t bx)
 #define ROLL_SNAP 3u                                    /* frames (~45 ms) */
 #define ROLL_BPM 4u                                     /* ui.roll[]: the four cards, then the header BPM */
 #define ROLL_Y 18                                       /* a card's value strip: rows 18..34, its figures (21..31) in the middle, */
-#define HEAD_RY0 4                                      /* the header BPM's roll window (rows 4 .. 19: the ink's rows) */
-#define HEAD_RY1 20
 #define ROLL_H 17                                       /* the label (MONO's chip: to row 17) above it, the gauge (38) below */
 static const uint8_t ROLL_EASE[17] = {0, 45, 84, 118, 147, 172, 193, 210, 223, 234, 242, 247, 251, 253, 254, 255, 255};
 
@@ -113,7 +113,7 @@ static int32_t roll_text(uint32_t k, int32_t x, int32_t y, const char *s, uint16
     const aafont_t *f = &AF_M;
     uint32_t e = (uint8_t)(ui.frame - ui.roll[k].t0) + 1u, i, p = 0;
     const char *a = ui.roll[k].from;
-    int32_t cy = k < ROLL_BPM ? ROLL_Y : HEAD_RY0, h = k < ROLL_BPM ? ROLL_H : HEAD_RY1 - HEAD_RY0;   /* (the header: rows 4 .. 19, the trim's rows 0 .. 3 and 20 .. 23 stay whole) */
+    int32_t cy = ROLL_Y, h = ROLL_H;
     uint16_t bg = k < ROLL_BPM ? T_SURF : T_BG;
     char t[8], ch[2] = {0, 0};
     if (e >= ROLL_FRAMES)
@@ -171,6 +171,8 @@ static int32_t roll_text(uint32_t k, int32_t x, int32_t y, const char *s, uint16
 #define HEAD_BAT_X 214                                 /* the battery's cell */
 #define HEAD_GRP_R 208                                 /* the octave / song row ends here */
 #define HEAD_MSG_W 166                                 /* a message centred on x 120: 37..203 (after the REC mark) */
+#define HEAD_LED_N 3u                                  /* the BPM's LED cells: 3 (G_BPM <= 300) */
+#define HEAD_LED_Y 4                                   /* its recess: rows 4 .. 18 (the capitals of M sit on 6 .. 16: 2 px round them) */
 #define HEAD_GAP 4                                     /* ink to ink: the metronome -> the BPM -> the lock */
 #define HEAD_PLAY_GAP 6                                /* the play state -> the metronome */
 /* the header's centre (1.5.6): the play state, the metronome and the BPM (BPM LOCK ON: its lock) as one group, its
@@ -186,9 +188,8 @@ static void head_geo(head_geo_t *g, const char *bpm)
 {
     int32_t ib[4], lb[4], pb[4], c = 16, pw, lw = 0;
     uint32_t sz = 16;
-    char z[8] = "0000000";
-    z[str_len(bpm) < 7u ? str_len(bpm) : 7u] = 0;
-    text_ink(&AF_M, z, g->b);
+    (void)bpm;
+    g->b[0] = 0; g->b[1] = HEAD_LED_Y; g->b[2] = led_w(LED_S, HEAD_LED_N); g->b[3] = HEAD_LED_Y + led_h(LED_S);   /* the BPM: a 3-cell LED readout, always as wide */
     icon_ink(16, ICON_TEMPO, ib);
     if (icon_cell(&sz, ICON_TEMPO) >= 0)
         c = (int32_t)sz;
@@ -352,26 +353,10 @@ static void draw_head(void)
     int centre = !big && (!msg || ui.bpm_t || ui.layer == LAYER_GLO);   /* the BPM being changed: it stays, the message
                                                         * right */
     int32_t rx = HEAD_REC_X;
-    if (song.g[G_BPM] != ui.roll_bpm) {
-        char a[8];
-        fmt_int(a, ui.roll_bpm);
-        fmt_int(b, song.g[G_BPM]);
-        roll_note(ROLL_BPM, a, b, ui.force);
-        ui.roll_bpm = song.g[G_BPM];
-    } else if (ui.force) {
-        ui.roll[ROLL_BPM].from[0] = 0;
-    }
-    if (!centre)                                       /* (a message over the BPM: no roll there to finish; CLOCK's */
-        ui.roll[ROLL_BPM].from[0] = 0;                 /* BPM knob turned while one shows) */
+    ui.roll_bpm = song.g[G_BPM];                       /* (the LED readout switches instantly: no roll) */
     fmt_int(b, song.g[G_BPM]);
     head_geo(&g, b);
     if (!ui.force && sig == ui.head_sig) {
-        if (ui.roll[ROLL_BPM].from[0] && centre) {     /* rolling: the BPM's strip only */
-            cv_begin((uint32_t)(g.sx1 - g.sx0), H_HEAD, T_BG);
-            trim_cv(TG_HEAD, g.sx0, 0, g.sx1 - g.sx0, H_HEAD);
-            roll_text(ROLL_BPM, g.bx - g.sx0, HEAD_MY, b, ui.bpm_t ? T_ACCENT : T_THEME);
-            cv_blit((uint32_t)g.sx0, Y_HEAD);
-        }
         if (metro_x >= 0 && beat != metro_beat) {      /* a beat: the metronome's cell only (either way round) */
             int32_t cx = g.mx0 - (g.sx0 - g.mx1);
             metro_beat = (int8_t)beat;
@@ -410,9 +395,7 @@ static void draw_head(void)
         head_metro(g.mx0, beat);
         metro_x = (int16_t)g.mx0;
         metro_beat = (int8_t)beat;
-        if (!ui.roll[ROLL_BPM].from[0])
-            GFX_HOOK_ALIGN(0, 0, 0, H_HEAD, AL_V, "header text on its middle");
-        roll_text(ROLL_BPM, g.bx, HEAD_MY, b, ui.bpm_t ? T_ACCENT : T_THEME);
+        cv_led(g.bx, HEAD_LED_Y, LED_S, HEAD_LED_N, b, T_BG, ui.bpm_t ? LED_HOT : LED_ON);
         if (ui_prefs & PREF_BPM_LOCK) {                /* BPM LOCK ON (#58): the lock right of the BPM */
             icon_ink(16, ICON_X_LOCK, ib);
             cv_icon_mid(lx + HEAD_GAP - ib[0], H_HEAD / 2, 16, ICON_X_LOCK, T_MID, T_BG);
