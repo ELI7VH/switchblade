@@ -124,7 +124,7 @@ static void felucca_init(void)
 }
 
 /* The power-on LED sweep (1.1, hal/fm1_led_anim.h: a soft light over the keys left to right, then the buttons swell
- * and settle on the glow; ~0.70 s), started before the scan and run by it: nothing waits for it, the splash's 430 ms
+ * and settle on the glow; ~0.70 s), started before the scan and run by it: nothing waits for it, the splash's ~2.43 s
  * and the first ~0.27 s of the UI go by under it (the UI's LEDs from its end, or at once on a key or a button down).
  * Every LEDS setting: it is no idle glow; with DIM HI / DIM LO it ends on that glow (and is drawn over that glow
  * level), with OFF / INV dark. Not with MENU > ANIM OFF (no motion: the LEDs as the UI has them at once), not after a crash (a crash record newer than the last boot saw: the crash screen's
@@ -189,7 +189,8 @@ static void fm1_main(void)
         settings_save();
     }
     autosave_boot(boot_clean);                /* (1.2) the last session's music, under the splash */
-    for (ms = 0; ms < 400u; ms += 10u) {      /* the splash; the pot followed (MIDI IN plays under it) */
+    for (ms = 0; ms < 2400u; ms += 10u) {     /* the splash (Switch Blade: 2.4 s); the pot followed (MIDI IN plays under it) */
+        fm1_wdt_feed();                       /* (the ~8 s WDT: the boot before the main loop is not fed elsewhere) */
         fm1_delay_ms(10);
         master_poll();
     }
