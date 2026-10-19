@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* ui_trim.c: the machines' trim (Switch Blade, MENU > COLOR > MACHINE). A few rectangles per machine, drawn on the
- * strips of the header, HOME and EDIT, to evoke the panel the machine is modelled on (assets/refs/): the OB-6's blue
+/* ui_trim.c: the machines' trim (Switch Blade: the machine look is the one colour scheme). A few rectangles per machine, drawn on the
+ * strips of the header, EDIT and the footer (HOME's rack units carry their own looks, ui_big.c), to evoke the panel the machine is modelled on (assets/refs/): the OB-6's blue
  * pinstripes and wood cheeks (OB-Z), the Juno-106's red and blue section bands (DRIFT), the TB-303's dark step section
  * with its red LEDs (ACID), the VOID WAVE plugin's amber glow rule (WAVE). No bitmaps: data, drawn with cv_rect /
  * lcd_fill, on the free rows and columns only (docs/plans/2026-10-19-switch-blade-ui.md, "UI.3").
@@ -27,11 +27,8 @@ typedef struct { uint8_t pg, x, y, w, h; uint16_t c; uint8_t k; } trim_t;   /* s
 #define OB_WOOD RGB(0x3c, 0x2e, 0x30)
 static const trim_t TRIM_OBZ[] = {
     {TG_HEAD, 0, 1, 240, 1, OB_STRIPE},   {TG_HEAD, 0, 22, 240, 1, OB_STRIPE},
-    {TG_HOME, 0, 24, 2, 216, OB_WOOD},    {TG_HOME, 238, 24, 2, 216, OB_WOOD},
     {TG_EDIT, 0, 24, 8, 188, OB_WOOD, TK_WOOD}, {TG_EDIT, 232, 24, 8, 188, OB_WOOD, TK_WOOD},   /* EDIT: the OB-6's cheeks, 8 px, grained */
-    {TG_EDIT, 0, 212, 2, 28, OB_WOOD},    {TG_EDIT, 238, 212, 2, 28, OB_WOOD},
-    {TG_HOME, 2, 24, 236, 1, OB_STRIPE},  {TG_HOME, 2, 68, 236, 1, OB_STRIPE},
-    {TG_HOME, 2, 148, 236, 1, OB_STRIPE}, {TG_HOME, 2, 211, 236, 1, OB_STRIPE},
+    {TG_EDIT, 0, 212, 2, 28, OB_WOOD, TK_WOOD}, {TG_EDIT, 238, 212, 2, 28, OB_WOOD, TK_WOOD},
     {TG_EDIT, 8, 24, 224, 1, OB_STRIPE},  {TG_EDIT, 8, 118, 224, 1, OB_STRIPE},
     {TG_EDIT, 8, 211, 224, 1, OB_STRIPE}, {TG_BOTH, 2, 237, 236, 1, OB_STRIPE},
 };
@@ -59,10 +56,6 @@ static const trim_t TRIM_DRIFT[] = {
     {TG_HEAD, 143, 0, 48, 3, JU_RED},   {TG_HEAD, 193, 0, 44, 3, JU_BLUE},
     {TG_HEAD, 3, 22, 46, 1, JU_RED},    {TG_HEAD, 51, 22, 58, 1, JU_RED},  {TG_HEAD, 113, 22, 28, 1, JU_RED},
     {TG_HEAD, 143, 22, 48, 1, JU_RED},  {TG_HEAD, 193, 22, 44, 1, JU_BLUE},
-    {TG_HOME, 3, 24, 188, 1, JU_RED},   {TG_HOME, 193, 24, 44, 1, JU_BLUE},
-    {TG_HOME, 3, 68, 188, 1, JU_RED},   {TG_HOME, 193, 68, 44, 1, JU_BLUE},
-    {TG_HOME, 3, 148, 188, 1, JU_RED},  {TG_HOME, 193, 148, 44, 1, JU_BLUE},
-    {TG_HOME, 3, 211, 188, 1, JU_RED},  {TG_HOME, 193, 211, 44, 1, JU_BLUE},
     {TG_EDIT, 0, 24, 240, 3, JU_RED},                                  /* EDIT: the Juno's red band under the header */
     {TG_EDIT, 3, 211, 188, 1, JU_RED},  {TG_EDIT, 193, 211, 44, 1, JU_BLUE},
 };
@@ -93,48 +86,5 @@ static void trim_cv(uint32_t mask, int32_t x0, int32_t y0, int32_t w, int32_t h)
             ctl_wood(ax - x0, ay - y0, bx - ax, by - ay, ax, ay);
         else
             cv_rect(ax - x0, ay - y0, bx - ax, by - ay, r[i].c);
-    }
-}
-/* a rectangle of colour c straight onto the screen with the trim of the pages in mask (TG_*) in it: each pixel written once (the
- * trim over a fill of its own would flash: #181). The trim rectangles of one page do not overlap; the rows are cut where a trim
- * rectangle starts or ends, and each band is filled in spans left to right */
-static void trim_fill(uint32_t mask, int32_t x, int32_t y, int32_t w, int32_t h, uint16_t c)
-{
-    const trim_t *r;
-    uint32_t i, n;
-    int32_t cut[2 * 32 + 2], nc = 0, k, j;
-    if (!ux.trim || ux.style) {
-        lcd_fill((uint32_t)x, (uint32_t)y, (uint32_t)w, (uint32_t)h, c);
-        return;
-    }
-    r = TRIM[(ux.trim - 1u) % NENGINES].r;
-    n = TRIM[(ux.trim - 1u) % NENGINES].n;
-    cut[nc++] = y;
-    cut[nc++] = y + h;
-    for (i = 0; i < n && nc + 2 <= (int32_t)(sizeof cut / sizeof cut[0]); i++)
-        if ((r[i].pg & mask) && r[i].x < x + w && r[i].x + r[i].w > x) {
-            if (r[i].y > y && r[i].y < y + h) cut[nc++] = r[i].y;
-            if (r[i].y + r[i].h > y && r[i].y + r[i].h < y + h) cut[nc++] = r[i].y + r[i].h;
-        }
-    for (k = 1; k < nc; k++)                             /* (sorted, a few) */
-        for (j = k; j > 0 && cut[j - 1] > cut[j]; j--) { int32_t t = cut[j]; cut[j] = cut[j - 1]; cut[j - 1] = t; }
-    for (k = 0; k + 1 < nc; k++) {
-        int32_t y0 = cut[k], y1 = cut[k + 1], cx = x;
-        if (y1 <= y0) continue;
-        while (cx < x + w) {                             /* the leftmost trim rectangle of this band at or right of cx */
-            int32_t best = -1, rx0, rx1;
-            for (i = 0; i < n; i++)
-                if ((r[i].pg & mask) && r[i].y <= y0 && r[i].y + r[i].h >= y1 && r[i].x + r[i].w > cx && r[i].x < x + w &&
-                    (best < 0 || r[i].x < r[best].x))
-                    best = (int32_t)i;
-            if (best < 0)
-                break;
-            rx0 = r[best].x > cx ? r[best].x : cx;
-            rx1 = r[best].x + r[best].w < x + w ? r[best].x + r[best].w : x + w;
-            if (rx0 > cx) lcd_fill((uint32_t)cx, (uint32_t)y0, (uint32_t)(rx0 - cx), (uint32_t)(y1 - y0), c);
-            lcd_fill((uint32_t)rx0, (uint32_t)y0, (uint32_t)(rx1 - rx0), (uint32_t)(y1 - y0), r[best].c);
-            cx = rx1;
-        }
-        if (cx < x + w) lcd_fill((uint32_t)cx, (uint32_t)y0, (uint32_t)(x + w - cx), (uint32_t)(y1 - y0), c);
     }
 }

@@ -145,14 +145,14 @@ static uint32_t ctl_hash(uint32_t v)
 }
 /* brushed silver over the rows y0 .. y0 + h - 1 of the screen, x0 .. x0 + w - 1 of the canvas (the TB-303's panel): a fixed
  * pattern of horizontal lines, each a shade of BG toward SURF (the same rows every time: the screen row is the seed) */
-static void ctl_brushed(int32_t x0, int32_t w, int32_t screen_y0, int32_t h)
+static void ctl_brushed_c(int32_t x0, int32_t w, int32_t screen_y0, int32_t h, uint16_t bg, uint16_t surf)
 {
     uint16_t sh[4];
     int32_t r;
-    sh[0] = T_BG;
-    sh[1] = ctl_blend(T_BG, T_SURF, 3);
-    sh[2] = ctl_blend(T_BG, T_SURF, 6);
-    sh[3] = ctl_blend(T_BG, T_SURF, 10);
+    sh[0] = bg;
+    sh[1] = ctl_blend(bg, surf, 3);
+    sh[2] = ctl_blend(bg, surf, 6);
+    sh[3] = ctl_blend(bg, surf, 10);
     for (r = 0; r < h; r++) {
         uint32_t v = ctl_hash(0x303u + (uint32_t)(screen_y0 + r) * 7919u);
         uint32_t k = v & 15u;
@@ -161,6 +161,7 @@ static void ctl_brushed(int32_t x0, int32_t w, int32_t screen_y0, int32_t h)
             cv_rect(x0 + (int32_t)((v >> 12) % (uint32_t)(w / 2)), r, w / 3, 1, sh[1 + (v >> 20) % 3u]);
     }
 }
+static void ctl_brushed(int32_t x0, int32_t w, int32_t screen_y0, int32_t h) { ctl_brushed_c(x0, w, screen_y0, h, T_BG, T_SURF); }
 /* wood over a canvas rectangle: vertical grain, each column a shade between WOOD_LO and WOOD_HI, changing every 16 rows (the
  * screen row and column are the seed) */
 static void ctl_wood(int32_t x, int32_t y, int32_t w, int32_t h, int32_t screen_x, int32_t screen_y)

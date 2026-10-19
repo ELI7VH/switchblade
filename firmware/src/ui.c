@@ -1411,10 +1411,10 @@ static void preset_go(uint32_t n)                    /* load list index n into t
 
 /* the EDIT layer's KNOB 2 (ui_layer.c): the selected track's engine only: its factory presets, then the used user presets
  * made with it (slot order). List index of the current sound; *total the length */
-static uint32_t eng_list_pos(uint32_t *total)
+static uint32_t eng_list_pos_of(const track_t *t, uint32_t *total)
 {
-    uint32_t e = TSEL->eng_req % NENGINES, np = preset_shown(e), u = user_of(TSEL), k, n = 0;
-    uint32_t cur = np ? TSEL->preset % np : 0u;
+    uint32_t e = t->eng_req % NENGINES, np = preset_shown(e), u = user_of(t), k, n = 0;
+    uint32_t cur = np ? t->preset % np : 0u;
     for (k = 0; k < UP_SLOTS; k++)
         if (up_used(k) && up_engine(k) == e) {
             if (k == u)
@@ -1424,6 +1424,7 @@ static uint32_t eng_list_pos(uint32_t *total)
     *total = np + n;
     return cur;
 }
+static uint32_t eng_list_pos(uint32_t *total) { return eng_list_pos_of(TSEL, total); }
 
 static void eng_list_step(int32_t direction)         /* the next / previous sound of the engine (wraps) */
 {
