@@ -155,7 +155,7 @@ static int motion_locks(void)
 static int preferences(void)
 {
     int bad = 0;
-    uint8_t a[4] = {0, 8, 0, 0};                         /* (COLOR's value 8: Switch Blade's MACHINE is value 0, so the fixed palette 7) */
+    uint8_t a[4] = {0, 0, 0, 0};                         /* (Switch Blade: the palette list is MACHINE alone) */
     reset();
     uint32_t n = request(ED_INFO, a, 0);
     uint32_t e = n - 6u;                                  /* (1.5.5: 4B 01 NCOND, 1.6: 45 01 5 last, below) */
@@ -166,7 +166,7 @@ static int preferences(void)
         host_wire[e - 33] == 0x4d && host_wire[e - 32] == 1 && host_wire[e - 31] == 64u && host_wire[e - 30] == 1 &&   /* (64 kept: 41 01 says 128) */
         host_wire[e - 29] == 0x42 && host_wire[e - 28] == 1 && host_wire[e - 27] == 3 &&
         host_wire[e - 26] == 0x53 && host_wire[e - 25] == 1 && host_wire[e - 24] == 3 &&
-        host_wire[e - 23] == 0x4E && host_wire[e - 22] == 1 && host_wire[e - 21] == 36 &&   /* MENU settings: 36 items (FM1-Four; VOID FOUR: no HOME) */
+        host_wire[e - 23] == 0x4E && host_wire[e - 22] == 1 && host_wire[e - 21] == 35 &&   /* MENU settings: 35 items (FM1-Four; VOID FOUR: no HOME; Switch Blade: no COLOR) */
         host_wire[e - 20] == 0x52 && host_wire[e - 19] == 1 && host_wire[e - 18] == 4 &&   /* RATCH */
         host_wire[e - 17] == 0x4C && host_wire[e - 16] == 1 && host_wire[e - 15] == 1 &&   /* 1.1 parameter locks */
         host_wire[e - 14] == 0x41 && host_wire[e - 13] == 1 && host_wire[e - 12] == 0 && host_wire[e - 11] == 1 &&   /* 1.2: 128 */
@@ -178,10 +178,10 @@ static int preferences(void)
     bad += check("INFO 1.6: 45 01 5, CUSTOM's colours, last",
         host_wire[n - 4] == 0x45 && host_wire[n - 3] == 1 && host_wire[n - 2] == 5);
     request(ED_UI_SET, a, 2);
-    bad += check("UI_SET updates the actual palette and reports RAM-only saving",
-        host_wire[5] == 3 && settings.palette == 7 && T_BG == UI_PALETTES[7].bg);
-    a[1] = NPALETTES + 1u; request(ED_UI_SET, a, 2);
-    bad += check("out-of-range palette leaves the display unchanged", host_wire[5] == 1 && settings.palette == 7);
+    bad += check("UI_SET 0 (palette MACHINE, the only one) applies and reports RAM-only saving",
+        host_wire[5] == 3 && settings.palette == UI_PAL_MACHINE && T_BG == UI_MACHINE_PALS[TSEL->eng_req % NENGINES].bg);
+    a[1] = 1; request(ED_UI_SET, a, 2);
+    bad += check("out-of-range palette (there is one) leaves the display unchanged", host_wire[5] == 1 && settings.palette == UI_PAL_MACHINE);
     a[0] = 1; a[1] = 1; request(ED_UI_SET, a, 2);
     bad += check("the retired font weight is not supported (rc 2), UI_STATE says 127",
         host_wire[5] == 2 && host_wire[8] == 9 && host_wire[10] == 127);
@@ -729,7 +729,7 @@ static uint32_t menu_set(uint32_t id, int32_t v)            /* -> rc; host_wire[
 static int menu_protocol(void)
 {
     static const char *const WANT[37][2] = {
-        {"COLOR", 0}, {"STYLE", "FLAT,LINE"}, {"LARGE", "OFF,ON"}, {"ANIM", "ON,OFF,IDLE"}, {"LEDS", "OFF,DIM LO,DIM HI,INV,INV LO,INV HI"},
+        {"(COLOR: gone)", 0}, {"STYLE", "FLAT,LINE"}, {"LARGE", "OFF,ON"}, {"ANIM", "ON,OFF,IDLE"}, {"LEDS", "OFF,DIM LO,DIM HI,INV,INV LO,INV HI"},
         {"HOLD", "0.3 s,0.4 s,0.5 s,0.6 s"}, {"KNOB ACCEL", "OFF,ON"}, {"FX LATCH", "OFF,ON"}, {"BPM LOCK", "OFF,ON"},
         {"SPEAKER EQ", "FLAT,LOWCUT,BASS+"}, {"USB LEVEL", "MASTER,FIXED"}, {"USB SERIAL", "ON,OFF"},
         {"CLICK", "OFF,REC,ON"}, {"CLICK LEVEL", "LOW,MID,HIGH"}, {"COUNT-IN", "OFF,1 BAR,2 BARS"},   /* (1.1: appended) */
@@ -757,9 +757,9 @@ static int menu_protocol(void)
     FILE *jf = json ? fopen(json, "w") : 0;
     reset();
     if (jf) fprintf(jf, "[");
-    for (i = 0; i < 36u; i++) {                         /* (index i: id i, past VOID FOUR's retired 23 the next) */
+    for (i = 0; i < 35u; i++) {                         /* (index idx: id idx + 1 (COLOR, id 0, is gone), past VOID FOUR's retired 23 the next) */
         uint32_t idx = i;
-        i = idx < 23u ? idx : idx + 1u;
+        i = idx < 22u ? idx + 1u : idx + 2u;
         n = menu_desc(idx, &it);
         joined[0] = 0;
         for (k = 0; k < it.nnames; k++) { if (k) strcat(joined, ","); strcat(joined, it.names[k]); }
@@ -767,11 +767,9 @@ static int menu_protocol(void)
                          !it.nnames && !strcmp(it.unit, "ct") && !strcmp(it.name, "TUNE")     /* (a number: cents) */
                        : n > 10u && it.index == idx && it.id == i && it.kind == 0 && it.min == 0 && !it.unit[0] &&
                          it.max + 1 == (int32_t)it.nnames && !strcmp(it.name, WANT[i][0]) &&
-                         (WANT[i][1] ? !strcmp(joined, WANT[i][1]) : it.nnames == NPALETTES + 1u);
+                         (WANT[i][1] ? !strcmp(joined, WANT[i][1]) : 0);
         ok &= it.value == (DEF[i] < 0 ? (int32_t)palette_cur() : DEF[i]) &&
               it.tab == TAB[i] && !strcmp(it.tabname, TABN[TAB[i]]) && !it.rest;
-        if (i == 0)
-            for (k = 0; k < NPALETTES; k++) ok &= !strcmp(it.names[0], "MACHINE") && !strcmp(it.names[k + 1u], UI_PALETTES[k].name);   /* (Switch Blade: MACHINE first) */
         if (!ok) { printf("  MENU_DESC %u: %s [%s] value %d max %d tab %u %s\n", i, it.name, joined, it.value, it.max, it.tab, it.tabname); break; }
         if (jf) {
             fprintf(jf, "%s\n {\"id\":%u,\"kind\":%u,\"min\":%d,\"max\":%d,\"value\":%d,\"name\":\"%s\",\"names\":[", i ? "," : "",
@@ -782,22 +780,22 @@ static int menu_protocol(void)
         i = idx;
     }
     if (jf) { fprintf(jf, "]\n"); fclose(jf); }
-    bad += check("MENU_DESC: 36 items (1.0.4's 12 in the menu's order, then 1.1's CLICK, CLICK LEVEL, COUNT-IN, 1.2's RESTORE LAST, SCALE LEDS, SCREEN OFF, 1.2's SCOPE, STEP PREVIEW, CHORD ENTRY, MIDI IN, TUNE, 1.5's HELP, 1.5.5's SELECT, T1..T4 CHANNEL, AUTO SELECT, SCREEN WAKE, FM1-Four's T1..T4 OUT, CLOCK OUT), ids 0..36 but 23 (1.3's HOME, gone), names, defaults; TUNE a number -50..50 ct", ok);
+    bad += check("MENU_DESC: 35 items (1.0.4's 11 in the menu's order (COLOR is gone), then 1.1's CLICK, CLICK LEVEL, COUNT-IN, 1.2's RESTORE LAST, SCALE LEDS, SCREEN OFF, 1.2's SCOPE, STEP PREVIEW, CHORD ENTRY, MIDI IN, TUNE, 1.5's HELP, 1.5.5's SELECT, T1..T4 CHANNEL, AUTO SELECT, SCREEN WAKE, FM1-Four's T1..T4 OUT, CLOCK OUT), ids 1..36 but 23 (1.3's HOME, gone; 0: COLOR, gone), names, defaults; TUNE a number -50..50 ct", ok);
     bad += check("MENU_DESC (1.0.5): after the names (TUNE: the unit) each item's tab, index and name (DISPLAY CONTROL AUDIO MIDI MIDI OUT SYSTEM)", ok);
     {   /* an older editor reads the names and stops: the tab is past them, nothing it reads moved */
-        uint32_t m = menu_desc(4, &it), p = 14, q;
+        uint32_t m = menu_desc(3, &it), p = 14, q;
         for (q = 0; q < 1u + it.nnames; q++) { while (host_wire[p]) p++; p++; }   /* name, the names */
         ok = m > 10u && host_wire[p] == 0 && !strcmp((const char *)host_wire + p + 1, "DISPLAY") &&
              p + 1u + 8u == m + 6u - 1u;
         bad += check("MENU_DESC: the tab comes after every byte of the 1.0.4 reply (older editors ignore it)", ok);
     }
     ok = 1;
-    for (i = 0; i < 36u; i++) {
+    for (i = 0; i < 35u; i++) {
         menu_desc(i, &it);
         ok &= strcmp(it.name, "CALIBRATION") && strcmp(it.name, "ABOUT") && strcmp(it.name, "INFO") && it.id != 23u;
     }
-    n = menu_desc(36, &it);
-    ok &= n == 2u && it.index == 36 && it.id == 127;
+    n = menu_desc(35, &it);
+    ok &= n == 2u && it.index == 35 && it.id == 127;
     n = menu_desc(127, &it);
     bad += check("MENU_DESC: no CALIBRATION / INFO / ABOUT; an index past the list answers index, 127 (no item)",
                  ok && n == 2u && it.index == 127 && it.id == 127);
@@ -811,8 +809,7 @@ static int menu_protocol(void)
     /* MENU_SET: each setting, applied as the menu applies it; RAM only here (no flash: rc 3) */
     reset();
     ui.force = 0;
-    ok = menu_set(0, 2) == 3 && host_wire[6] == 0 && ed_rv(host_wire + 7) == 2 && settings.palette == 1u &&
-         T_BG == UI_PALETTES[1].bg && ui.force;
+    ok = menu_set(0, 2) == 1 && settings.palette == UI_PAL_MACHINE;   /* (id 0, COLOR: gone, an unknown id) */
     ok &= menu_set(1, 1) == 3 && ui_style == ST_LINE;
     ok &= menu_set(2, 1) == 3 && (ui_prefs & PREF_LARGE);
     ok &= menu_set(3, 1) == 3 && (ui_prefs & PREF_ANIM_OFF);
@@ -845,20 +842,18 @@ static int menu_protocol(void)
           ui_prefs2 == 31u;                             /* (its own byte: SELECT's bit 4 untouched) */
     ok &= menu_set(31, 1) == 3 && ui_prefs2 == 63u && (ui_rec_prefs & 0x80u) && ui_scr == 1u;   /* (1.5.5: SCREEN WAKE
                                                          * PANEL, bit 5 of ui_prefs2; SCREEN OFF's byte untouched) */
-    for (i = 0; i < 31u; i++) {                         /* MENU_DESC reads them back (by id; 23 is no item) */
+    for (i = 0; i < 30u; i++) {                         /* MENU_DESC reads them back (by id; 0 and 23 are no item) */
         static const int32_t SET[32] = {2, 1, 1, 1, 1, 3, 1, 1, 1, 2, 1, 0, 2, 0, 2, 1, 1, 2, 1, 1, 1, 2, -13, 0, 1, 1, 9, 16, 17, 0, 1, 1};
         menu_desc(i, &it);
-        ok &= it.value == SET[it.id] && it.id == (i < 23u ? i : i + 1u);
+        ok &= it.value == SET[it.id] && it.id == (i < 22u ? i + 1u : i + 2u);
     }
-    bad += check("MENU_SET: every setting applied as the menu does (palette, EQ, USB LEVEL, CLICK, COUNT-IN at once, RESTORE LAST, SCALE LEDS, SCREEN OFF, SCOPE, STEP PREVIEW, CHORD ENTRY, HELP, SELECT, T1..T4 CHANNEL, AUTO SELECT, SCREEN WAKE), read back", ok);
+    bad += check("MENU_SET: every setting applied as the menu does (EQ, USB LEVEL, CLICK, COUNT-IN at once, RESTORE LAST, SCALE LEDS, SCREEN OFF, SCOPE, STEP PREVIEW, CHORD ENTRY, HELP, SELECT, T1..T4 CHANNEL, AUTO SELECT, SCREEN WAKE), read back", ok);
     ok = menu_set(3, 0) == 3 && !(ui_prefs & PREF_ANIM_OFF) && (ui_prefs & PREF_LARGE) && menu_set(10, 0) == 3 &&
          !fx_usb_fixed && menu_set(1, 0) == 3 && ui_style == ST_FLAT;
     bad += check("MENU_SET: a flag back to its default leaves the other flags", ok);
 
     /* clamping: the reply carries the device's value */
-    ok = menu_set(0, 50) == 3 && ed_rv(host_wire + 7) == (int32_t)NPALETTES && settings.palette == NPALETTES - 1u;
-    ok &= menu_set(0, -5) == 3 && ed_rv(host_wire + 7) == 0 && settings.palette == UI_PAL_MACHINE;   /* (0: MACHINE) */
-    ok &= menu_set(4, 99) == 3 && ed_rv(host_wire + 7) == 5 && settings_leds == LEDS_INV && leds_inv() == 2u;   /* (1.5.6: INV HI last) */
+    ok = menu_set(4, 99) == 3 && ed_rv(host_wire + 7) == 5 && settings_leds == LEDS_INV && leds_inv() == 2u;   /* (1.5.6: INV HI last) */
     ok &= menu_set(5, 8191) == 3 && ed_rv(host_wire + 7) == 3 && settings_hold == 3u;
     ok &= menu_set(2, 7) == 3 && ed_rv(host_wire + 7) == 1 && (ui_prefs & PREF_LARGE);
     ok &= menu_set(14, 9) == 3 && ed_rv(host_wire + 7) == 2 && cin_bars == 2u;
@@ -981,7 +976,8 @@ static int learn_protocol(void)
     return bad;
 }
 
-/* 1.6 (#244): CUSTOM, the user's palette: PALETTE_GET / PALETTE_SET (80, 81; INFO 45 01 5), COLOR's 11th value */
+/* 1.6 (#244): CUSTOM, the user's palette: PALETTE_GET / PALETTE_SET (80, 81; INFO 45 01 5). Switch Blade has one colour scheme
+ * and no CUSTOM: the commands stay and are accepted, changing nothing (an editor that sends them gets no error) */
 static uint32_t palette_cmd(uint32_t cmd, const uint8_t *a, uint32_t n) { return request(cmd, a, n); }
 /* a PALETTE_SET frame: op, then 5 x (r, g, b) */
 static uint32_t pal_send(uint32_t op, const uint16_t *c)
@@ -998,105 +994,44 @@ static int custom_palette(void)
     int bad = 0, ok;
     uint8_t a[4] = {0};
     const uint16_t good[5] = {rgb565(8, 16, 40), rgb565(24, 32, 64), rgb565(240, 240, 255), rgb565(120, 200, 255), rgb565(255, 160, 40)};
-    const uint16_t flat[5] = {rgb565(80, 80, 80), rgb565(90, 90, 90), rgb565(100, 100, 100), rgb565(110, 110, 110), rgb565(120, 120, 120)};
-    uint32_t n, i;
+    uint32_t n, op;
+    uint16_t bg;
     reset();
+    bg = T_BG;
     n = palette_cmd(ED_PALETTE_GET, a, 0);
     ok = n == 5u + 2u + 15u + 1u && host_wire[4] == ED_PALETTE_GET && host_wire[5] == 0 && host_wire[6] == 5 &&
-         host_wire[7] == (T_BG >> 11) && host_wire[8] == ((T_BG >> 5) & 63u);        /* (nothing stored: the palette in use, to start from) */
-    bad += check("PALETTE_GET: none stored (flags 0), five colours: the palette in use", ok);
+         host_wire[7] == (T_BG >> 11) && host_wire[8] == ((T_BG >> 5) & 63u) && host_wire[9] == (T_BG & 31u);   /* (flags 0: the palette in use) */
+    bad += check("PALETTE_GET: flags 0 (none stored, none in use), five colours: the machine palette in use", ok);
     ok = palette_cmd(ED_PALETTE_GET, a, 1) == 0u;
     bad += check("  PALETTE_GET takes no arguments", ok);
-    n = pal_send(0, flat);
-    ok = n > 0u && host_wire[5] == 0 && T_BG == flat[0] && T_TEXT == flat[2] && !(ui_cpal_flags & CPAL_STORED);
-    bad += check("PALETTE_SET: colours that are hard to read are shown too (a preview: the editor warns, the device does not refuse)", ok);
-    a[0] = 3; request(ED_PALETTE_SET, a, 1);
-    n = pal_send(1, flat);
-    ok = n > 0u && (host_wire[5] == 0 || host_wire[5] == 3) && (ui_cpal_flags & CPAL_STORED) && cpal_on() && T_BG == flat[0];
-    bad += check("  and stored (op 1: rc as UI_SET, no rc 5)", ok);
-    a[0] = 2; request(ED_PALETTE_SET, a, 1);
-    ok = ui_cpal_flags == 0u && palette_n() == NPALETTES + 1u;
-    bad += check("  a way back: op 2 removes it", ok);
-    {
-        uint8_t b[16] = {1, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};          /* red 32: out of range */
-        ok = request(ED_PALETTE_SET, b, 16) > 0u && host_wire[5] == 1;
-        b[1] = 0; b[2] = 64;                                                           /* green 64 */
-        ok &= request(ED_PALETTE_SET, b, 16) > 0u && host_wire[5] == 1;
-        ok &= request(ED_PALETTE_SET, b, 15) > 0u && host_wire[5] == 1;               /* (the wrong length: rc 1) */
-        b[0] = 9;
-        ok &= request(ED_PALETTE_SET, b, 16) > 0u && host_wire[5] == 1;               /* an unknown op */
-        ok &= !(ui_cpal_flags & CPAL_STORED);
+    for (op = 0, ok = 1; op < 4u; op++) {
+        n = pal_send(op, good);
+        ok &= n > 0u && host_wire[4] == ED_PALETTE_SET && host_wire[5] == 0 && T_BG == bg && T_BG != good[0] &&
+              ui_cpal_flags == 0u && ui_cpal[0] == 0 && palette_cur() == 0u && palette_n() == 1u;
     }
-    bad += check("  a value out of range, an unknown op: rc 1, nothing stored", ok);
-    n = pal_send(0, good);                                                          /* the preview: gfx.c's copy only */
-    ok = n > 0u && host_wire[5] == 0 && T_BG == good[0] && T_TEXT == good[2] && T_THEME == good[3] && T_ACCENT == good[4] &&
-         ui_cpal_flags == 0u && ui_cpal[0] == 0 && palette_n() == NPALETTES + 1u;
-    bad += check("PALETTE_SET op 0 (preview): the colours are shown at once, nothing is stored", ok);
-    ok = T_SEL == ux_mix(good[0], good[3], UI_SEL_PCT) && T_MID == ux_mix(good[0], good[2], UI_MID_PCT) && T_INK == good[0] &&
-         !ux.mono && ux.light == 0u;
-    bad += check("  the other tokens derived as for any palette (SEL, MID, INK), not GREY", ok);
-    a[0] = 3; n = palette_cmd(ED_PALETTE_SET, a, 1);
-    ok = n > 0u && host_wire[5] == 0 && T_BG == UI_PALETTES[settings.palette].bg;
-    bad += check("PALETTE_SET op 3: the preview dropped, the palette in use again", ok);
-    n = pal_send(1, good);
-    ok = n > 0u && host_wire[4] == ED_PALETTE_SET && (host_wire[5] == 3 || host_wire[5] == 0) && ui_cpal_flags == (CPAL_STORED | CPAL_ACTIVE) &&
-         palette_cur() == COLOR_CUSTOM && palette_n() == NPALETTES + 2u && T_BG == good[0] && host_wire[6] == 3 && host_wire[7] == 5;
-    for (i = 0; i < 5u; i++) ok &= (uint16_t)(ui_cpal[2 * i] | ui_cpal[2 * i + 1] << 8) == good[i];
-    bad += check("PALETTE_SET op 1: stored, in use (flags 3), five colours little endian in the settings' bytes", ok);
-    n = palette_cmd(ED_PALETTE_GET, a, 0);
-    ok = host_wire[5] == 3 && host_wire[6] == 5 && host_wire[7] == (good[0] >> 11) && host_wire[8] == ((good[0] >> 5) & 63u) &&
-         host_wire[9] == (good[0] & 31u);
-    bad += check("PALETTE_GET after: flags 3 and the stored colours (r5 g6 b5, three 7-bit bytes each)", ok);
+    bad += check("PALETTE_SET ops 0 (preview), 1 (store), 2 (remove), 3 (drop the preview): accepted with rc 0, nothing changes", ok);
     n = palette_cmd(ED_UI_PALETTES, a, 0);
-    ok = n > 0u && host_wire[5] == NPALETTES + 2u && !strncmp((const char *)host_wire + 6 + 0, "MACHINE", 8);
-    {   /* the names: each a 12-byte field (ed_str): the last one is CUSTOM */
-        uint32_t pos = 6, k;
-        for (k = 0; k < NPALETTES + 1u; k++) pos += (uint32_t)strlen((const char *)host_wire + pos) + 1u;
-        ok &= !strcmp((const char *)host_wire + pos, "CUSTOM");
-    }
-    bad += check("UI_PALETTES: CUSTOM listed last while one is stored", ok);
-    a[0] = 0; a[1] = COLOR_CUSTOM; n = request(ED_UI_SET, a, 2);
-    ok = n > 0u && host_wire[5] != 1 && palette_cur() == COLOR_CUSTOM;
-    a[1] = 4; request(ED_UI_SET, a, 2);                                            /* (value 4: the fixed palette 3) */
-    ok &= palette_cur() == 4u && settings.palette == 3u && (ui_cpal_flags & CPAL_STORED) && !(ui_cpal_flags & CPAL_ACTIVE) &&
-          T_BG == UI_PALETTES[3].bg;
-    a[1] = COLOR_CUSTOM; request(ED_UI_SET, a, 2);
-    ok &= palette_cur() == COLOR_CUSTOM && T_BG == good[0] && settings.palette == 3u;
-    a[1] = COLOR_CUSTOM + 1u; request(ED_UI_SET, a, 2);
+    ok = n > 0u && host_wire[5] == 1 && !strncmp((const char *)host_wire + 6, "MACHINE", 8);
+    bad += check("UI_PALETTES: one palette, MACHINE", ok);
+    a[0] = 0; a[1] = 0; n = request(ED_UI_SET, a, 2);
+    ok = n > 0u && host_wire[5] != 1;
+    a[1] = 1; n = request(ED_UI_SET, a, 2);
     ok &= host_wire[5] == 1;
-    bad += check("UI_SET 0: CUSTOM (11, after MACHINE and the ten fixed palettes) selectable like a built-in palette, a built-in one leaves it stored (settings.palette the base)", ok);
-    {   /* COLOR in MENU: 11 values, CUSTOM last */
-        menu_item_t it;
-        menu_desc(0, &it);
-        ok = it.max == (int32_t)COLOR_CUSTOM && it.nnames == NPALETTES + 2u && !strcmp(it.names[COLOR_CUSTOM], "CUSTOM") &&
-             !strcmp(it.names[0], "MACHINE") && it.value == (int32_t)COLOR_CUSTOM;
-        ok &= menu_set(0, 6) == 3 && palette_cur() == 6u && T_BG == UI_PALETTES[5].bg;
-        ok &= menu_set(0, 99) == 3 && palette_cur() == COLOR_CUSTOM && T_BG == good[0];
-        bad += check("MENU COLOR: 12 values while CUSTOM is stored (MACHINE first, CUSTOM last), MENU_SET reaches it", ok);
-    }
     n = palette_cmd(ED_UI_STATE, a, 0);
-    ok = n > 0u && host_wire[6] == COLOR_CUSTOM;
-    bad += check("UI_STATE: the palette byte is 11 while CUSTOM is in use", ok);
-    a[0] = 2; n = palette_cmd(ED_PALETTE_SET, a, 1);
-    ok = n > 0u && ui_cpal_flags == 0u && palette_cur() == 1u + settings.palette && palette_n() == NPALETTES + 1u && T_BG == UI_PALETTES[settings.palette].bg;
-    for (i = 0; i < 10u; i++) ok &= ui_cpal[i] == 0;
-    bad += check("PALETTE_SET op 2: removed (flags 0, bytes 0), the built-in palette is back, COLOR has 11 values again", ok);
-    a[0] = 0; a[1] = COLOR_CUSTOM; n = request(ED_UI_SET, a, 2);
-    ok = host_wire[5] == 1;
-    bad += check("UI_SET 0 with CUSTOM (11) but none stored: rc 1", ok);
-    {   /* a settings object with the bytes round trips (settings_export / settings_import), none stored reads as none */
+    ok &= n > 0u && host_wire[6] == 0;
+    bad += check("UI_SET 0: palette 0 (MACHINE) is accepted, 1 is out of range (rc 1); UI_STATE's palette byte is 0", ok);
+    {   /* a settings object with CUSTOM's bytes (an older firmware) keeps them as saved and shows MACHINE */
         persist_t p;
-        pal_send(1, good);
         settings_export(&p);
-        memset(&favorites, 0, sizeof favorites);
-        ok = settings_import(&p, sizeof p) == 1 && ui_cpal_flags == 3u && palette_n() == NPALETTES + 2u;
-        palette_apply();
-        ok &= T_BG == good[0] && T_ACCENT == good[4];
-        bad += check("settings: CUSTOM kept by an export and an import, in use after palette_apply", ok);
-        p.favorites.factory[15][12] = 3; p.favorites.factory[15][0] = p.favorites.factory[15][4] = 0x55;   /* hard to read: kept as saved */
+        p.favorites.factory[15][12] = 3; p.favorites.factory[15][0] = p.favorites.factory[15][4] = 0x55;
         p.favorites.factory[15][1] = p.favorites.factory[15][5] = 0x55;
-        ok = settings_import(&p, sizeof p) == 1 && ui_cpal_flags == 3u && ui_cpal[0] == 0x55 && palette_n() == NPALETTES + 2u;
-        bad += check("settings: colours that are hard to read are kept as saved (the user's choice)", ok);
+        ok = settings_import(&p, sizeof p) == 1 && ui_cpal_flags == 3u && ui_cpal[0] == 0x55 && palette_n() == 1u;
+        palette_apply();
+        ok &= T_BG == UI_MACHINE_PALS[TSEL->eng_req % NENGINES].bg && ux.trim;
+        bad += check("settings: CUSTOM's bytes are kept as saved, the palette is MACHINE", ok);
+        settings_export(&p);
+        ok = p.favorites.factory[15][12] == 3 && p.favorites.factory[15][0] == 0x55 && p.palette == UI_PAL_TAG + 10u;
+        bad += check("  and exported again unchanged (an older firmware reading them finds what it saved)", ok);
         p.favorites.factory[15][12] = 0xFE;
         ok = settings_import(&p, sizeof p) == 1 && ui_cpal_flags == 0u && ui_cpal[0] == 0;
         bad += check("settings: a flags byte without the stored bit: none, the colours zero; the bits past the two dropped", ok);

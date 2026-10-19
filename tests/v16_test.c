@@ -205,10 +205,11 @@ static int resets(void)
 
 /* ---- CUSTOM, the user's palette (#244) ---- */
 static uint16_t rgb(uint32_t r, uint32_t g, uint32_t b) { return (uint16_t)((r >> 3) << 11 | (g >> 2) << 5 | b >> 3); }
-static void custom_store(const uint16_t *c, int use)
+static void custom_store(const uint16_t *c, int use)      /* the bytes of an older settings record */
 {
-    cpal_store(c);
-    if (use) palette_choose(COLOR_CUSTOM);
+    uint32_t i;
+    for (i = 0; i < 5u; i++) { ui_cpal[2u * i] = (uint8_t)c[i]; ui_cpal[2u * i + 1u] = (uint8_t)(c[i] >> 8); }
+    (void)use;
 }
 static int screens_lit(const char *what)          /* every page, HOME, the menu: drawn, ink on the screen, the screen not flat */
 {
@@ -234,64 +235,28 @@ static int screens_lit(const char *what)          /* every page, HOME, the menu:
 }
 static int custom_palette_ui(void)
 {
+    /* CUSTOM is gone (Switch Blade: the machine palettes are the one colour scheme): stored CUSTOM bytes (an older settings
+     * record) change nothing, MENU has no COLOR, and every page and HOME still draw (ink on the screen) in each machine's palette */
     int bad = 0, ok;
+    uint32_t e;
     const uint16_t dark[5] = {rgb(8, 16, 40), rgb(24, 32, 64), rgb(240, 240, 255), rgb(120, 200, 255), rgb(255, 160, 40)};
-    const uint16_t light[5] = {rgb(250, 246, 235), rgb(230, 224, 208), rgb(20, 24, 40), rgb(30, 90, 160), rgb(200, 60, 40)};
-    const uint16_t edge[5] = {rgb(0, 0, 0), rgb(36, 36, 36), rgb(136, 136, 136), rgb(88, 88, 88), rgb(70, 70, 70)};
     ui_power_on();
-    /* (Switch Blade: COLOR's value 0 is MACHINE, 1 .. NPALETTES the fixed palettes, COLOR_CUSTOM the one after them) */
-    ok = menu_n(MI_COLOR) == NPALETTES + 1u && !(ui_cpal_flags & CPAL_STORED);
-    palette_choose(COLOR_CUSTOM);                    /* (none stored: nothing changes) */
-    ok &= palette_cur() == 1u + settings.palette && !cpal_on();
-    bad += check("CUSTOM: none stored, COLOR has MACHINE and the 10 fixed values (CUSTOM does nothing)", ok);
-    palette_choose(1u + 4u);
     custom_store(dark, 0);
-    ok = menu_n(MI_COLOR) == NPALETTES + 2u && menu_get(MI_COLOR) == 1u + 4u && !strcmp(menu_vname(MI_COLOR, COLOR_CUSTOM), "CUSTOM") &&
-         cpal_on() == 0u;
-    bad += check("CUSTOM: stored (not in use): COLOR has 12 values, the fixed 4 still in use, CUSTOM named last", ok);
-    palette_choose(COLOR_CUSTOM);
-    ok = menu_get(MI_COLOR) == COLOR_CUSTOM && T_BG == dark[0] && T_TEXT == dark[2] && settings.palette == 4u;
-    bad += check("  CUSTOM chosen: its colours are the palette (BG TEXT), settings.palette stays 4 (what older firmware shows)", ok);
-    ok = menu_step(MI_COLOR, 1) == 0u && menu_step(MI_COLOR, -1) == NPALETTES;
-    palette_choose(0);                               /* MACHINE */
-    ok &= menu_step(MI_COLOR, -1) == COLOR_CUSTOM && menu_step(MI_COLOR, 1) == 1u;
-    bad += check("  the menu steps COLOR through CUSTOM: past the last fixed one, round to MACHINE, the first", ok);
-    palette_choose(1);                               /* GREY */
-    {
-        persist_t p;
-        palette_choose(COLOR_CUSTOM);
-        settings_export(&p);
-        ok = p.palette == palette_to_stored(0u) && p.favorites.factory[15][12] == 3u && palette_from_stored(p.palette) == 0u;
-        bad += check("  saved: persist_t.palette is the built-in palette (the base), the colours and flags in favorites", ok);
-    }
-    ok = screens_lit("dark");
-    bad += check("every page and HOME drawn in a dark CUSTOM palette (ink on the screen)", ok);
-    cpal_store(light);
+    ui_cpal_flags = 3;
     palette_apply();
-    ok = T_BG == light[0] && ux.light && screens_lit("light");
-    bad += check("  in a light one (the REC red for light backgrounds)", ok);
-    cpal_store(edge);
-    palette_apply();
-    ok = screens_lit("edge");
-    bad += check("  in one on the edge of the readable rule (the editor's: TEXT / BG 128 ..)", ok);
-    {   /* colours nobody can read are the user's to choose: drawn without a fault, and the way back stays (COLOR steps to a built-in palette) */
-        const uint16_t same[5] = {rgb(90, 90, 90), rgb(90, 90, 90), rgb(90, 90, 90), rgb(90, 90, 90), rgb(90, 90, 90)};
-        const uint16_t white[5] = {rgb(255, 255, 255), rgb(255, 255, 255), rgb(255, 255, 255), rgb(255, 255, 255), rgb(255, 255, 255)};
-        uint32_t k;
-        for (k = 0; k < 2u; k++) {
-            cpal_store(k ? white : same);
-            palette_choose(COLOR_CUSTOM);
-            ui.home = 0; ui.menu = 0; ui.page = 0; page_entered(); ui.force = 1;
-            frame(); frame();
-            ui.menu = 1; ui.force = 1; frame();            /* the menu drawn too */
-            ui.menu = 0;
-        }
-        ok = cpal_on() && menu_step(MI_COLOR, 1) == 0u;
-        palette_choose(menu_step(MI_COLOR, 1));
-        ok &= !cpal_on() && settings.palette == UI_PAL_MACHINE && T_BG == UI_MACHINE_PALS[TSEL->eng_req % NENGINES].bg;
-        bad += check("  colours nobody can read (one grey, all white): drawn without a fault, COLOR steps back to MACHINE", ok);
+    ok = palette_n() == 1u && palette_cur() == 0u && settings.palette == UI_PAL_MACHINE &&
+         T_BG == UI_MACHINE_PALS[TSEL->eng_req % NENGINES].bg && T_BG != dark[0] && ux.trim;
+    bad += check("CUSTOM: stored bytes (flags 3) are ignored: the palette is still the track's machine's", ok);
+    ok = strcmp(MI_NAME[0], "STYLE") == 0 && MI_TAB[0] == MTAB_DISPLAY;
+    bad += check("MENU > DISPLAY starts at STYLE: no COLOR row", ok);
+    for (e = 0, ok = 1; e < NENGINES; e++) {
+        ui_power_on();
+        set_engine_of(TSEL, e);
+        ok &= screens_lit("machine");
     }
-    palette_choose(1);
+    bad += check("every page and HOME drawn on each machine's palette (ink on the screen)", ok);
+    memset(ui_cpal, 0, 10);
+    ui_cpal_flags = 0;
     return bad;
 }
 

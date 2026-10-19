@@ -782,11 +782,11 @@ static const char B_NOTE[NTRK] = {'F', 'G', 'A', 'C'};  /* black keys 1..4: F# G
 enum { LS_OFF, LS_SEL, LS_HELD, LS_WAIT, LS_DIM, LS_MUTE };
 /* 1.5 (#173): | LS_ALT, an idle (OFF, DIM) cell of the FX map's 2nd and 4th columns in a fill of its own, the columns
  * light / dark in turn as the piano roll's keys, so the effects are told apart at a glance: SURF -> TEXT 22 % (the
- * idle RAISE is 12 %); LINE (idle cells unfilled) 10 %; MONO (its one grey) none */
+ * idle RAISE is 12 %); LINE (idle cells unfilled) 10 % */
 #define LS_ALT 0x10u
 static uint16_t lc_alt(void)
 {
-    return ux.raise == UI_BW_GREY && ux.dim == UI_BW_GREY ? T_RAISE : ux_mix(T_SURF, T_TEXT, ux.style ? 10 : 22);
+    return ux_mix(T_SURF, T_TEXT, ux.style ? 10 : 22);
 }
 
 static uint16_t lc_fill(uint32_t st, uint16_t *ink)

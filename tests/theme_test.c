@@ -1,6 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* The palettes and the real canvas/text renderer (src/gfx.c): GREY stays gray in every token and blend, MONO is
- * black and white in every token (one grey: DIM LINE RAISE LANE) and neutral in every blend,
+/* The palettes (the four machines', the one colour scheme) and the real canvas/text renderer (src/gfx.c):
  * every palette's text contrast, the alpha blend, the ramp cache, the fonts' metrics and the ellipsis.
  * Optional: a palette sheet (PPM). */
 #include <stdint.h>
@@ -21,10 +20,6 @@ static void lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint1
 static uint16_t sheet[SHEET_W * SHEET_H];
 static unsigned channel(uint16_t c, unsigned n)
 { return n == 0 ? c >> 11 : n == 1 ? (c >> 5) & 63 : c & 31; }
-static int gray(uint16_t c) { return channel(c, 0) == channel(c, 2) && channel(c, 1) == channel(c, 0) * 2u; }
-/* MONO's blends: R = B, G within 2 of 2 R (blended per channel, the 5-6-5 rounding) */
-static int neutral(uint16_t c)
-{ return channel(c, 0) == channel(c, 2) && (int)channel(c, 1) - 2 * (int)channel(c, 0) >= -2 && (int)channel(c, 1) - 2 * (int)channel(c, 0) <= 2; }
 static double luminance(uint16_t color)
 {
     const double weight[] = {0.2126, 0.7152, 0.0722};
@@ -47,126 +42,80 @@ int main(int argc, char **argv)
     static const uint8_t pd[] = {0x08, 0xf0};
     const aafont_t probe = {1, 1, 'A', 'A', 0, 0, pg, pd, 0, 0, 0};
     double worst = 100;
-    assert(NPALETTES == 10u && !strcmp(UI_PALETTES[0].name, "GREY") && !strcmp(UI_PALETTES[7].name, "HI-CON") &&
-           !strcmp(UI_PALETTES[8].name, "NIGHT") && !strcmp(UI_PALETTES[9].name, "MONO") && UI_BW_INDEX == 9u);
-    /* (#50, 1.0.2: appended, the ids stay; GREY is the MONO of 1.0.1, id 0) */
-    for (unsigned st = ST_FLAT; st <= ST_LINE; st++) {   /* MONO: every token black or white, in FLAT and LINE */
-        uint16_t *tok = &ux.bg;
+    /* Switch Blade has one colour scheme: the four machines' palettes (UI_MACHINE_PALS, engine order; the fixed palettes and
+     * CUSTOM are gone). Each one: the contrast of text, labels, values, selection and keycaps (DRIFT's tan keys), the light
+     * ACID's derived tokens, the trim, the alpha blend (no halo), the sheet */
+    assert(NPALETTES == 4u && UI_NMACHINE == 4u && !strcmp(UI_MACHINE_PALS[0].name, "OB-Z") && !strcmp(UI_MACHINE_PALS[1].name, "WAVE") &&
+           !strcmp(UI_MACHINE_PALS[2].name, "ACID") && !strcmp(UI_MACHINE_PALS[3].name, "DRIFT"));
+    for (unsigned st = ST_FLAT; st <= ST_LINE; st++) {
         ux.style = (uint8_t)st;
-        palette_set(UI_BW_INDEX);
-        assert(&ux.grid - tok == 15);
-        for (unsigned i = 0; i < 16; i++) {
-            /* the one grey: DIM (inactive), LINE (tracks), RAISE (wells under white text), LANE (the piano roll) */
-            int grey_ok = tok[i] == UI_BW_GREY && (&tok[i] == &ux.dim || &tok[i] == &ux.line || &tok[i] == &ux.raise ||
-                                                   &tok[i] == &ux.lane);
-            if (!(tok[i] == 0x0000u || tok[i] == 0xFFFFu || grey_ok))
-                printf("MONO (%s): token %u = %04x is not black or white\n", st ? "LINE" : "FLAT", i, tok[i]);
-            assert(tok[i] == 0x0000u || tok[i] == 0xFFFFu || grey_ok);
-        }
-        assert(T_BG == 0u && T_SURF == 0u && T_TEXT == 0xFFFFu && T_SEL == 0xFFFFu && T_INK == 0u && T_REC == 0xFFFFu);
-    }
-    ux.style = ST_FLAT;
-    for (unsigned p = 0; p < NPALETTES; p++) {
-        uint16_t *tok = &ux.bg;
-        palette_set(p);
-        if (p == UI_GREY_INDEX)
-            for (unsigned i = 0; i < 14; i++) assert(gray(tok[i]));      /* every token, derived ones too (RAISE, KEY the last) */
-        /* text and the things read on the screen; the generator checks the same (tools/gen_ui_palettes.py) */
-        struct { uint16_t fg, bg; double min; } c[] = {
-            {T_TEXT, T_BG, 12.0}, {T_TEXT, T_SURF, 9.0}, {T_MID, T_BG, 5.0}, {T_MID, T_SURF, 4.0},
-            {T_THEME, T_BG, 4.5}, {T_THEME, T_SURF, 4.5}, {T_ACCENT, T_BG, 4.5}, {T_ACCENT, T_SURF, 4.5},
-            {T_INK, T_SEL, 4.5}, {T_INK, T_THEME, 4.5}, {T_DIM, T_BG, 2.2}, {T_LINE, T_BG, 1.25}, {T_REC, T_BG, 3.0},
-            {T_INK, T_KEY, 4.5}, {T_KEY, T_BG, 3.0}, {T_KEY, T_SURF, 2.5}, {T_INK, T_DIM, 1.8}, {T_INK, T_ACCENT, 4.5},
-            {T_TEXT, T_RAISE, 7.0}};
-        double min = 100;
-        for (unsigned i = 0; i < sizeof c / sizeof c[0]; i++) {
-            double r = contrast(c[i].fg, c[i].bg);
-            if (r < c[i].min) printf("%s: pairing %u contrast %.2f < %.2f\n", UI_PALETTES[p].name, i, r, c[i].min);
-            assert(r >= c[i].min);
-            if (r / c[i].min < min) min = r / c[i].min;
-        }
-        if (min < worst) worst = min;
-        printf("%-7s text %.1f:1, labels %.1f:1, values %.1f:1, selection %.1f:1\n", UI_PALETTES[p].name,
-               contrast(T_TEXT, T_BG), contrast(T_MID, T_BG), contrast(T_THEME, T_BG), contrast(T_INK, T_SEL));
-        assert((p == 6u) == ux.light);                         /* PAPER is the light one */
-        assert(T_REC == (p == UI_GREY_INDEX || p == UI_BW_INDEX ? T_ACCENT : ux.light ? UI_REC_LIGHT : UI_REC_DARK));
-        /* the blend: transparent, solid and an edge between the two, on two backgrounds */
-        for (unsigned b = 0; b < 2; b++) {
-            uint16_t under = b ? T_SEL : T_BG, ink = b ? T_INK : T_THEME;
-            cv_begin(3, 1, under);
-            cv_text_on(0, 0, &probe, "A", ink, under);
-            assert(swap16(cv_px[0]) == under && swap16(cv_px[2]) == ink);
-            for (unsigned k = 0; k < 3; k++) {
-                unsigned a = channel(under, k), z = channel(ink, k), m = channel(swap16(cv_px[1]), k);
-                assert(m >= (a < z ? a : z) && m <= (a > z ? a : z));   /* no halo */
-            }
-            if (p == UI_GREY_INDEX) assert(gray(swap16(cv_px[1])));
-            if (p == UI_BW_INDEX) assert(neutral(swap16(cv_px[1])));
-        }
-        assert(text_w(&AF_S, UI_PALETTES[p].name) <= 60);     /* the COLOR row's value */
-        cv_begin(240, 124, T_BG);
-        cv_text(4, 2, &AF_M, UI_PALETTES[p].name, T_TEXT);
-        for (unsigned k = 0; k < 5; k++) cv_rect(150 + k * 16, 4, 12, 12, tok[k]);
-        cv_text(4, 26, &AF_S, "LABEL", T_MID);
-        cv_text(70, 22, &AF_M, "VALUE 127", T_THEME);
-        cv_text(170, 22, &AF_M, "HOT", T_ACCENT);
-        cv_text(4, 46, &AF_S, "INACTIVE", T_DIM);
-        cv_rect(80, 44, 150, 17, T_SEL);
-        cv_text_on(86, 45, &AF_S, "SELECTED ROW", T_INK, T_SEL);
-        cv_rect(4, 66, 232, 1, T_LINE);
-        cv_rect(4, 72, 120, 3, T_LINE);
-        cv_rect(4, 72, 70, 3, T_SEL);
-        cv_rect(74, 70, 1, 7, T_THEME);
-        cv_text(136, 66, &AF_S, "REC", T_REC);
-        cv_text(4, 82, &AF_L, "124", T_THEME);
-        cv_text(80, 92, &AF_S, "Mixed case text", T_TEXT);
-        cv_key_hint(80, 108, KC_OCTUP, "LOAD", 1, T_BG);          /* keycaps: available, unavailable */
-        cv_key_hint(150, 108, KC_OCTDN, "BACK", 0, T_BG);
-        for (unsigned y = 0; y < 124; y++)
-            for (unsigned x = 0; x < 240; x++) {
-                uint16_t v = swap16(cv_px[y * 240 + x]);
-                if (p == UI_GREY_INDEX) assert(gray(v));          /* every blended pixel of GREY */
-                if (p == UI_BW_INDEX) assert(neutral(v));         /* and of MONO */
-                sheet[(p / 4 * 124 + y) * 960 + p % 4 * 240 + x] = v;
-            }
-    }
-    {   /* Switch Blade: the four machines' palettes (MACHINE mode; UI_MACHINE_PALS, engine order) under the same rules as every
-         * palette: the contrast of text, labels, values, selection and keycaps (DRIFT's tan keys), the light ACID's derived tokens,
-         * and the trim only on them (a fixed palette and CUSTOM: none) */
-        assert(UI_NMACHINE == 4u && !strcmp(UI_MACHINE_PALS[0].name, "OB-Z") && !strcmp(UI_MACHINE_PALS[1].name, "WAVE") &&
-               !strcmp(UI_MACHINE_PALS[2].name, "ACID") && !strcmp(UI_MACHINE_PALS[3].name, "DRIFT"));
         for (unsigned m = 0; m < UI_NMACHINE; m++) {
+            uint16_t *tok = &ux.bg;
             palette_set(PAL_MACHINE_ID(m));
+            assert(&ux.grid - tok == 15);
+            /* text and the things read on the screen; the generator checks the same (tools/gen_ui_palettes.py) */
             struct { uint16_t fg, bg; double min; } c[] = {
                 {T_TEXT, T_BG, 12.0}, {T_TEXT, T_SURF, 9.0}, {T_MID, T_BG, 5.0}, {T_MID, T_SURF, 4.0},
                 {T_THEME, T_BG, 4.5}, {T_THEME, T_SURF, 4.5}, {T_ACCENT, T_BG, 4.5}, {T_ACCENT, T_SURF, 4.5},
                 {T_INK, T_SEL, 4.5}, {T_INK, T_THEME, 4.5}, {T_DIM, T_BG, 2.2}, {T_LINE, T_BG, 1.25}, {T_REC, T_BG, 3.0},
                 {T_INK, T_KEY, 4.5}, {T_KEY, T_BG, 3.0}, {T_KEY, T_SURF, 2.5}, {T_INK, T_DIM, 1.8}, {T_INK, T_ACCENT, 4.5},
                 {T_TEXT, T_RAISE, 7.0}, {T_INK, T_REC, 4.5}};
+            double min = 100;
+            if (st == ST_LINE) continue;                          /* (LINE: surf = bg; the same pairs, nothing new) */
             for (unsigned i = 0; i < sizeof c / sizeof c[0]; i++) {
                 double r = contrast(c[i].fg, c[i].bg);
                 if (r < c[i].min) printf("%s: pairing %u contrast %.2f < %.2f\n", UI_MACHINE_PALS[m].name, i, r, c[i].min);
                 assert(r >= c[i].min);
+                if (r / c[i].min < min) min = r / c[i].min;
             }
-            assert(ux.trim == 1u + m && !ux.mono && ux.light == (m == 2u) && T_BG == UI_MACHINE_PALS[m].bg);
+            if (min < worst) worst = min;
+            assert(ux.trim == 1u + m && ux.light == (m == 2u) && T_BG == UI_MACHINE_PALS[m].bg);   /* ACID is the light one */
             assert(ux.light ? T_REC == UI_REC_LIGHT : T_REC == UI_REC_DARK);
             assert(T_KEY == (UI_MACHINE_PALS[m].key ? UI_MACHINE_PALS[m].key : ux_mix(T_BG, T_TEXT, UI_KEY_PCT)));
             assert((m == 3u) == (UI_MACHINE_PALS[m].key != 0));  /* DRIFT: tan keycaps, as the Juno-106's buttons */
             assert(text_w(&AF_S, UI_MACHINE_PALS[m].name) <= 60);
             printf("%-7s (machine) text %.1f:1, labels %.1f:1, values %.1f:1, selection %.1f:1\n", UI_MACHINE_PALS[m].name,
                    contrast(T_TEXT, T_BG), contrast(T_MID, T_BG), contrast(T_THEME, T_BG), contrast(T_INK, T_SEL));
+            /* the blend: transparent, solid and an edge between the two, on two backgrounds */
+            for (unsigned b = 0; b < 2; b++) {
+                uint16_t under = b ? T_SEL : T_BG, ink = b ? T_INK : T_THEME;
+                cv_begin(3, 1, under);
+                cv_text_on(0, 0, &probe, "A", ink, under);
+                assert(swap16(cv_px[0]) == under && swap16(cv_px[2]) == ink);
+                for (unsigned k = 0; k < 3; k++) {
+                    unsigned a = channel(under, k), z = channel(ink, k), mm = channel(swap16(cv_px[1]), k);
+                    assert(mm >= (a < z ? a : z) && mm <= (a > z ? a : z));   /* no halo */
+                }
+            }
+            cv_begin(240, 124, T_BG);
+            cv_text(4, 2, &AF_M, UI_MACHINE_PALS[m].name, T_TEXT);
+            for (unsigned k = 0; k < 5; k++) cv_rect(150 + k * 16, 4, 12, 12, tok[k]);
+            cv_text(4, 26, &AF_S, "LABEL", T_MID);
+            cv_text(70, 22, &AF_M, "VALUE 127", T_THEME);
+            cv_text(170, 22, &AF_M, "HOT", T_ACCENT);
+            cv_text(4, 46, &AF_S, "INACTIVE", T_DIM);
+            cv_rect(80, 44, 150, 17, T_SEL);
+            cv_text_on(86, 45, &AF_S, "SELECTED ROW", T_INK, T_SEL);
+            cv_rect(4, 66, 232, 1, T_LINE);
+            cv_rect(4, 72, 120, 3, T_LINE);
+            cv_rect(4, 72, 70, 3, T_SEL);
+            cv_rect(74, 70, 1, 7, T_THEME);
+            cv_text(136, 66, &AF_S, "REC", T_REC);
+            cv_text(4, 82, &AF_L, "124", T_THEME);
+            cv_text(80, 92, &AF_S, "Mixed case text", T_TEXT);
+            cv_key_hint(80, 108, KC_OCTUP, "LOAD", 1, T_BG);          /* keycaps: available, unavailable */
+            cv_key_hint(150, 108, KC_OCTDN, "BACK", 0, T_BG);
+            for (unsigned y = 0; y < 124; y++)
+                for (unsigned x = 0; x < 240; x++)
+                    sheet[(m / 4 * 124 + y) * 960 + m % 4 * 240 + x] = swap16(cv_px[y * 240 + x]);
         }
-        for (unsigned p = 0; p < NPALETTES; p++) { palette_set(p); assert(!ux.trim && !UI_PALETTES[p].key); }
-        palette_set(NPALETTES);
-        assert(!ux.trim);                                        /* CUSTOM */
-        palette_set(PAL_MACHINE_ID(1u));
-        assert(ux.trim == 2u && !ux.mono);                       /* (a machine palette is never the GREY / MONO special case) */
     }
+    ux.style = ST_FLAT;
     /* the ramp cache follows the palette (a stale ramp would blend toward the old background) */
     palette_set(1);
     cv_begin(3, 1, T_BG); cv_text(0, 0, &probe, "A", T_THEME);
     uint16_t green = swap16(cv_px[1]);
-    palette_set(6);
+    palette_set(2);
     cv_begin(3, 1, T_BG); cv_text(0, 0, &probe, "A", T_THEME);
     assert(swap16(cv_px[1]) != green);
     /* fonts: Inter Tight S 12 px, M 15 px, L 28 px; tabular digits; the ellipsis; L has capitals only */
@@ -191,6 +140,6 @@ int main(int argc, char **argv)
         }
         fclose(f);
     }
-    printf("Palettes: GREY gray, MONO black and white, contrast (worst margin x%.2f), blending, ramp cache, font metrics and ellipsis passed.\n", worst);
+    printf("Palettes: the four machines, contrast (worst margin x%.2f), blending, ramp cache, font metrics and ellipsis passed.\n", worst);
     return 0;
 }

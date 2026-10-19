@@ -70,6 +70,8 @@ static void draw_battery(int32_t bx)
 #define ROLL_SNAP 3u                                    /* frames (~45 ms) */
 #define ROLL_BPM 4u                                     /* ui.roll[]: the four cards, then the header BPM */
 #define ROLL_Y 18                                       /* a card's value strip: rows 18..34, its figures (21..31) in the middle, */
+#define HEAD_RY0 4                                      /* the header BPM's roll window (rows 4 .. 19: the ink's rows) */
+#define HEAD_RY1 20
 #define ROLL_H 17                                       /* the label (MONO's chip: to row 17) above it, the gauge (38) below */
 static const uint8_t ROLL_EASE[17] = {0, 45, 84, 118, 147, 172, 193, 210, 223, 234, 242, 247, 251, 253, 254, 255, 255};
 
@@ -111,7 +113,7 @@ static int32_t roll_text(uint32_t k, int32_t x, int32_t y, const char *s, uint16
     const aafont_t *f = &AF_M;
     uint32_t e = (uint8_t)(ui.frame - ui.roll[k].t0) + 1u, i, p = 0;
     const char *a = ui.roll[k].from;
-    int32_t cy = k < ROLL_BPM ? ROLL_Y : 0, h = k < ROLL_BPM ? ROLL_H : H_HEAD;
+    int32_t cy = k < ROLL_BPM ? ROLL_Y : HEAD_RY0, h = k < ROLL_BPM ? ROLL_H : HEAD_RY1 - HEAD_RY0;   /* (the header: rows 4 .. 19, the trim's rows 0 .. 3 and 20 .. 23 stay whole) */
     uint16_t bg = k < ROLL_BPM ? T_SURF : T_BG;
     char t[8], ch[2] = {0, 0};
     if (e >= ROLL_FRAMES)

@@ -90,18 +90,46 @@ static void trim_cv(uint32_t mask, int32_t x0, int32_t y0, int32_t w, int32_t h)
         cv_rect(ax - x0, ay - y0, bx - ax, by - ay, r[i].c);
     }
 }
-/* the same straight onto the screen (HOME's gaps between the tabs, drawn once with the BG), rows y .. y + h - 1 */
-static void trim_screen(uint32_t mask, int32_t y0, int32_t h)
+/* a rectangle of colour c straight onto the screen with the trim of the pages in mask (TG_*) in it: each pixel written once (the
+ * trim over a fill of its own would flash: #181). The trim rectangles of one page do not overlap; the rows are cut where a trim
+ * rectangle starts or ends, and each band is filled in spans left to right */
+static void trim_fill(uint32_t mask, int32_t x, int32_t y, int32_t w, int32_t h, uint16_t c)
 {
     const trim_t *r;
     uint32_t i, n;
-    if (!ux.trim || ux.style)
+    int32_t cut[2 * 32 + 2], nc = 0, k, j;
+    if (!ux.trim || ux.style) {
+        lcd_fill((uint32_t)x, (uint32_t)y, (uint32_t)w, (uint32_t)h, c);
         return;
+    }
     r = TRIM[(ux.trim - 1u) % NENGINES].r;
     n = TRIM[(ux.trim - 1u) % NENGINES].n;
-    for (i = 0; i < n; i++) {
-        int32_t ay = r[i].y > y0 ? r[i].y : y0, by = r[i].y + r[i].h < y0 + h ? r[i].y + r[i].h : y0 + h;
-        if ((r[i].pg & mask) && by > ay)
-            lcd_fill(r[i].x, (uint32_t)ay, r[i].w, (uint32_t)(by - ay), r[i].c);
+    cut[nc++] = y;
+    cut[nc++] = y + h;
+    for (i = 0; i < n && nc + 2 <= (int32_t)(sizeof cut / sizeof cut[0]); i++)
+        if ((r[i].pg & mask) && r[i].x < x + w && r[i].x + r[i].w > x) {
+            if (r[i].y > y && r[i].y < y + h) cut[nc++] = r[i].y;
+            if (r[i].y + r[i].h > y && r[i].y + r[i].h < y + h) cut[nc++] = r[i].y + r[i].h;
+        }
+    for (k = 1; k < nc; k++)                             /* (sorted, a few) */
+        for (j = k; j > 0 && cut[j - 1] > cut[j]; j--) { int32_t t = cut[j]; cut[j] = cut[j - 1]; cut[j - 1] = t; }
+    for (k = 0; k + 1 < nc; k++) {
+        int32_t y0 = cut[k], y1 = cut[k + 1], cx = x;
+        if (y1 <= y0) continue;
+        while (cx < x + w) {                             /* the leftmost trim rectangle of this band at or right of cx */
+            int32_t best = -1, rx0, rx1;
+            for (i = 0; i < n; i++)
+                if ((r[i].pg & mask) && r[i].y <= y0 && r[i].y + r[i].h >= y1 && r[i].x + r[i].w > cx && r[i].x < x + w &&
+                    (best < 0 || r[i].x < r[best].x))
+                    best = (int32_t)i;
+            if (best < 0)
+                break;
+            rx0 = r[best].x > cx ? r[best].x : cx;
+            rx1 = r[best].x + r[best].w < x + w ? r[best].x + r[best].w : x + w;
+            if (rx0 > cx) lcd_fill((uint32_t)cx, (uint32_t)y0, (uint32_t)(rx0 - cx), (uint32_t)(y1 - y0), c);
+            lcd_fill((uint32_t)rx0, (uint32_t)y0, (uint32_t)(rx1 - rx0), (uint32_t)(y1 - y0), r[best].c);
+            cx = rx1;
+        }
+        if (cx < x + w) lcd_fill((uint32_t)cx, (uint32_t)y0, (uint32_t)(x + w - cx), (uint32_t)(y1 - y0), c);
     }
 }

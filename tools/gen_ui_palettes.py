@@ -18,40 +18,20 @@ blends at palette_set() time (src/gfx.c, the same integer maths as mix() here):
                                 lane, fader slots, button wells, chips
   KEY  = mix(BG, TEXT, 78 %)    a keycap's fill (a mid-light cushion; its label INK, unavailable: a DIM fill)
   INK  = BG: text on a selection or THEME fill (GREY, MONO: a light fill, dark ink)
-Outside the palette: REC, a fixed red (GREY, MONO: ACCENT); the QR code's fixed black and white; the crash
-screen's fixed red. GREY is pure grayscale (R = G = B) in every colour and every derived tint.
-MONO is black and white: its tokens are not blended but set (src/gfx.c palette_set, bw() here): BG SURF
-TINT GRID black; TEXT THEME ACCENT MID SEL KEY white (a selection, a THEME or ACCENT fill, a keycap: white
-with black INK, an inversion); and one mid grey, BW_GREY, for DIM LINE RAISE LANE. That grey is the one
-exception: RAISE is the fill under white text on chips, idle cells and button wells and the track of
-empty steps, slots and gauges, and DIM marks the inactive and the unavailable; black would hide them,
-white would hide the text on them or make the inactive read as active. Only antialiased edges add greys.
-Saved settings name palettes by a tagged id (PAL_TAG + index); older firmware saved the index into
-its 20 palettes, mapped by UI_PALETTE_MIGRATE.
+Outside the palette: REC, a fixed red; the QR code's fixed black and white; the crash screen's fixed red.
+Switch Blade has one colour scheme, the four machines' palettes (OB-Z WAVE ACID DRIFT, engine order); the ten fixed
+palettes of earlier firmware (GREY GREEN AMBER ICE VIOLET ROSE PAPER HI-CON NIGHT MONO) and CUSTOM are gone. Saved settings
+name a palette by a tagged id (PAL_TAG + 10 = MACHINE is written, so earlier firmware reads it as GREY); any stored id
+loads as MACHINE.
 --report prints the WCAG contrast of every pairing. The tool fails (exit 1) on any miss.
 """
 import argparse
 import sys
 from pathlib import Path
 
-# name, bg, surf, text, theme, accent (8-bit RGB; stored as RGB565)
-PALETTES = [
-    ("GREY",   (14, 14, 14),    (36, 36, 36),    (204, 204, 204), (232, 232, 232), (255, 255, 255)),
-    ("GREEN",  (6, 18, 10),     (16, 40, 26),    (226, 244, 230), (84, 214, 120),  (255, 214, 92)),
-    ("AMBER",  (18, 14, 8),     (42, 32, 18),    (246, 236, 216), (255, 168, 40),  (96, 214, 230)),
-    ("ICE",    (8, 16, 24),     (20, 36, 52),    (228, 240, 248), (80, 184, 236),  (255, 140, 100)),
-    ("VIOLET", (16, 12, 28),    (36, 28, 60),    (240, 232, 252), (178, 136, 246), (110, 228, 168)),
-    ("ROSE",   (24, 10, 18),    (52, 22, 40),    (252, 232, 242), (244, 114, 182), (255, 214, 110)),
-    ("PAPER",  (244, 239, 228), (226, 218, 202), (34, 30, 24),    (10, 84, 70),    (172, 56, 8)),
-    ("HI-CON", (0, 0, 0),       (40, 40, 40),    (255, 255, 255), (255, 232, 0),   (0, 230, 255)),
-    # appended (saved ids are indices: append only). #50, the 0.9 look: true black, green-tinted text and lines
-    # (the derived MID / DIM / LINE are tints of TEXT), phosphor-green values, white for the one active thing
-    ("NIGHT",  (0, 0, 0),       (0, 24, 10),     (150, 230, 170), (56, 220, 100),  (255, 255, 255)),
-    # 1.0.2: black and white (the derived tokens are set, not blended: bw()); the old MONO is GREY (id 0)
-    ("MONO",   (0, 0, 0),       (0, 0, 0),       (255, 255, 255), (255, 255, 255), (255, 255, 255)),
-]
-# the four machines' palettes (MENU > COLOR > MACHINE: the palette follows the selected track's machine; engine order
-# OB-Z WAVE ACID DRIFT). Not in the menu's list and not stored by index: UI_PALETTES keeps its 10 ids. Sampled from the
+# name, bg, surf, text, theme, accent[, key] (8-bit RGB; stored as RGB565)
+# the four machines' palettes (the palette follows the selected track's machine; engine order
+# OB-Z WAVE ACID DRIFT). Sampled from the
 # machines' reference panels (assets/refs/, docs/plans/2026-10-19-switch-blade-ui.md), then held to the same contrast
 # rules as every palette (docs/plans: the sampled hexes, lifted only where a rule failed: OB-Z surf and theme, DRIFT surf
 # and theme, ACID bg / surf / accent; the report of the changes is in .superpowers/sdd/task-ui23-report.md). ACID is a light palette (the 303's silver, like PAPER: its derived tokens come out the light way)
@@ -62,16 +42,8 @@ MACHINE_PALETTES = [
     # DRIFT's keycaps are tan, as the Juno-106's buttons (the 6th colour: a keycap fill of its own, not derived)
     ("DRIFT", (11, 13, 17),    (24, 27, 34),    (228, 230, 232), (255, 96, 90),   (61, 134, 200), (224, 197, 144)),
 ]
-BW = "MONO"
-BW_GREY = (82, 82, 82)             # MONO's one mid grey (RGB565 10/20/10): DIM LINE RAISE LANE
-# the 20 palettes of the earlier firmware (index order) -> the new palette
-OLD = ["GREEN", "AMBER", "CYAN", "RED", "MONO", "VIOLET", "PINK", "ICE", "WARM", "OCEAN", "DUSK", "HI-CON",
-       "LIGHT", "PAPER", "SKY", "MINT", "LILAC", "ROSE", "SAND", "L-HICON"]
-OLD_TO_NEW = {"GREEN": "GREEN", "AMBER": "AMBER", "CYAN": "ICE", "RED": "ROSE", "MONO": "GREY", "VIOLET": "VIOLET",
-              "PINK": "ROSE", "ICE": "ICE", "WARM": "AMBER", "OCEAN": "ICE", "DUSK": "VIOLET", "HI-CON": "HI-CON",
-              "LIGHT": "PAPER", "PAPER": "PAPER", "SKY": "PAPER", "MINT": "PAPER", "LILAC": "PAPER", "ROSE": "PAPER",
-              "SAND": "PAPER", "L-HICON": "HI-CON"}
-PAL_TAG = 64                       # stored id = PAL_TAG + index; below 20: an old id
+PAL_TAG = 64                       # stored id = PAL_TAG + 10 (MACHINE's id in the earlier firmware's palette list)
+PAL_STORED_MACHINE = 10
 REC_DARK, REC_LIGHT = (255, 72, 72), (190, 24, 40)
 QR_LIGHT, QR_DARK, CRASH_BG, CRASH_INK = (255, 255, 255), (0, 0, 0), (160, 0, 0), (255, 255, 255)
 PCT = {"MID": 70, "DIM": 42, "LINE": 18, "SEL": 80, "TINT": 12, "KEY": 78}
@@ -130,8 +102,8 @@ def contrast(a, b):
 def derive(p):
     name, *cols = p
     own_key = to565(cols[5]) if len(cols) > 5 else 0
-    bg, surf, text, theme, accent = (to565(c, name == BW) for c in cols[:5])
-    mono = name == "GREY"
+    bg, surf, text, theme, accent = (to565(c) for c in cols[:5])
+    mono = False
     d = dict(bg=bg, surf=surf, text=text, theme=theme, accent=accent,
              mid=mix(bg, text, PCT["MID"], mono), dim=mix(bg, text, PCT["DIM"], mono),
              line=mix(bg, text, PCT["LINE"], mono), sel=mix(bg, theme, PCT["SEL"], mono),
@@ -141,10 +113,7 @@ def derive(p):
         d["key"] = own_key
     d["ink"] = bg
     d["light"] = luma(bg) > 128
-    d["rec"] = accent if mono or name == BW else to565(REC_LIGHT if d["light"] else REC_DARK)
-    if name == BW:                     # src/gfx.c palette_set: set, not blended
-        grey = to565(BW_GREY)
-        d.update(mid=text, sel=theme, key=text, dim=grey, line=grey, raise_=grey, lane=grey, tint=bg, grid=bg)
+    d["rec"] = to565(REC_LIGHT if d["light"] else REC_DARK)
     return name, d
 
 
@@ -168,19 +137,8 @@ def main():
     ap.add_argument("--report", action="store_true")
     a = ap.parse_args()
     fails = []
-    assert PALETTES[0][0] == "GREY" and len(OLD) == 20 and len(PALETTES) <= 63
-    rows = [derive(p) for p in PALETTES + MACHINE_PALETTES]
+    rows = [derive(p) for p in MACHINE_PALETTES]
     for name, d in rows:
-        if name == "GREY":
-            for k, v in d.items():
-                if k == "light":
-                    continue
-                if not (v >> 11 == v & 31 and ((v >> 5) & 63) == (v >> 11) << 1):
-                    fails.append(f"{name} is not grayscale: {k} = {v:#06x}")
-        if name == BW:                 # every token pure black or white, or the one grey (DIM LINE RAISE LANE)
-            for k, v in d.items():
-                if k != "light" and v not in (0x0000, 0xFFFF) and not (v == to565(BW_GREY) and k in ("dim", "line", "raise_", "lane")):
-                    fails.append(f"{name} is not black and white: {k} = {v:#06x}")
         for f, b, lim, why in CHECKS:
             c = contrast(d[f], d[b])
             if c < lim:
@@ -191,30 +149,20 @@ def main():
             print(f"{name:8s} " + " ".join(f"{contrast(d[f], d[b]):5.1f}".ljust(12) for f, b, _, _ in CHECKS))
         print("minimum  " + " ".join(f"{lim:<12.2f}" for _, _, lim, _ in CHECKS))
     if a.out:
-        names = [p[0] for p in PALETTES]
         out = ["/* generated by tools/gen_ui_palettes.py: the UI palettes (5 colours each, the rest derived) */",
                "#pragma once", "#include <stdint.h>", "",
-               "/* ui_pal_t {name, bg, surf, text, theme, accent[, key]} (src/gfx.c) */",
-               "static const ui_pal_t UI_PALETTES[] = {"]
-        for p in PALETTES:
-            v = [to565(c, p[0] == BW) for c in p[1:]]
-            out.append(f'    {{"{p[0]}", ' + ", ".join(f"0x{x:04x}" for x in v) + "},")
-        out += ["};", f"#define UI_NPALETTES {len(PALETTES)}u", "#define UI_GREY_INDEX 0u",
-                "", "/* the machines' palettes, in engine order (src/gfx.c palette_set: id UI_NPALETTES + 1 + machine) */",
-                "static const ui_pal_t UI_MACHINE_PALS[] = {"]
+               "/* ui_pal_t {name, bg, surf, text, theme, accent[, key]} (src/gfx.c): the machines' palettes, in engine order",
+               " * (src/gfx.c palette_set: id = machine) */",
+               "static const ui_pal_t UI_MACHINE_PALS[] = {"]
         for p in MACHINE_PALETTES:
             out.append(f'    {{"{p[0]}", ' + ", ".join(f"0x{to565(c):04x}" for c in p[1:]) + "},")   # (a 6th colour: the key)
         out += ["};", f"#define UI_NMACHINE {len(MACHINE_PALETTES)}u", "",
-                f"#define UI_BW_INDEX {names.index(BW)}u          /* MONO: black and white (src/gfx.c palette_set) */",
-                f"#define UI_BW_GREY 0x{to565(BW_GREY):04x}u          /* MONO's one grey: DIM LINE RAISE LANE */",
-                f"#define UI_PAL_TAG {PAL_TAG}u          /* stored id = UI_PAL_TAG + index; below 20: an old id */"]
+                f"#define UI_PAL_TAG {PAL_TAG}u          /* stored id = UI_PAL_TAG + index of the earlier firmware's list; below 20: an older id */",
+                f"#define UI_PAL_STORED_MACHINE {PAL_STORED_MACHINE}u   /* MACHINE's id in that list: what is written */"]
         out += [f"#define UI_{k}_PCT {v}" for k, v in PCT.items()] + [f"#define UI_RAISE_PCT {RAISE_PCT}   /* SURF -> TEXT */"]
         out += [f"#define UI_REC_DARK 0x{to565(REC_DARK):04x}u", f"#define UI_REC_LIGHT 0x{to565(REC_LIGHT):04x}u",
                 f"#define UI_QR_LIGHT 0x{to565(QR_LIGHT):04x}u", f"#define UI_QR_DARK 0x{to565(QR_DARK):04x}u",
-                f"#define UI_CRASH_BG 0x{to565(CRASH_BG):04x}u", f"#define UI_CRASH_INK 0x{to565(CRASH_INK):04x}u", "",
-                "/* the 20 palettes of earlier firmware: " + " ".join(OLD) + " */",
-                "static const uint8_t UI_PALETTE_MIGRATE[20] = {" +
-                ", ".join(str(names.index(OLD_TO_NEW[n])) for n in OLD) + "};", ""]
+                f"#define UI_CRASH_BG 0x{to565(CRASH_BG):04x}u", f"#define UI_CRASH_INK 0x{to565(CRASH_INK):04x}u", ""]
         Path(a.out).write_text("\n".join(out))
     for f in fails:
         print("FAIL", f)

@@ -1,24 +1,22 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
 /* Renders of the firmware UI (firmware/src/ui*.c on tests/ui_test.c's stubs), the layout lint, the GREY and MONO
- * checks and the host draw cost.
+ * layout lint and the host draw cost. Switch Blade has one colour scheme, the four machines' palettes (OB-Z WAVE ACID DRIFT):
+ * every screen is drawn with each forced, then in MACHINE mode on each machine's track.
  *   ui_render OUTDIR [SLOTDIR]   (run by tests/run_tests.sh; tests/ui_render.py makes the PNGs;
- *                                 SLOTDIR: filmstrips of the rolling digits, GREY MONO and GREEN)
- * Layout lint, over every screen below in every palette, every page of every engine and every value of every
+ *                                 SLOTDIR: filmstrips of the rolling digits, one per machine)
+ * Layout lint, over every screen below in every machine palette, every page of every engine and every value of every
  * column: the ink box of every text and icon drawn (gfx.c GFX_HOOK_TEXT) as it lands on the screen. A finding:
  * a box off the screen, cut by its canvas, partly covered by a later strip or fill, overlapping another box, or
  * ellipsised when it is not free text (labels and values must fit; names and messages may be ellipsised), or
  * spilling out of its cell: touching a rounded rectangle of its canvas (gfx.c cv_rrect: a cell, card, row, button,
  * GFX_HOOK_CELL) without lying inside it, though still on the screen (the FX map's REVERSE), or drawn in the
- * colour it is drawn on (gfx.c GFX_HOOK_INK: a text, icon or keycap label that cannot be seen; MONO's tokens share
- * values, DIM and RAISE its one grey).
- * GREY: every pixel of every screen is RGB565 gray (R = B, G = 2 R). MONO (black and white, blended per channel):
- * every pixel is neutral (R = B, G within 2 of 2 R).
+ * colour it is drawn on (gfx.c GFX_HOOK_INK: a text, icon or keycap label that cannot be seen).
  * MENU > STYLE LINE: every screen again in every palette, the same lint; a text or icon on a divider
  * (ui_draw.c lcd_rule, GFX_HOOK_RULE: the rules between the strips; cv_rule's are cells) is a finding too.
- * Rolling digits: every frame of a header BPM roll and a card roll, up and down, in every palette (lint, GREY, MONO).
- * Output: OUTDIR/ppm/<PALETTE>_<screen>.ppm for GREY MONO GREEN PAPER NIGHT, OUTDIR/report.txt (findings, ellipsised
- * free text, the draw cost), OUTDIR/text_audit.tsv (GREY, per screen: texts, icons and keycaps with their ink-box px,
+ * Rolling digits: every frame of a header BPM roll and a card roll, up and down, in every machine palette (lint).
+ * Output: OUTDIR/ppm/<MACHINE>_<screen>.ppm, OUTDIR/report.txt (findings, ellipsised
+ * free text, the draw cost), OUTDIR/text_audit.tsv (OB-Z, per screen: texts, icons and keycaps with their ink-box px,
  * the ellipsised ones, the texts closer than 2 px to their cell's edge, the words).
  * Alignment (gfx.c GFX_HOOK_ALIGN): every place where a text, icon or keycap is meant to sit centred (in a cell, a
  * chip, a button, a row, a column, a knob, a strip) or on a line shared with its neighbours (an icon on its label's
@@ -28,7 +26,7 @@
  * it, on every screen above in FLAT and LINE and every palette, the page / value sweep, and align_sweeps (every value
  * each place can show). 0.5 px is the odd pixel left over (it goes left / up); 1 px or more is a finding.
  * OUTDIR/align.txt: per place, how often measured, the worst offsets and where.
- * Exit 1 on a finding, a GREY pixel off gray, a MONO one off neutral, or an alignment 1 px or more off. */
+ * Exit 1 on a finding or an alignment 1 px or more off. */
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
@@ -543,27 +541,10 @@ static void font_scene(const char *mode, const char *name)
                 b->s, (b->flags & 1u) ? "\t(ellipsised)" : "");
     }
 }
-/* GREY: every pixel RGB565 gray (R = B, G = 2 R); MONO (black and white, its edges blended per channel): neutral
- * (R = B, G within 2 of 2 R, the 5-6-5 rounding). Other palettes: nothing */
-static uint32_t mono_bad;
-static void mono_check(void)
-{
-    uint32_t i, bw = settings.palette == UI_BW_INDEX;
-    if (settings.palette != UI_GREY_INDEX && !bw) return;
-    for (i = 0; i < 240u * 240u; i++) {
-        uint16_t c = swap16(host_screen[i]);
-        int32_t d = (int32_t)((c >> 5) & 63u) - (int32_t)(c >> 11) * 2;
-        if ((c >> 11) != (c & 31u) || (bw ? d < -2 || d > 2 : d != 0)) {
-            if (!mono_bad) fprintf(rep, "%s %s: pixel %u,%u = %04x off %s\n", bw ? "MONO" : "GREY", cur_name, i % 240u, i / 240u, c,
-                                   bw ? "neutral" : "gray");
-            mono_bad++;
-        }
-    }
-}
 static void hk_ink(uint16_t ink, uint16_t bg)
 {
     if (ink != bg) return;
-    if (nink < 20u) fprintf(rep, "%s: ink %04x drawn on its own colour (%s)\n", cur_name, ink, UI_PALETTES[settings.palette % NPALETTES].name);
+    if (nink < 20u) fprintf(rep, "%s: ink %04x drawn on its own colour (%s)\n", cur_name, ink, UI_MACHINE_PALS[(ux.trim - 1u) % UI_NMACHINE].name);
     nink++;
 }
 static void write_ppm(const char *dir, const char *pal, const char *name)
@@ -584,9 +565,9 @@ static void write_ppm(const char *dir, const char *pal, const char *name)
 }
 
 /* ------------------------------------------------------------------ the screens --- */
-static void pal(uint32_t p) { settings.palette = p; palette_set(p); }
-/* machine e's palette and trim forced (a fixed palette pinned in the settings, so the UI's palette_follow leaves it alone) */
-static void palm(uint32_t e) { settings.palette = UI_GREY_INDEX; palette_set(PAL_MACHINE_ID(e)); }
+/* machine e's palette and trim forced (trim_machine is not updated, so the UI's palette_follow leaves it alone) */
+static void pal(uint32_t p) { settings.palette = UI_PAL_MACHINE; palette_set(PAL_MACHINE_ID(p)); }
+static void palm(uint32_t e) { pal(e); }
 /* MACHINE mode as the menu sets it: the palette is the selected track's machine's (palette_apply) */
 static uint32_t mach_bad;
 static void machine_mode(void)
@@ -596,8 +577,8 @@ static void machine_mode(void)
     palette_apply();
     if (ux.trim != 1u + TSEL->eng_req % NENGINES || T_BG != UI_MACHINE_PALS[TSEL->eng_req % NENGINES].bg) mach_bad++;
 }
-static int32_t sweep_machine = -1;                /* the value sweeps: a machine's palette, or (-1) GREY */
-static void pal_sweep(void) { if (sweep_machine >= 0) palm((uint32_t)sweep_machine); else pal(UI_GREY_INDEX); }
+static int32_t sweep_machine = -1;                /* the value sweeps: a machine's palette, or (-1) OB-Z's */
+static void pal_sweep(void) { pal(sweep_machine >= 0 ? (uint32_t)sweep_machine : 0u); }
 static void state(void)                          /* a playing song with steps on every track */
 {
     uint32_t i;
@@ -1681,7 +1662,7 @@ static void roll_frames(const char *dir)
         state(); song.playing = 0; pal(p);
         song.g[G_BPM] = 129; song.g[G_TUNE] = 19;
         go_title("CLOCK"); page_over = &ROLL_PG;
-        snprintf(name, sizeof name, "%s/roll", UI_PALETTES[p].name);
+        snprintf(name, sizeof name, "%s/roll", UI_MACHINE_PALS[p].name);
         cur_name = name;
         draw(-1);
         for (k = 0; k < 8u; k++) { ui.hot_t = 0; ui.bpm_t = 0; ui_draw(); }   /* settled, nothing hot */
@@ -1693,7 +1674,6 @@ static void roll_frames(const char *dir)
                 if (k == 1u) roll_turns(row ? -1 : 1);
                 else ui_draw();
                 lint();
-                mono_check();
                 roll_film_put(bimg, biw, row, k, HX, 0, HW, HH);
                 roll_film_put(cimg, ciw, row, k, CARD_X(3), Y_LABEL, COL_W, COL_H);
             }
@@ -1704,9 +1684,9 @@ static void roll_frames(const char *dir)
             }
             for (k = 0; k < 8u; k++) ui_draw();
         }
-        if (dir && (p == UI_GREY_INDEX || p == UI_BW_INDEX || !strcmp(UI_PALETTES[p].name, "GREEN"))) {
-            roll_film_save(dir, UI_PALETTES[p].name, "bpm_roll", bimg, biw, bih);
-            roll_film_save(dir, UI_PALETTES[p].name, "card_roll", cimg, ciw, cih);
+        if (dir) {
+            roll_film_save(dir, UI_MACHINE_PALS[p].name, "bpm_roll", bimg, biw, bih);
+            roll_film_save(dir, UI_MACHINE_PALS[p].name, "card_roll", cimg, ciw, cih);
         }
     }
     page_over = 0;
@@ -1758,7 +1738,7 @@ static void align_sweeps(void)
     int32_t v;
     if (nul) rep = nul;                              /* (not lint scenes: their draws pile up) */
     for (st = ST_FLAT; st <= ST_LINE; st++) {
-        state(); pal(UI_GREY_INDEX);
+        state(); pal(0);
         ui_style = (uint8_t)st; style_apply();
         cur_name = st ? "sweep LINE: cushions" : "sweep FLAT: cushions";
         for (k = 0; k < NTRK; k++)
@@ -1872,7 +1852,7 @@ static void align_sweeps(void)
                 draw_countin();
             }
         cin_total = cin_left = 0;
-        state(); pal(UI_GREY_INDEX);
+        state(); pal(0);
         cur_name = st ? "sweep LINE: NAME" : "sweep FLAT: NAME";
         song.playing = 0; go_page(GR_USER); name_open(NK_USER_SAVE, 6);
         for (k = 0; k < 2u; k++) {                       /* ABC, 123: every key cycling, every letter typed next */
@@ -1899,7 +1879,7 @@ static void align_sweeps(void)
             cv_begin(240, H_GRAPH, T_SURF);
             graph_roll(TSEL, T_THEME);
         }
-        state(); pal(UI_GREY_INDEX);
+        state(); pal(0);
         cur_name = st ? "sweep LINE: mixer" : "sweep FLAT: mixer";
         go_page(GR_TRK);
         for (v = 0; v < 256; v++) {                    /* (then with LARGE: the strip) */
@@ -1966,7 +1946,6 @@ int main(int argc, char **argv)
     const char *out = argc > 1 ? argv[1] : "build/ui_new";
     char path[600];
     uint32_t p, s;
-    static const char *const SHOW[] = {"GREY", "MONO", "GREEN", "PAPER", "NIGHT"};   /* (NIGHT: #50, to review) */
     snprintf(path, sizeof path, "%s/report.txt", out);
     rep = fopen(path, "w");
     if (!rep) { fprintf(stderr, "cannot write %s\n", path); return 1; }
@@ -2038,23 +2017,7 @@ int main(int argc, char **argv)
         fprintf(rep, "(self-test: %u findings above are expected)\n\n", nfind);
         nfind = 0;
     }
-    for (p = 0; p < NPALETTES; p++)
-        for (s = 0; s < S_COUNT; s++) {
-            char name[64];
-            uint32_t k;
-            snprintf(name, sizeof name, "%s/%s", UI_PALETTES[p].name, S_NAME[s]);
-            cur_name = name;
-            setup((int)s);
-            pal(p);
-            if (p == UI_GREY_INDEX) aud = audf;
-            draw((int)s);
-            lint();
-            if (p == UI_GREY_INDEX) { audit_scene(S_NAME[s]); font_scene("FLAT", S_NAME[s]); aud = 0; }
-            mono_check();
-            for (k = 0; k < sizeof SHOW / sizeof SHOW[0]; k++)
-                if (!strcmp(UI_PALETTES[p].name, SHOW[k])) write_ppm(out, SHOW[k], S_NAME[s]);
-        }
-    {   /* the machines' palettes and trims (MENU > COLOR > MACHINE): every screen with each machine's palette forced; then in
+    {   /* the machines' palettes and trims (the one colour scheme): every screen with each machine's palette forced; then in
          * MACHINE mode on each machine's track (every screen with the selected track set to the machine); then in MACHINE mode as
          * each screen sets its own track. HOME and EDIT of each machine: OUTDIR/ppm/<MACHINE>_<screen>.ppm. 0 lint findings,
          * and no trim under a text, icon or card (hk_trim) */
@@ -2069,8 +2032,10 @@ int main(int argc, char **argv)
                 cur_name = name;
                 setup((int)s);
                 palm(m);
+                if (m == 0u) aud = audf;                  /* (the text and font audits: OB-Z's, the layout is the same in every palette) */
                 draw((int)s);
                 lint();
+                if (m == 0u) { audit_scene(S_NAME[s]); font_scene("FLAT", S_NAME[s]); aud = 0; }
                 nm++;
             }
         for (m = 0; m < UI_NMACHINE; m++)
@@ -2123,16 +2088,15 @@ int main(int argc, char **argv)
         if (mach_bad) { fprintf(stderr, "ui_render: MACHINE mode set the wrong palette %u times\n", mach_bad); nfind++; }
         (void)nshot;
     }
-    {   /* STYLE LINE (gfx.c ST_*): every screen in every palette, linted (GREY: gray, MONO: neutral); GREY MONO NIGHT
-         * PAPER as OUTDIR/ppm/<STYLE>_<PALETTE>_<screen>.ppm (ui_render.py: sheet_<STYLE>_<PALETTE>.png) */
-        static const char *const ST_N[2] = {"FLAT", "LINE"}, *const ST_PAL[] = {"GREY", "MONO", "NIGHT", "PAPER"};
-        uint32_t st, k, n0 = nfind, nruled = 0;
+    {   /* STYLE LINE (gfx.c ST_*): every screen in every machine's palette, linted; as OUTDIR/ppm/<STYLE>_<MACHINE>_<screen>.ppm
+         * (ui_render.py: sheet_<STYLE>_<MACHINE>.png) */
+        static const char *const ST_N[2] = {"FLAT", "LINE"};
+        uint32_t st, n0 = nfind, nruled = 0;
         for (st = ST_LINE; st <= ST_LINE; st++)
             for (p = 0; p < NPALETTES; p++) {
-                for (k = 0; k < sizeof ST_PAL / sizeof ST_PAL[0] && strcmp(UI_PALETTES[p].name, ST_PAL[k]); k++) ;
                 for (s = 0; s < S_COUNT; s++) {
                     char name[64], tag[24];
-                    snprintf(tag, sizeof tag, "%s_%s", ST_N[st], UI_PALETTES[p].name);
+                    snprintf(tag, sizeof tag, "%s_%s", ST_N[st], UI_MACHINE_PALS[p].name);
                     snprintf(name, sizeof name, "%s/%s", tag, S_NAME[s]);
                     cur_name = name;
                     setup((int)s);
@@ -2142,17 +2106,16 @@ int main(int argc, char **argv)
                     if (ux.style != st) { fprintf(stderr, "ui_render: %s drawn in style %u\n", name, ux.style); return 1; }
                     nruled += nrules != 0u;
                     lint();
-                    mono_check();
-                    if (k < sizeof ST_PAL / sizeof ST_PAL[0]) write_ppm(out, tag, S_NAME[s]);
+                        write_ppm(out, tag, S_NAME[s]);
                 }
             }
         ui_style = ST_FLAT; style_apply();
         if (nruled < 100u) { fprintf(stderr, "ui_render: dividers on %u STYLE screens only\n", nruled); return 1; }
-        fprintf(rep, "STYLE LINE (every palette): %u lint findings\n", nfind - n0);
+        fprintf(rep, "STYLE LINE (every machine palette): %u lint findings\n", nfind - n0);
     }
-    {   /* MENU > LARGE (ui.c large_kind): every screen in every palette in FLAT and LINE, linted (GREY: gray, MONO:
-         * neutral); GREY MONO in FLAT as OUTDIR/ppm/LARGE_<PALETTE>_<screen>.ppm (ui_render.py: sheet_LARGE_<PALETTE>.png),
-         * LINE GREY as LARGE-LINE_GREY; the tall cards' value faces counted (lg_hook) */
+    {   /* MENU > LARGE (ui.c large_kind): every screen in every machine's palette in FLAT and LINE, linted; OB-Z's as
+         * OUTDIR/ppm/LARGE_OB-Z_<screen>.ppm (ui_render.py: sheet_LARGE_OB-Z.png) and LARGE-LINE_OB-Z; the tall cards' value faces
+         * counted (lg_hook) */
         static const char *const ST_N[2] = {"LARGE", "LARGE-LINE"};
         uint32_t st, n0 = nfind, ntall = 0;
         large_on = 1;
@@ -2160,7 +2123,7 @@ int main(int argc, char **argv)
             for (p = 0; p < NPALETTES; p++)
                 for (s = 0; s < S_COUNT; s++) {
                     char name[64], tag[24];
-                    snprintf(tag, sizeof tag, "%s_%s", ST_N[st], UI_PALETTES[p].name);
+                    snprintf(tag, sizeof tag, "%s_%s", ST_N[st], UI_MACHINE_PALS[p].name);
                     snprintf(name, sizeof name, "%s/%s", tag, S_NAME[s]);
                     cur_name = name;
                     setup((int)s);
@@ -2170,16 +2133,15 @@ int main(int argc, char **argv)
                     draw((int)s);
                     ntall += !ui.menu && !ui.confirm && !name_on() && large_kind() == LK_TALL;
                     lint();
-                    if (!st && p == UI_GREY_INDEX) font_scene("LARGE", S_NAME[s]);
-                    mono_check();
-                    if ((p == UI_GREY_INDEX || (!st && p == UI_BW_INDEX)))
+                    if (!st && p == 0u) font_scene("LARGE", S_NAME[s]);
+                        if (p == 0u)
                         write_ppm(out, tag, S_NAME[s]);
                 }
         ui_style = ST_FLAT; style_apply();
         sweep_columns();                                /* every value of every column, tall */
         large_on = 0;
         if (ntall < 100u) { fprintf(stderr, "ui_render: LARGE drew %u screens with tall cards only\n", ntall); return 1; }
-        fprintf(rep, "MENU > LARGE (FLAT and LINE, every palette, the page / value sweep): %u lint findings; %u screens with tall"
+        fprintf(rep, "MENU > LARGE (FLAT and LINE, every machine palette, the page / value sweep): %u lint findings; %u screens with tall"
                 " cards\n", nfind - n0, ntall);
         fprintf(rep, "  tall card values: %llu in L, %llu in M (a glyph not in L: \"%s\"), %llu in M (L too wide), %llu in S\n",
                 (unsigned long long)lg_n[0], (unsigned long long)lg_n[1], lg_miss, (unsigned long long)lg_n[2],
@@ -2288,17 +2250,17 @@ int main(int argc, char **argv)
         for (i = 0; i < cs_n; i++) fprintf(rep, " '%s'", cs_seen[i]);
         fprintf(rep, "\n");
     }
-    fprintf(rep, "\n%u lint findings, %u inks on their own colour, %u ellipsised free texts, %u GREY / MONO pixels off gray / "
-            "neutral; %u column values swept; %u cards linted with MOTION's icon\n", nfind, nink, nfree, mono_bad,
+    fprintf(rep, "\n%u lint findings, %u inks on their own colour, %u ellipsised free texts; "
+            "%u column values swept; %u cards linted with MOTION's icon\n", nfind, nink, nfree,
             nsweep, nmotion);
     if (!nmotion) { fprintf(stderr, "ui_render: the MOTION sweep marked no card\n"); nfind++; }
     if (!nsong_txt) { fprintf(stderr, "ui_render: SONG's bands checked no text\n"); nfind++; }
     fclose(rep);
     printf("ui_render: %u screens x %u palettes + the page/value sweep; %u lint findings, %u ellipsised free texts (%u distinct), "
-           "%u inks on their own colour, %u GREY / MONO pixels off gray / neutral; report %s\n",
+           "%u inks on their own colour; report %s\n",
            (unsigned)S_COUNT, (unsigned)NPALETTES, nfind, nfree, nfree_seen, nink,
-           mono_bad, path);
+           path);
     printf("ui_render: alignment: %u measurements of %u places, %u off by 1 px or more%s\n", al_count, al_nst - 1u, al_fail,
            al_fail ? " (see align.txt)" : "");
-    return nfind || nink || mono_bad || al_fail ? 1 : 0;
+    return nfind || nink || al_fail ? 1 : 0;
 }

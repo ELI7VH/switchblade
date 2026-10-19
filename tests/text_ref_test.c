@@ -43,11 +43,6 @@ static void ref_ramp(uint16_t fg, uint16_t bg)
     const uint8_t *cv = ux.light ? CURVE_LIGHT : CURVE_DARK;
     for (uint32_t a = 0; a < 16u; a++) {
         uint32_t out = 0;
-        if (ux.mono) {
-            int32_t x = bg >> 11, y = fg >> 11;
-            rv[a] = ux_gray((uint32_t)(x + (((y - x) * (int32_t)cv[a] + 128) >> 8)));
-            continue;
-        }
         for (uint32_t k = 0; k < 3u; k++) {
             int32_t x = (bg >> SH[k]) & MK[k], y = (fg >> SH[k]) & MK[k];
             out |= (uint32_t)(x + (((y - x) * (int32_t)cv[a] + 128) >> 8)) << SH[k];

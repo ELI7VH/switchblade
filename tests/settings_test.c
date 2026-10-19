@@ -33,58 +33,53 @@ int main(void)
     original.favorites.user = 1u << 31; original.favorites.filter = 1;
     p = original;
     assert(settings_import(&p, sizeof p) == 1); settings_init();
-    assert(settings.palette == UI_GREY_INDEX && fx_lowcut && settings.zoom && panel.enc[0] == 3);
-    assert(p.palette == palette_to_stored(UI_GREY_INDEX));        /* migrated in place */
-    {   /* every old id maps to a palette; tagged ids round trip; anything else is GREY */
-        persist_t q = original;
-        for (uint32_t i = 0; i < 20u; i++) assert(palette_from_stored(i) < NPALETTES);
-        assert(palette_from_stored(13) == 6u && palette_from_stored(11) == 7u && palette_from_stored(19) == 7u);
-        for (uint32_t i = 0; i < NPALETTES; i++) assert(palette_from_stored(palette_to_stored(i)) == i);
-        assert(palette_from_stored(40) == UI_GREY_INDEX && !palette_stored_ok(40) && palette_stored_ok(3));
-        /* 1.0.2: the old MONO keeps its id as GREY (a saved MONO looks the same); the new black and white MONO is
-         * appended, a new id */
-        assert(palette_from_stored(UI_PAL_TAG + 0u) == UI_GREY_INDEX && !strcmp(UI_PALETTES[UI_GREY_INDEX].name, "GREY"));
-        assert(UI_BW_INDEX == NPALETTES - 1u && !strcmp(UI_PALETTES[UI_BW_INDEX].name, "MONO") &&
-               palette_from_stored(UI_PAL_TAG + UI_BW_INDEX) == UI_BW_INDEX && palette_stored_ok(UI_PAL_TAG + UI_BW_INDEX));
-        q.palette = palette_to_stored(5);
-        assert(settings_import(&q, sizeof q) == 1 && settings.palette == 5u);
-        settings.magic = SETTINGS_MAGIC_OLD; settings.palette = 13; settings_init();   /* retained SET3 */
-        assert(settings.magic == SETTINGS_MAGIC && settings.palette == 6u);
-        p = original; assert(settings_import(&p, sizeof p) == 1); settings_init();
-    }
-    {   /* Switch Blade: MACHINE is the default of fresh settings and has a stored id of its own; old ids load as before */
+    assert(settings.palette == UI_PAL_MACHINE && fx_lowcut && settings.zoom && panel.enc[0] == 3);
+    assert(p.palette == palette_to_stored(UI_PAL_MACHINE));       /* migrated in place: an old id 4 is MACHINE now */
+    {   /* Switch Blade: MACHINE is the one colour scheme. Every stored id loads as MACHINE (an older firmware's index below 20,
+         * a fixed palette's tagged id, CUSTOM's, MACHINE's own); MACHINE is written as the id older firmware reads as GREY */
         persist_t q = original;
         uint32_t i;
+        assert(palette_to_stored(UI_PAL_MACHINE) == UI_PAL_TAG + UI_PAL_STORED_MACHINE && UI_PAL_STORED_MACHINE == 10u);
+        assert(palette_stored_ok(UI_PAL_TAG + UI_PAL_STORED_MACHINE) && !palette_stored_ok(UI_PAL_TAG + UI_PAL_STORED_MACHINE + 1u) &&
+               !palette_stored_ok(40) && palette_stored_ok(3));
+        for (i = 0; i < 20u; i++) assert(palette_from_stored(i) == UI_PAL_MACHINE);
+        for (i = 0; i <= UI_PAL_STORED_MACHINE; i++) assert(palette_from_stored(UI_PAL_TAG + i) == UI_PAL_MACHINE);
+        assert(palette_from_stored(40) == UI_PAL_MACHINE && palette_from_stored(0xFFFFFFFFu) == UI_PAL_MACHINE);
         settings.magic = 0; settings.palette = 5; settings_init();             /* fresh: no valid record */
         assert(settings.palette == UI_PAL_MACHINE && trim_machine == 0u);       /* (palette_apply: the selected track's machine) */
-        assert(palette_to_stored(UI_PAL_MACHINE) == UI_PAL_TAG + NPALETTES && palette_stored_ok(UI_PAL_TAG + NPALETTES));
-        assert(palette_from_stored(UI_PAL_TAG + NPALETTES) == UI_PAL_MACHINE);
-        assert(!palette_stored_ok(UI_PAL_TAG + NPALETTES + 1u) && palette_from_stored(UI_PAL_TAG + NPALETTES + 1u) == UI_GREY_INDEX);
-        assert(UI_PAL_MACHINE != NPALETTES - 1u && UI_NMACHINE == NENGINES);   /* (CUSTOM is NPALETTES in palette_set; the menu's value is separate) */
+        assert(UI_NMACHINE == NENGINES && NPALETTES == UI_NMACHINE);
         for (i = 0; i < NENGINES; i++) {                                         /* the palette in use follows the machine */
             sel_stub.eng_req = (uint8_t)i;
             settings.palette = UI_PAL_MACHINE;
             palette_apply();
             assert(ux.trim == 1u + i && T_BG == UI_MACHINE_PALS[i].bg && T_THEME == UI_MACHINE_PALS[i].theme && trim_machine == i);
-            settings.palette = 3; palette_apply();                               /* a fixed palette: no trim, the same colours */
-            assert(!ux.trim && T_BG == UI_PALETTES[3].bg);
         }
         sel_stub.eng_req = 0;
         settings.palette = UI_PAL_MACHINE;                                       /* MACHINE saved and restored */
         settings_export(&p);
-        assert(p.palette == UI_PAL_TAG + NPALETTES);
-        settings.palette = 5;
-        assert(settings_import(&p, sizeof p) == 1 && settings.palette == UI_PAL_MACHINE && p.palette == UI_PAL_TAG + NPALETTES);
-        settings_init();
-        assert(settings.palette == UI_PAL_MACHINE);                              /* (a retained record: the choice stays) */
-        for (i = 0; i < NPALETTES; i++) {                                        /* every earlier choice still loads as it was */
-            q.palette = palette_to_stored(i);
-            assert(settings_import(&q, sizeof q) == 1 && settings.palette == i && q.palette == UI_PAL_TAG + i);
-            settings_init(); assert(settings.palette == i);
-        }
-        for (i = 0; i < 20u; i++) {                                              /* ... and the earlier firmware's ids */
+        assert(p.palette == UI_PAL_TAG + UI_PAL_STORED_MACHINE);
+        for (i = 0; i < 20u; i++) {                                              /* an older firmware's ids */
             q.palette = i;
-            assert(settings_import(&q, sizeof q) == 1 && settings.palette == UI_PALETTE_MIGRATE[i]);
+            assert(settings_import(&q, sizeof q) == 1 && settings.palette == UI_PAL_MACHINE && q.palette == UI_PAL_TAG + 10u);
+            settings_init(); assert(settings.palette == UI_PAL_MACHINE);
+        }
+        for (i = 0; i <= UI_PAL_STORED_MACHINE; i++) {                           /* ... a fixed palette's, MACHINE's, ... */
+            q.palette = UI_PAL_TAG + i;
+            assert(settings_import(&q, sizeof q) == 1 && settings.palette == UI_PAL_MACHINE && q.palette == UI_PAL_TAG + 10u);
+            settings_init(); assert(settings.palette == UI_PAL_MACHINE && T_BG == UI_MACHINE_PALS[0].bg && ux.trim == 1u);
+        }
+        settings.magic = SETTINGS_MAGIC_OLD; settings.palette = 13; settings_init();   /* retained SET3 */
+        assert(settings.magic == SETTINGS_MAGIC && settings.palette == UI_PAL_MACHINE);
+        settings.palette = 77; settings_init();                                  /* a stray value in RAM */
+        assert(settings.palette == UI_PAL_MACHINE);
+        {   /* CUSTOM's bytes (favorites.factory[15][0..9, 12]) are kept as saved, nobody reads them */
+            q = original;
+            q.favorites.factory[15][0] = 0x41; q.favorites.factory[15][1] = 0x08; q.favorites.factory[15][12] = 3;
+            assert(settings_import(&q, sizeof q) == 1 && settings.palette == UI_PAL_MACHINE);
+            settings_init();
+            assert(settings.palette == UI_PAL_MACHINE && ux.trim == 1u);
+            settings_export(&q);
+            assert(q.favorites.factory[15][0] == 0x41 && q.favorites.factory[15][12] == 3 && q.palette == UI_PAL_TAG + 10u);
         }
         p = original; assert(settings_import(&p, sizeof p) == 1); settings_init();
     }

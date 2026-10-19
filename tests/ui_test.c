@@ -216,8 +216,8 @@ static void ui_power_on(void)
     ui.home = 1;
     ui.force = 1;
     panel = PANEL_DEFAULT;
-    settings.palette = UI_GREY_INDEX;
-    palette_set(UI_GREY_INDEX);
+    settings.palette = UI_PAL_MACHINE;
+    palette_apply();
     transport_req = 0;
     panic_req = 0;
     mi_r = mi_w = midi_in_overflow = 0;
@@ -1224,8 +1224,8 @@ static int test_categories(void)
     return bad;
 }
 
-/* Switch Blade, MACHINE mode (MENU > COLOR > MACHINE, the default): the palette follows the selected track's machine, with its
- * trim; a fixed palette and CUSTOM pin the look and have no trim */
+/* Switch Blade's one colour scheme: the palette follows the selected track's machine, with its trim (the fixed palettes, CUSTOM
+ * and MENU > COLOR are gone) */
 static int test_machine_palette(void)
 {
     int bad = 0, ok = 1;
@@ -1234,9 +1234,9 @@ static int test_machine_palette(void)
     ui_power_on();
     settings.magic = 0;                                  /* fresh settings (settings_init's defaults) */
     settings_init();
-    bad += check("fresh settings default to MACHINE (COLOR value 0, named MACHINE)",
+    bad += check("fresh settings are MACHINE, the one palette (the editor's list: MACHINE alone)",
                  settings.palette == UI_PAL_MACHINE && palette_cur() == 0u && str_eq(palette_name(0), "MACHINE") &&
-                 str_eq(palette_name(1), "GREY") && palette_n() == 1u + NPALETTES);
+                 palette_n() == 1u);
     for (e = 0; e < NENGINES; e++)                       /* the machines' palettes differ, and carry the machine's name */
         for (t = 0; t < e; t++)
             ok &= UI_MACHINE_PALS[e].bg != UI_MACHINE_PALS[t].bg || UI_MACHINE_PALS[e].theme != UI_MACHINE_PALS[t].theme;
@@ -1276,40 +1276,19 @@ static int test_machine_palette(void)
         bad += check("MACHINE mode: the change redraws the whole screen in the new palette (no OB-Z background left)",
                      ok && !old_bg && ux.light && ux.trim == 1u + ENGI_ACID);
     }
-    /* a fixed palette pins the look: no follow, no trim */
-    palette_choose(1u + 3u);                             /* ICE */
-    for (t = 0, ok = 1; t < NTRK; t++) {
-        song.sel = t;
-        ui.force = 0;
-        ui_draw();
-        ok &= settings.palette == 3u && T_BG == UI_PALETTES[3].bg && !ux.trim;
-    }
-    bad += check("a fixed palette pins the colours across tracks and machines: no follow, no trim", ok);
-    palette_choose(0);                                   /* MACHINE again */
-    song.sel = 2;
-    ui_draw();
-    bad += check("COLOR > MACHINE after a fixed palette: the selected track's palette comes back", settings.palette == UI_PAL_MACHINE &&
-                 ux.trim == 1u + TSEL->eng_req % NENGINES);
-    {   /* CUSTOM: a stored palette is the value after the fixed ones, pins the look, and MACHINE comes back after it */
-        uint16_t c[5] = {0x0841, 0xCE59, 0xEF5D, 0xFFDF, 0xFD20};
-        cpal_store(c);
-        bad += check("CUSTOM stays the value after the fixed palettes (NPALETTES + 1) once one is stored",
-                     palette_n() == NPALETTES + 2u && COLOR_CUSTOM == NPALETTES + 1u && str_eq(palette_name(COLOR_CUSTOM), "CUSTOM"));
-        palette_choose(COLOR_CUSTOM);
+    {   /* a stored fixed palette or CUSTOM (an earlier firmware's settings) is MACHINE: the palette follows the track */
         for (t = 0, ok = 1; t < NTRK; t++) {
+            persist_t q;
+            settings_export(&q);
+            q.palette = palette_to_stored(0) - 10u + (t % 2u ? 3u : 0u);   /* the tagged id of GREY / ICE of the earlier list */
+            settings_import(&q, sizeof q);
             song.sel = t;
             ui.force = 0;
             ui_draw();
-            ok &= cpal_on() && palette_cur() == COLOR_CUSTOM && T_BG == c[0] && !ux.trim;
+            ok &= settings.palette == UI_PAL_MACHINE && T_BG == UI_MACHINE_PALS[TSEL->eng_req % NENGINES].bg &&
+                  ux.trim == 1u + TSEL->eng_req % NENGINES;
         }
-        bad += check("CUSTOM pins the look across tracks (no follow, no trim)", ok);
-        palette_choose(0);
-        song.sel = 1;
-        ui_draw();
-        bad += check("choosing MACHINE leaves CUSTOM and follows the track again", !cpal_on() && palette_cur() == 0u &&
-                     ux.trim == 1u + TSEL->eng_req % NENGINES);
-        memset(ui_cpal, 0, 10);
-        ui_cpal_flags = 0;
+        bad += check("an old fixed palette's id loads as MACHINE: the palette and trim follow every track", ok);
     }
     {   /* STYLE LINE: the dividers are the seams: no trim (the palette is still the machine's) */
         ui_style = ST_LINE; style_apply();
@@ -1328,22 +1307,16 @@ static int test_display_preferences(void)
     ui_power_on();
     memcpy(sounds, trk, sizeof sounds);
     hold(B_HOME);
-    ui.menu_sel = MI_COLOR;
+    ui.menu_sel = MI_STYLE;
     ui.force = 1; ui_draw();
     memcpy(before, host_screen, sizeof before);
-    settings.palette = 5; palette_set(5);
-    press(B_OCTUP);
-    bad += check("COLOR OCT+ previews the next palette (PAPER, light) without closing the menu",
-                 settings.palette == 6 && T_BG == UI_PALETTES[6].bg && ux.light && ui.menu == 1 && !song.octave &&
-                 memcmp(before, host_screen, sizeof before) && !memcmp(sounds, trk, sizeof sounds));
-    turn(EN_K1, 1);
-    bad += check("COLOR KNOB 1 steps on to HI-CON, NIGHT (#50: true black), MONO (1.0.2: black and white), then wraps to MACHINE (Switch Blade), then GREY",
-                 settings.palette == 7 && (turn(EN_K1, 1), settings.palette == 8u) && T_BG == 0u &&
-                 str_eq(UI_PALETTES[8].name, "NIGHT") && (turn(EN_K1, 1), settings.palette == UI_BW_INDEX) &&
-                 str_eq(UI_PALETTES[UI_BW_INDEX].name, "MONO") && T_BG == 0u && T_TEXT == 0xFFFFu &&
-                 (turn(EN_K1, 1), settings.palette == UI_PAL_MACHINE) && ux.trim == 1u + TSEL->eng_req % NENGINES &&
-                 (turn(EN_K1, 1), settings.palette == UI_GREY_INDEX) && str_eq(UI_PALETTES[UI_GREY_INDEX].name, "GREY") &&
-                 !ux.trim);
+    press(B_OCTUP);                                    /* STYLE LINE previews without closing the menu */
+    bad += check("STYLE OCT+ previews LINE without closing the menu, the palette is still the machine's",
+                 ui_style == ST_LINE && ui.menu == 1 && !song.octave && settings.palette == UI_PAL_MACHINE &&
+                 ux.trim == 1u + TSEL->eng_req % NENGINES && memcmp(before, host_screen, sizeof before) &&
+                 !memcmp(sounds, trk, sizeof sounds));
+    press(B_OCTDN);
+    bad += check("STYLE OCT- goes back to FLAT", ui_style == ST_FLAT && ui.menu == 1);
     settings.lowcut = 2;
     ui.menu_sel = MI_LOWCUT;
     press(B_OCTUP);
@@ -1366,7 +1339,7 @@ static int test_display_preferences(void)
     k = ui.menu == 1 && settings.lowcut == 0u;         /* (OCT- at the first value: nothing, the menu stays) */
     press(B_HOME);
     bad += check("HOME leaves display preferences without changing musical state (OCT- no longer closes)",
-                 k && !ui.menu && settings.palette == UI_GREY_INDEX && !memcmp(sounds, trk, sizeof sounds));
+                 k && !ui.menu && settings.palette == UI_PAL_MACHINE && !memcmp(sounds, trk, sizeof sounds));
     return bad;
 }
 
@@ -1410,19 +1383,19 @@ static int test_menu_tabs(void)
                  "FM1-Four: T1..T4 OUT, CLOCK OUT), 1..8 each in a run, fit the page; tab gaps constant (S, LARGE)",
                  ok && MTAB_COUNT == 6u && str_eq(MTAB_NAME[MTAB_MOUT], "MIDI OUT") && mtab_rows(MTAB_MOUT) == 5u &&
                  mtab_first(MTAB_MOUT) == MI_TOUT1 && MI_TAB[MI_CLKOUT] == MTAB_MOUT && MI_LCLEAR + 1u == MI_TOUT1 && str_eq(MTAB_NAME[0], "DISPLAY") && str_eq(MTAB_NAME[MTAB_MIDI], "MIDI") &&
-                 mtab_rows(MTAB_DISPLAY) == 7u && MI_TAB[MI_SCOPE] == MTAB_DISPLAY && mtab_rows(MTAB_CONTROL) == 8u && MI_TAB[MI_SELECT] == MTAB_CONTROL && mtab_rows(MTAB_AUDIO) == 6u &&
+                 mtab_rows(MTAB_DISPLAY) == 6u && MI_TAB[MI_SCOPE] == MTAB_DISPLAY && mtab_rows(MTAB_CONTROL) == 8u && MI_TAB[MI_SELECT] == MTAB_CONTROL && mtab_rows(MTAB_AUDIO) == 6u &&
                  mtab_rows(MTAB_MIDI) == 8u && MI_TAB[MI_MFOLLOW] == MTAB_MIDI && MI_TAB[MI_SCRWAKE] == MTAB_MIDI && MI_SCRWAKE + 1u == MI_LCLEAR && MI_TAB[MI_LCLEAR] == MTAB_MIDI && MI_TAB[MI_TCH4] == MTAB_MIDI && mtab_rows(MTAB_SYSTEM) == 6u && MI_TAB[MI_TUNE] == MTAB_AUDIO &&   /* (1.5: LEARN CLEAR, HELP) */
                  MI_TAB[MI_MIDIIN] == MTAB_MIDI && MI_TAB[MI_INFO] == MTAB_SYSTEM && MI_INFO >= MI_VALUES);
 
     ui_power_on();
     hold(B_HOME);
-    ok = ui.menu == 1 && ui.menu_sel == MI_COLOR && menu_tab() == MTAB_DISPLAY;
-    for (i = 0; i < 6u; i++) turn(EN_PRESET, 1);
+    ok = ui.menu == 1 && ui.menu_sel == MI_STYLE && menu_tab() == MTAB_DISPLAY;
+    for (i = 0; i < 5u; i++) turn(EN_PRESET, 1);
     ok &= ui.menu_sel == MI_SCOPE;
-    turn(EN_PRESET, 1); ok &= ui.menu_sel == MI_COLOR;  /* (wraps within the tab) */
+    turn(EN_PRESET, 1); ok &= ui.menu_sel == MI_STYLE;  /* (wraps within the tab) */
     turn(EN_PRESET, -1); ok &= ui.menu_sel == MI_SCOPE;
     turn(EN_PRESET, -1); turn(EN_PRESET, -1); ok &= ui.menu_sel == MI_LEDS;
-    bad += check("MENU: PRESETS moves within the tab and wraps there (COLOR .. SCOPE)", ok);
+    bad += check("MENU: PRESETS moves within the tab and wraps there (STYLE .. SCOPE: COLOR is gone)", ok);
     turn(EN_ALGO, 1); ok = ui.menu_sel == MI_HOLD && menu_tab() == MTAB_CONTROL;
     turn(EN_PRESET, 1); turn(EN_PRESET, 1); ok &= ui.menu_sel == MI_LATCH;
     turn(EN_ALGO, 1); ok &= ui.menu_sel == MI_LOWCUT && menu_tab() == MTAB_AUDIO;
@@ -1476,23 +1449,18 @@ static int test_menu_tabs(void)
             press(B_OCTDN);
             ok &= menu_get(i) == want && ui.menu == 1;
         }
-        v = menu_get(i);                               /* the ends: COLOR wraps, the rest stop */
-        if (i == MI_COLOR) {
-            menu_put(i, n - 1u); press(B_OCTUP); ok &= menu_get(i) == 0u;
-            press(B_OCTDN); ok &= menu_get(i) == n - 1u;
-        } else {
-            press(B_OCTDN); ok &= menu_get(i) == v;
-            for (j = 0; j < n; j++) press(B_OCTUP);
-            v = menu_get(i);
-            press(B_OCTUP); ok &= menu_get(i) == v && v != menu_step(i, -1);
-        }
+        v = menu_get(i);                               /* the ends: every row stops */
+        press(B_OCTDN); ok &= menu_get(i) == v;
+        for (j = 0; j < n; j++) press(B_OCTUP);
+        v = menu_get(i);
+        press(B_OCTUP); ok &= menu_get(i) == v && v != menu_step(i, -1);
         want = menu_step(i, -1);                       /* a knob steps as OCT does */
         turn(EN_K3, -1); ok &= menu_get(i) == want && ui.menu == 1;
     }
     ui_prefs = 0; settings_hold = HOLD_DEF; settings_leds = LEDS_DIM; ui_style = ST_FLAT;
-    settings.lowcut = 0; fx_lowcut = 0; menu_put(MI_COLOR, UI_GREY_INDEX);
+    settings.lowcut = 0; fx_lowcut = 0;
     song.g[G_TUNE] = 0; song.g[G_ROUTE] = 0;
-    bad += check("MENU: OCT+ / OCT- step every value row up / down (COLOR wraps, the rest stop), the menu stays", ok);
+    bad += check("MENU: OCT+ / OCT- step every value row up / down (the ends stop), the menu stays", ok);
     {   /* the ON / OFF rows: up (a knob right, OCT+) is ON, the switch's knob to the right, whichever bit it is */
         static const uint8_t SW[] = {MI_LARGE, MI_ANIM, MI_ACCEL, MI_LATCH, MI_BPMLOCK, MI_SERIAL, MI_RESTORE};
         ok = 1;
@@ -1715,31 +1683,59 @@ static int test_information(void)
     return bad;
 }
 
-/* GREY is grayscale on every screen: every page of every engine, HOME, the menu, ABOUT, the dialogs (RGB565 gray:
- * R = B, G = 2 R). MONO (black and white, blended per channel) is neutral on every screen: R = B, G within 2 of 2 R
- * (the 5-6-5 rounding of its edges) */
-static int screen_gray(void)
+/* Every pixel of a screen is on the palette: a token of the machine's palette (BG .. GRID), REC, the QR's black and white, the
+ * trim's colours, or a blend of two of them (an anti-aliased edge: on the segment between two of them, within 1 of each channel's
+ * 5-6-5 rounding). It finds a colour the firmware draws that is not the palette's (the check that every screen in GREY was gray
+ * made for the fixed palettes) */
+static int on_palette_px(uint16_t c, const uint16_t *tok, uint32_t n)
 {
-    uint32_t i;
+    uint32_t i, j;
+    int32_t cc[3] = {c >> 11, (c >> 5) & 63, c & 31};
+    for (i = 0; i < n; i++) {
+        if (tok[i] == c)
+            return 1;
+        for (j = i + 1u; j < n; j++) {
+            int32_t a[3] = {tok[i] >> 11, (tok[i] >> 5) & 63, tok[i] & 31}, b[3] = {tok[j] >> 11, (tok[j] >> 5) & 63, tok[j] & 31};
+            int32_t k, big = 0, ok = 1;
+            for (k = 1; k < 3; k++)
+                if (abs(b[k] - a[k]) > abs(b[big] - a[big])) big = k;
+            if (a[big] == b[big]) continue;
+            {   /* t in 0..1024 along the segment, from the channel that moves most */
+                int32_t t = (cc[big] - a[big]) * 1024 / (b[big] - a[big]);
+                if (t < -16 || t > 1040) continue;
+                for (k = 0; k < 3 && ok; k++) {
+                    int32_t want = a[k] + (b[k] - a[k]) * t / 1024;
+                    ok = abs(cc[k] - want) <= 1;
+                }
+                if (ok) return 1;
+            }
+        }
+    }
+    return 0;
+}
+static int screen_on_palette(void)
+{
+    uint16_t tok[64], seen[512];
+    uint32_t n = 0, ns = 0, i, k, e;
+    const uint16_t *u = &ux.bg;
+    for (i = 0; i < 16u; i++) tok[n++] = u[i];
+    tok[n++] = UI_REC_DARK; tok[n++] = UI_REC_LIGHT; tok[n++] = UI_QR_LIGHT; tok[n++] = UI_QR_DARK;
+    for (e = 0; e < NENGINES; e++)
+        for (i = 0; i < TRIM[e].n && n < 64u; i++) {
+            for (k = 0; k < n && tok[k] != TRIM[e].r[i].c; k++) ;
+            if (k == n) tok[n++] = TRIM[e].r[i].c;
+        }
     for (i = 0; i < 240u * 240u; i++) {
         uint16_t c = swap16(host_screen[i]);
-        if ((c >> 11) != (c & 31u) || ((c >> 5) & 63u) != (c >> 11) * 2u)
+        for (k = 0; k < ns && seen[k] != c; k++) ;
+        if (k < ns) continue;
+        if (!on_palette_px(c, tok, n))
             return 0;
+        if (ns < 512u) seen[ns++] = c;
     }
     return 1;
 }
-static int screen_neutral(void)
-{
-    uint32_t i;
-    for (i = 0; i < 240u * 240u; i++) {
-        uint16_t c = swap16(host_screen[i]);
-        int32_t d = (int32_t)((c >> 5) & 63u) - (int32_t)(c >> 11) * 2;
-        if ((c >> 11) != (c & 31u) || d < -2 || d > 2)
-            return 0;
-    }
-    return 1;
-}
-static int mono_screens(uint32_t pal, int (*chk)(void), uint32_t *n)
+static int palette_screens(uint32_t *n)
 {
     int ok = 1;
     uint32_t e, i;
@@ -1750,42 +1746,39 @@ static int mono_screens(uint32_t pal, int (*chk)(void), uint32_t *n)
             ui_power_on(); set_engine_of(TSEL, e); song.playing = 1; song.rec = 1;
             ui.home = 0; ui.page = (uint8_t)i; page_entered();
             if (!page_visible(i)) continue;
-            settings.palette = pal; palette_set(pal);
+            palette_apply();
             memset(host_screen, 0, sizeof host_screen);
             ui.force = 1; ui_draw();
-            ok &= chk();
+            ok &= screen_on_palette();
             (*n)++;
         }
         ui_power_on(); set_engine_of(TSEL, e); go_home();
-        settings.palette = pal; palette_set(pal);
-        ui.force = 1; ui_draw(); ok &= chk();
+        palette_apply();
+        ui.force = 1; ui_draw(); ok &= screen_on_palette();
     }
     for (i = 0; i < 4u; i++) {
         ui_power_on(); song.rec = 3;
-        settings.palette = pal; palette_set(pal);
+        palette_apply();
         if (i < 2u) { ui.menu = (uint8_t)(i + 1u); ui.menu_scroll = 300; }
         else if (i == 2u) ui.confirm = CF_OVR_PROJ;
         else ui.uboot = 2;
-        ui.force = 1; ui_draw(); ok &= chk();
+        ui.force = 1; ui_draw(); ok &= screen_on_palette();
     }
     return ok;
 }
 static int test_mono_screens(void)
 {
     int bad = 0, ok;
-    uint32_t e, n = 0, nb = 0;
-    ok = mono_screens(UI_GREY_INDEX, screen_gray, &n);
-    bad += check("GREY: every pixel of every page, HOME, menu, ABOUT, dialog and countdown is gray", ok && n > 120u);   /* (4 engines: 135) */
-    ok = mono_screens(UI_BW_INDEX, screen_neutral, &nb);
-    bad += check("MONO (black and white): every pixel of every page, HOME, menu, ABOUT, dialog and countdown is neutral",
-                 ok && nb == n);
-    ui_power_on();
-    for (e = 0; e < NPALETTES; e++) {               /* the other palettes are not gray: the check sees colour */
-        ui_power_on(); palette_set(e); ui.force = 1; ui_draw();
-        ok = screen_gray();
-        if (e == UI_GREY_INDEX ? !ok : ok) bad += check("palette colour shows on HOME", 0);
+    uint32_t n = 0;
+    ok = palette_screens(&n);
+    bad += check("every pixel of every page, HOME, menu, ABOUT, dialog and countdown is on the machine's palette (its tokens, the trim's colours, their blends)",
+                 ok && n > 120u);   /* (4 engines: 135) */
+    {   /* the check sees a stray colour */
+        ui_power_on(); ui.force = 1; ui_draw();
+        ok = screen_on_palette();
+        host_screen[5 * 240 + 100] = swap16(0x07E0u);   /* pure green on OB-Z's blue / red / black */
+        bad += check("... and finds a colour that is not the palette's", ok && !screen_on_palette());
     }
-    palette_set(UI_GREY_INDEX);
     return bad;
 }
 
@@ -1968,7 +1961,7 @@ static int test_roll(void)
         ok &= ui.roll[3].from[0] != 0;
         if (k == 0) { page_over = 0; go_title("ENV"); }
         else if (k == 1) turn(EN_ALGO, 1);
-        else if (k == 2) { settings.palette = 1; palette_set(1); }          /* (no ui.force) */
+        else if (k == 2) palette_set(1);                                    /* (no ui.force) */
         else if (k == 3) set_engine_of(TSEL, eng_step(TSEL->eng_req, 1));   /* (no ui.force) */
         else ui.force = 1;
         frame();
@@ -1980,15 +1973,15 @@ static int test_roll(void)
     ui.force = 1; frame();
     ok &= !ui.roll[ROLL_BPM].from[0];
     bad += check("roll: a page, track, palette or engine change and ui.force snap", ok);
-    palette_set(UI_GREY_INDEX);
+    palette_apply();
 
-    /* MONO: every roll frame is gray */
+    /* every roll frame is on the palette */
     ui_power_on(); roll_settle();
     ok = 1;
     turn(EN_SELECT, 9);
     turn(EN_K4, -1);
-    for (k = 0; k < ROLL_FRAMES; k++) { ok &= screen_gray(); frame(); }
-    bad += check("roll: MONO roll frames are gray", ok);
+    for (k = 0; k < ROLL_FRAMES; k++) { ok &= screen_on_palette(); frame(); }
+    bad += check("roll: every roll frame is on the palette", ok);
     page_over = 0;
     ui_power_on();
     return bad;
@@ -3975,7 +3968,7 @@ static int test_bughunt_ui(void)
 }
 
 /* the chord keys on the device (chord.c): SCL tapped again is the CHORD page, KNOB 1 CHRD, KNOB 2 VOIC, the graph
- * names the last chord (MONO gray); a sound load keeps them; the SCL layer's KNOB 3 / 4 are CHRD / VOIC, OCT-
+ * names the last chord (on the palette); a sound load keeps them; the SCL layer's KNOB 3 / 4 are CHRD / VOIC, OCT-
  * puts them back */
 static int test_chord_page(void)
 {
@@ -3992,16 +3985,16 @@ static int test_chord_page(void)
     bad += check("SCL tapped again: the CHORD page (CHRD VOIC, the chord graph)", ok && cur_page()->id[0] == P_CHRD &&
                  cur_page()->id[1] == P_VOIC);
     memset(host_screen, 0, sizeof host_screen); ui.force = 1; ui_draw();
-    bad += check("  CHRD OFF: the page says what to do, MONO gray", screen_gray());
+    bad += check("  CHRD OFF: the page says what to do, on the palette", screen_on_palette());
     turn(EN_K1, 1); frame();
     turn(EN_K2, 1); frame();
     bad += check("  KNOB 1: CHRD DIA3, KNOB 2: VOIC OPEN", t->p[P_CHRD] == CH_DIA3 && t->p[P_VOIC] == VC_OPEN);
     key_down(7); frame();                                          /* C4 in C (SCALE CHR: the major of C) */
     ok = gates() == 3u && chord_last[song.sel].root == 60;
     memset(host_screen, 0, sizeof host_screen); ui.force = 1; ui_draw();
-    ok &= screen_gray();
+    ok &= screen_on_palette();
     key_up(7); frame();
-    bad += check("  a key plays the chord, the graph shows it (C), MONO gray", ok && !gates());
+    bad += check("  a key plays the chord, the graph shows it (C), on the palette", ok && !gates());
     t->p[P_CHRD] = CH_MIN7; t->p[P_VOIC] = VC_BASS;
     apply_preset_to(t, 1);
     bad += check("  a sound load keeps CHRD and VOIC (SCL settings)", t->p[P_CHRD] == CH_MIN7 && t->p[P_VOIC] == VC_BASS);
@@ -4022,9 +4015,9 @@ static int test_chord_page(void)
                  t->p[P_CHRD] == CH_OFF && t->p[P_VOIC] == VC_CLOSE && t->p[P_ROOT] == 0 && ui.home);
     btn_down(B_SCL); frames(800);
     memset(host_screen, 0, sizeof host_screen); ui.force = 1; ui_draw();
-    ok = screen_gray();
+    ok = screen_on_palette();
     btn_up(B_SCL); frame();
-    bad += check("  its map and cards MONO gray", ok);
+    bad += check("  its map and cards on the palette", ok);
     return bad;
 }
 
@@ -4295,8 +4288,8 @@ static int test_piano_roll(void)
     memset(host_screen, 0, sizeof host_screen); ui.force = 1; ui_draw();
     ok = pr_columns_match(t, &nb);
     bad += check("piano roll: ACID's bars drawn at their notes' rows, ties carried, rests empty", ok && nb >= 10u);
-    bad += check("  the view holds the page's notes (A2..A3 in 21 rows), MONO gray", proll.lo <= 45 && proll.lo + PR_ROWS - 1 >= 57 &&
-                 screen_gray());
+    bad += check("  the view holds the page's notes (A2..A3 in 21 rows), on the palette", proll.lo <= 45 && proll.lo + PR_ROWS - 1 >= 57 &&
+                 screen_on_palette());
     t->p[P_VOICE] = V_POLY;                                           /* chords: up to 4 bars in a column */
     for (i = 0; i < 16u; i += 4u) {
         step_t *s = &t->step[i];
@@ -4401,7 +4394,7 @@ static int test_bughunt_ui2(void)
         for (k = 0; k < 4u; k++) {
             int32_t X = CARD_X(0), Y = Y_GRAPH;
             ui_power_on();
-            settings.palette = 1; palette_set(1);
+            palette_set(1);
             go_page(GR_TRK); frame(); frame();
             turn(EN_K1 + k, 1);                                       /* (K4 right: MUTE on, its badge shown) */
             ui.force = 1; frame();
@@ -4468,7 +4461,7 @@ static int test_bughunt_ui2(void)
             track_t *t;
             uint8_t lo = 0, hi = 127;
             ui_power_on(); t = TSEL; track_defaults_steps(t); t->p[P_SLEN] = 16;
-            settings.palette = (uint8_t)p; palette_set(p);
+            palette_set(p);
             t->step[0].time = t->step[5].time = ST_NOTE; t->step[0].n = t->step[5].n = 1;
             t->step[0].note[0] = lo; t->step[5].note[0] = hi;
             go_page(GR_ROLL); cursor_set(0); ui.force = 1; frame(); frame();
@@ -5436,7 +5429,7 @@ static int test_screen_off(void)
     ui_power_on();                                    /* in the MENU: OCT+ / a knob step it */
     menu_put(MI_SCROFF, 3u);
     hold(B_HOME);
-    for (i = 0; i < 5u; i++) turn(EN_PRESET, 1);
+    for (i = 0; i < 4u; i++) turn(EN_PRESET, 1);
     ok = ui.menu == 1 && ui.menu_sel == MI_SCROFF;
     press(B_OCTUP); ok &= scr_get() == 4u;
     press(B_OCTUP); ok &= scr_get() == 4u;           /* (stops at the end) */
@@ -7681,7 +7674,7 @@ static int test_style(void)
     frame();
     ok = ui_style == ST_FLAT && ux.style == ST_FLAT && ux.surf != ux.bg;
     ui.force = 1; frame();
-    ok &= host_screen[rule] == swap16(T_BG);
+    ok &= host_screen[rule] == swap16(T_BG) || host_screen[rule] == swap16(OB_STRIPE);   /* (OB-Z's trim: a stripe on that row) */
     hold(B_HOME); ui.menu_sel = MI_STYLE;
     ok &= ui.menu == 1u && str_eq(MI_NAME[MI_STYLE], "STYLE");
     turn(EN_K1, 1); ok &= ui_style == ST_LINE && ux.style == ST_LINE && ux.surf == ux.bg;
@@ -7824,7 +7817,7 @@ static int test_head_centres(void)
                 int pr = !st && !p, okp;
                 ui_power_on();
                 ui_style = (uint8_t)st; style_apply();
-                settings.palette = p; palette_set(p);
+                palette_set(p); ux.trim = 0;               /* (the ink of the elements: the trim's stripes are not one) */
                 head_state(s);
                 memset(host_screen, 0, sizeof host_screen);
                 ui.force = 1; draw_head(); ui.force = 0;
@@ -7871,7 +7864,7 @@ static int test_head_metronome(void)
     int bad = 0, ok = 1, only = 1, b;
     int32_t x, y, w;
     ui_power_on();
-    settings.palette = 0; palette_set(0);
+    palette_set(0); ux.trim = 0;
     song.g[G_BPM] = 124; ui.roll_bpm = 124;
     head_geo(&g, "124");
     w = g.mx1 - g.mx0;
@@ -7918,7 +7911,7 @@ static int test_head_group(void)
                 head_geo_t g;
                 char s[8];
                 ui_power_on();
-                settings.palette = 0; palette_set(0);
+                palette_set(0); ux.trim = 0;
                 if (lk) ui_prefs |= PREF_BPM_LOCK;
                 song.playing = (uint8_t)pl; clk_pos = 0; clk_step = 8u;
                 song.g[G_BPM] = T[i]; ui.roll_bpm = T[i];
@@ -8274,31 +8267,30 @@ static int test_head_slot(void)
 static uint16_t tr_px(int32_t x, int32_t y) { return swap16(host_screen[(uint32_t)y * 240u + (uint32_t)x]); }
 /* 1.5 (#173): the FX map's columns light / dark in turn (ui_layer.c LS_ALT): an idle cell's fill, read inside its top
  * edge, the same in columns 1 and 3 and in 2 and 4 and different between them, every row, FLAT and LINE (LINE: the
- * 1st / 3rd unfilled, the panel's colour); MONO (its one grey) all alike */
+ * 1st / 3rd unfilled, the panel's colour) */
 static int test_fx_map_columns(void)
 {
     int bad = 0, ok = 1;
     uint32_t st, pal, r, c;
-    for (pal = 0; pal < 2u; pal++)
+    for (pal = 0; pal < NPALETTES; pal++)
         for (st = ST_FLAT; st <= ST_LINE; st++) {
             ui_power_on();
-            settings.palette = (uint8_t)(pal ? UI_BW_INDEX : UI_GREY_INDEX);
             ui_style = (uint8_t)st;
             style_apply();
-            palette_set(settings.palette);
+            palette_set(pal);
             ui.home = 1; ui.layer = LAYER_FX; ui.force = 1;
             draw_layer();
             for (r = 0; r < 4u; r++) {
                 uint16_t px[4];
                 for (c = 0; c < 4u; c++)
                     px[c] = tr_px(LC_X(c) + 27, Y_GRAPH + 4 + (LF_H + 4) * (int32_t)r + 1);
-                ok &= px[0] == px[2] && px[1] == px[3] && (pal ? px[0] == px[1] : px[0] != px[1]);
-                ok &= !st || pal || px[0] == T_SURF;
+                ok &= px[0] == px[2] && px[1] == px[3] && px[0] != px[1];
+                ok &= !st || px[0] == T_SURF;
             }
             ui.layer = 0;
         }
-    ui_style = ST_FLAT; style_apply(); settings.palette = UI_GREY_INDEX; palette_set(UI_GREY_INDEX);
-    bad += check("1.5 #173: the FX map's columns alternate light / dark (FLAT, LINE; MONO: one grey)", ok);
+    ui_style = ST_FLAT; style_apply(); palette_apply();
+    bad += check("1.5 #173: the FX map's columns alternate light / dark (FLAT, LINE, every machine's palette)", ok);
     return bad;
 }
 

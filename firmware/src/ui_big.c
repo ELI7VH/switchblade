@@ -473,7 +473,7 @@ static void home_cards(void)
 static void home_gaps(void)
 {
     uint32_t i, y = HOME_TY, h = HOME_TH;
-    lcd_fill(0, y, (uint32_t)CARD_X(0), h, T_BG);
+    trim_fill(TG_HOME, 0, (int32_t)y, CARD_X(0), (int32_t)h, T_BG);   /* (MACHINE mode: the margins' trim in the same pass) */
     for (i = 0; i < 4u; i++) {                          /* right of each tab */
         uint32_t x = (uint32_t)(CARD_X(i) + CARD_W), w = i < 3u ? (uint32_t)CARD_X(i + 1u) - x : 240u - x;
         if (ux.style && i < 3u) {
@@ -482,10 +482,9 @@ static void home_gaps(void)
             lcd_rule(x, y + 1u, 1, h - 2u);
             lcd_fill(x + 1u, y + 1u, w - 1u, h - 2u, T_BG);
         } else {
-            lcd_fill(x, y, w, h, T_BG);
+            trim_fill(TG_HOME, (int32_t)x, (int32_t)y, (int32_t)w, (int32_t)h, T_BG);
         }
     }
-    trim_screen(TG_HOME, (int32_t)y, (int32_t)h);       /* (MACHINE mode: the margins and the gaps' trim; the tabs redraw their own) */
 }
 
 static void draw_home_big(void)

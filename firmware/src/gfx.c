@@ -86,8 +86,8 @@ static uint8_t cv_flip;          /* cv_alpha_hc: the cell mirrored left <-> righ
 static struct {
     uint16_t bg, surf, text, theme, accent;
     uint16_t mid, dim, line, sel, tint, ink, rec, raise, key, lane, grid;
-    uint8_t light, mono;
-    uint8_t trim;                /* MACHINE mode: the machine's trim to draw (ui_trim.c), 1 + engine; 0: none (a fixed palette, CUSTOM) */
+    uint8_t light;
+    uint8_t trim;                /* MACHINE mode: the machine's trim to draw (ui_trim.c), 1 + engine */
     uint8_t style;               /* MENU > STYLE (ui.c style_apply): ST_FLAT, ST_LINE */
     uint32_t gen;                /* bumped by palette_set (the text ramps follow) */
 } ux;
@@ -113,18 +113,13 @@ static struct {
 #define T_KEY ux.key             /* a keycap's fill (its label: T_INK; unavailable: a T_DIM fill) */
 #define T_LANE ux.lane           /* the piano roll: an in-scale row (SURF -> THEME 10 %) */
 #define T_GRID ux.grid           /* the piano roll: a step line (SURF -> TEXT 6 %; beats and C rows: RAISE) */
-#define NPALETTES UI_NPALETTES
+#define NPALETTES UI_NMACHINE          /* (the palettes there are: one per machine) */
 
-static inline uint16_t ux_gray(uint32_t x5) { return (uint16_t)((x5 << 11) | (x5 << 6) | x5); }
-/* a + (b - a) * pct / 100 per channel, rounded; GREY on the red channel, so it stays gray */
+/* a + (b - a) * pct / 100 per channel, rounded */
 static uint16_t ux_mix(uint16_t a, uint16_t b, int32_t pct)
 {
     static const uint8_t SH[3] = {11, 5, 0}, MK[3] = {31, 63, 31};
     uint32_t out = 0, k;
-    if (ux.mono) {
-        int32_t x = a >> 11, d = ((b >> 11) - x) * pct;
-        return ux_gray((uint32_t)(x + (d + (d >= 0 ? 50 : -50)) / 100));
-    }
     for (k = 0; k < 3u; k++) {
         int32_t x = (a >> SH[k]) & MK[k], d = (((b >> SH[k]) & MK[k]) - x) * pct;
         out |= (uint32_t)(x + (d + (d >= 0 ? 50 : -50)) / 100) << SH[k];
@@ -136,32 +131,16 @@ static uint32_t ux_luma(uint16_t c)        /* 0..255 */
     return ((c >> 11) * 255u / 31u * 54u + ((c >> 5) & 63u) * 255u / 63u * 183u + (c & 31u) * 255u / 31u * 19u) >> 8;
 }
 
-/* 1.6 (#244): a palette of the user's, the 11th (index NPALETTES, "CUSTOM"): the same five stored colours, the rest
- * derived as for every palette, set from the editor (ui.c cpal_*; settings: favorites.factory[15][0..9, 12]). Not GREY
- * (no gray ramps) and not MONO: the channels blend as they are */
-static ui_pal_t ux_cust = {"CUSTOM", 0x0841, 0xCE59, 0xEF5D, 0xFFDF, 0xFD20};
-/* the five colours as stored (RGB565, 16 bits little endian each: BG SURF TEXT THEME ACCENT) */
-static void palette_custom_load(const uint8_t *b)
-{
-    ux_cust.bg = (uint16_t)(b[0] | b[1] << 8);
-    ux_cust.surf = (uint16_t)(b[2] | b[3] << 8);
-    ux_cust.text = (uint16_t)(b[4] | b[5] << 8);
-    ux_cust.theme = (uint16_t)(b[6] | b[7] << 8);
-    ux_cust.accent = (uint16_t)(b[8] | b[9] << 8);
-}
-
-/* Palette ids for palette_set: 0 .. NPALETTES - 1 the fixed ones, NPALETTES CUSTOM, NPALETTES + 1 + e the machine e's palette
- * (UI_MACHINE_PALS, MENU > COLOR > MACHINE: the palette follows the selected track's machine; only these carry a trim).
- * settings.palette holds a fixed palette's index, or UI_PAL_MACHINE (= NPALETTES) for MACHINE mode */
-#define UI_PAL_MACHINE NPALETTES
-#define PAL_MACHINE_ID(e) (NPALETTES + 1u + (e) % UI_NMACHINE)
+/* Switch Blade's one colour scheme: the machine's palette (UI_MACHINE_PALS; MACHINE was one choice of MENU > COLOR, now there
+ * is no other: the fixed palettes and CUSTOM are gone). palette_set(e): machine e's palette and trim (ux.trim = 1 + e).
+ * settings.palette is always UI_PAL_MACHINE; any stored id (an earlier firmware's index, a fixed palette's tagged id,
+ * CUSTOM's) loads as MACHINE, and MACHINE is written as the tagged id earlier firmware reads as GREY */
+#define UI_PAL_MACHINE 0u
+#define PAL_MACHINE_ID(e) ((e) % UI_NMACHINE)
 static void palette_set(uint32_t i)
 {
-    int cust = i == NPALETTES, mach = i > NPALETTES, fixed = !cust && !mach;
-    const ui_pal_t *p = cust ? &ux_cust : mach ? &UI_MACHINE_PALS[(i - NPALETTES - 1u) % UI_NMACHINE] : &UI_PALETTES[i % NPALETTES];
-    i %= NPALETTES;
-    ux.trim = mach ? (uint8_t)(1u + (p - UI_MACHINE_PALS)) : 0;
-    ux.mono = fixed && i == UI_GREY_INDEX;
+    const ui_pal_t *p = &UI_MACHINE_PALS[i % UI_NMACHINE];
+    ux.trim = (uint8_t)(1u + i % UI_NMACHINE);
     ux.bg = p->bg; ux.surf = ux.style ? p->bg : p->surf; ux.text = p->text; ux.theme = p->theme; ux.accent = p->accent;
     ux.mid = ux_mix(p->bg, p->text, UI_MID_PCT);
     ux.dim = ux_mix(p->bg, p->text, UI_DIM_PCT);
@@ -174,24 +153,15 @@ static void palette_set(uint32_t i)
     ux.lane = ux_mix(ux.surf, p->theme, 10);
     ux.grid = ux_mix(ux.surf, p->text, 6);
     ux.light = ux_luma(p->bg) > 128u;
-    ux.rec = ux.mono ? p->accent : ux.light ? UI_REC_LIGHT : UI_REC_DARK;
-    if (fixed && i == UI_BW_INDEX) {             /* MONO: black and white, set, not blended (tools/gen_ui_palettes.py) */
-        ux.mid = ux.sel = ux.key = ux.rec = p->text;   /* a selection, a keycap, REC: white, its INK black */
-        ux.dim = ux.line = ux.raise = ux.lane = UI_BW_GREY;   /* the one grey: inactive, tracks, wells */
-        ux.tint = ux.grid = p->bg;
-    }
+    ux.rec = ux.light ? UI_REC_LIGHT : UI_REC_DARK;
     ux.gen++;                                    /* the text ramps change with the coverage curve */
 }
 
-/* settings store a tagged id; ids below 20 are the palettes of earlier firmware. UI_PAL_TAG + NPALETTES is MACHINE
- * (firmware before it reads an unknown id as GREY) */
-static uint32_t palette_from_stored(uint32_t v)
-{
-    if (v >= UI_PAL_TAG && v - UI_PAL_TAG <= NPALETTES) return v - UI_PAL_TAG;
-    return v < 20u ? UI_PALETTE_MIGRATE[v] : UI_GREY_INDEX;
-}
-static uint32_t palette_to_stored(uint32_t i) { return UI_PAL_TAG + (i <= NPALETTES ? i : UI_GREY_INDEX); }
-static int palette_stored_ok(uint32_t v) { return v < 20u || (v >= UI_PAL_TAG && v - UI_PAL_TAG <= NPALETTES); }
+/* settings store a tagged id (UI_PAL_TAG + the id of an earlier firmware's palette list, 10 = MACHINE, or an index below 20 of
+ * the oldest firmware); every one of them loads as MACHINE, none is refused if it was ever valid */
+static uint32_t palette_from_stored(uint32_t v) { (void)v; return UI_PAL_MACHINE; }
+static uint32_t palette_to_stored(uint32_t i) { (void)i; return UI_PAL_TAG + UI_PAL_STORED_MACHINE; }
+static int palette_stored_ok(uint32_t v) { return v < 20u || (v >= UI_PAL_TAG && v - UI_PAL_TAG <= UI_PAL_STORED_MACHINE); }
 
 static inline uint16_t swap16(uint32_t c) { return (uint16_t)(((c >> 8) & 0xFFu) | ((c & 0xFFu) << 8)); }
 
@@ -354,8 +324,6 @@ static const uint16_t *ramp(uint16_t fg, uint16_t bg)
     const uint8_t *cv = ux.light ? CURVE_LIGHT : CURVE_DARK;
     uint32_t i, a, k;
     uint16_t *v;
-    if (fg == bg)                                /* MONO: DIM on a RAISE well (one grey): black, recessed */
-        fg = ux.bg;
     GFX_HOOK_INK(fg, bg);
     if (rc.gen != ux.gen) {
         rc.gen = ux.gen;
@@ -374,14 +342,9 @@ static const uint16_t *ramp(uint16_t fg, uint16_t bg)
     for (a = 0; a < 16u; a++) {
         uint32_t out = 0;
         int32_t w = cv[a];
-        if (ux.mono) {
-            int32_t x = bg >> 11;
-            out = ux_gray((uint32_t)(x + ((((fg >> 11) - x) * w + 128) >> 8)));
-        } else {
-            for (k = 0; k < 3u; k++) {
-                int32_t x = (bg >> SH[k]) & MK[k], y = (fg >> SH[k]) & MK[k];
-                out |= (uint32_t)(x + (((y - x) * w + 128) >> 8)) << SH[k];
-            }
+        for (k = 0; k < 3u; k++) {
+            int32_t x = (bg >> SH[k]) & MK[k], y = (fg >> SH[k]) & MK[k];
+            out |= (uint32_t)(x + (((y - x) * w + 128) >> 8)) << SH[k];
         }
         v[a] = swap16(out);
     }

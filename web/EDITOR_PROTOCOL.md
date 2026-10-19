@@ -973,7 +973,22 @@ again (LEARN_GET) when it matters (e.g. with the settings, or after the user say
 03 62 F7` (op 0: CC74, T4, id 98: P_E0 + 2, DRUM's TONE, where P_E0 is 96 as in 1.2 .. 1.4.1) answers `F0 7D 46 4C 4F 00 10 01 4A 03 62 ...
 F7` (rc 0, 16 entries, the first CC74 on T4 id 98).
 
-## CUSTOM palette (80-81; 1.6)
+## CUSTOM palette (80-81; 1.6) -- Switch Blade: one colour scheme
+
+**Switch Blade (UI.4): the fixed palettes, CUSTOM and MENU > COLOR are gone; the machine look is the only colour scheme.**
+The palette is always the selected track's machine's (`UI_MACHINE_PALS`, with its trim). What that means on the wire:
+- `PALETTE_GET` (80) answers flags 0, 5, then the five colours in use (the machine palette on screen).
+- `PALETTE_SET` (81), any op (0 preview, 1 store, 2 remove, 3 drop the preview) and any length, is **accepted and ignored**:
+  rc 0, then `PALETTE_GET`'s reply. Nothing is shown, stored or removed (no error for an editor that still sends it).
+- `UI_PALETTES` (36) lists one name, "MACHINE"; `UI_SET` id 0 takes 0 (rc 3 / 0 / 4 as before: applied, nothing changes) and
+  rc 1 for any other value; `UI_STATE`'s palette byte is always 0.
+- MENU: COLOR (id 0) is not offered (`MENU_DESC` has 35 items, ids 1..36 but 23; INFO's `4E 01` says 35); `MENU_SET` id 0
+  answers rc 1 (an unknown id). The DISPLAY tab is STYLE, LARGE, ANIM, LEDS, SCREEN OFF, SCOPE.
+- Settings: every stored palette id (an earlier firmware's index below 20, a fixed palette's tagged id, MACHINE's, CUSTOM's
+  base) loads as MACHINE; MACHINE is written as `UI_PAL_TAG + 10` (earlier firmware reads that as GREY). CUSTOM's bytes
+  (the favorites' 16th row) are kept as saved and read by nobody.
+The text below describes the 1.6 behaviour and is kept for firmware before Switch Blade.
+
 
 COLOR (MENU > DISPLAY, Discussion #239, #244) has a palette of the user's as its 11th value, CUSTOM. A palette is five
 stored colours, BG SURF TEXT THEME ACCENT; the device derives the other tokens (MID, DIM, LINE, SEL, TINT, INK, RAISE, KEY,

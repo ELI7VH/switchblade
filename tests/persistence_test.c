@@ -310,27 +310,27 @@ int main(void)
     reset();
     settings_init();
     {
-        const uint8_t amber[] = {0, 3};                  /* (COLOR's value 3: the fixed palette 2; value 0 is MACHINE) */
+        const uint8_t amber[] = {3, 1};                  /* (the favorites filter ON: the palette is gone, this is the editor's preference left) */
         song.playing = 1;
         bad += check("editor display change while playing is applied and reports deferred saving",
-                      ed_ui_set(amber, sizeof amber) == 4 && settings.palette == 2u && persist_pending == 1 && !erases);
+                      ed_ui_set(amber, sizeof amber) == 4 && favorites.filter == 1u && persist_pending == 1 && !erases);
         song.playing = 0;
         settings_poll();
-        bad += check("STOP commits the deferred palette setting",
-                      !persist_pending && erases == 1 && persist_saved.palette == palette_to_stored(2));
+        bad += check("STOP commits the deferred preference",
+                      !persist_pending && erases == 1 && persist_saved.favorites.filter == 1u);
         before = erases;
         bad += check("repeating an unchanged editor preference succeeds without erasing",
                       ed_ui_set(amber, sizeof amber) == 0 && erases == before);
         erase_error = 1;
-        const uint8_t mono[] = {0, 1};                   /* (value 1: the fixed palette 0) */
+        const uint8_t mono[] = {3, 0};                   /* (the filter OFF again) */
         bad += check("editor reports failed saving while preserving the previous flash setting",
-                      ed_ui_set(mono, sizeof mono) == 3 && settings.palette == 0u && persist_pending == 2 &&
-                      persist_saved.palette == palette_to_stored(2));
+                      ed_ui_set(mono, sizeof mono) == 3 && favorites.filter == 0u && persist_pending == 2 &&
+                      persist_saved.favorites.filter == 1u);
         erase_error = 0;
         fm1_ms += 1000;
         settings_poll();
         bad += check("failed editor preference retries through the existing persistence path",
-                      !persist_pending && persist_saved.palette == palette_to_stored(0));
+                      !persist_pending && persist_saved.favorites.filter == 0u);
         const uint8_t bold[] = {1, 1};
         bad += check("the retired font weight is refused without a write", ed_ui_set(bold, sizeof bold) == 2);
     }
@@ -375,7 +375,6 @@ int main(void)
         settings_hold = HOLD_DEF; settings_leds = LEDS_DIM;
     }
     reset();
-    settings.palette = 3;
     settings.lowcut = 2;
     settings.zoom = 1;
     persist_saved.bold = 1;                       /* (an earlier firmware's font weight: kept as saved) */
@@ -384,7 +383,7 @@ int main(void)
     song.playing = 1;
     settings_save();
     bad += check("playing: settings queued, no erase, runtime kept", persist_pending && !erases &&
-                  settings.palette == 3u && settings.lowcut == 2u && settings.zoom == 1u);
+                  settings.lowcut == 2u && settings.zoom == 1u);
     song.playing = 0;
     transport_req = 1;
     settings_poll();
@@ -394,16 +393,16 @@ int main(void)
     settings_poll();
     bad += check("pending SONG: settings still queued, no erase", persist_pending && !erases);
     chain.armed = 0;
-    settings.palette = 2;
+    settings.lowcut = 1;
     settings_poll();
     bad += check("STOP: latest settings saved and request cleared", !persist_pending && erases == 1u &&
-                  st_load(OBJ_SETTINGS, &p, sizeof p) == (int)sizeof p && p.palette == palette_to_stored(2) &&
-                  p.lowcut == 2u && p.zoom == 1u && p.bold == 1u &&
+                  st_load(OBJ_SETTINGS, &p, sizeof p) == (int)sizeof p && p.palette == palette_to_stored(UI_PAL_MACHINE) &&
+                  p.lowcut == 1u && p.zoom == 1u && p.bold == 1u &&
                   p.favorites.factory[8][0] == 1 && p.favorites.user == (1u << 31) &&
                   !memcmp(&p.panel, &panel, sizeof panel));
     settings_save();
     bad += check("unchanged settings do not erase", !persist_pending && erases == 1u);
-    settings.palette = 1;
+    settings.lowcut = 0;
     erase_error = 1;
     fm1_ms = 0xFFFFFF00u;
     settings_save();
@@ -412,12 +411,12 @@ int main(void)
     fm1_ms += 999u;
     settings_poll();
     bad += check("failed settings retry waits through clock wrap", persist_pending && erases == before &&
-                  persist_saved.palette == palette_to_stored(2) && settings.palette == 1u);
+                  persist_saved.lowcut == 1u && settings.lowcut == 0u);
     erase_error = 0;
     fm1_ms++;
     settings_poll();
     bad += check("settings retry succeeds after 1000 ms", !persist_pending && erases == before + 1u &&
-                  st_load(OBJ_SETTINGS, &p, sizeof p) == (int)sizeof p && p.palette == palette_to_stored(1));
+                  st_load(OBJ_SETTINGS, &p, sizeof p) == (int)sizeof p && p.lowcut == 0u);
 
     reset();
     trk[0].step[0] = (step_t){{60}, 1, ST_NOTE, 0, 96, 0, 0};
@@ -590,7 +589,7 @@ int main(void)
     bad += check("PLAY consumed before the preset snapshot still blocks a bank write",
                   up_put(3, &r) == 2 && irq_races == 2u && song.playing && !transport_req && erases == before);
     song.playing = 0; transport_req = 1; irq_start_race = 1;
-    settings.palette = 4;
+    settings.lowcut = 1;
     settings_save();
     bad += check("PLAY consumed before the settings snapshot defers the write",
                   irq_races == 3u && song.playing && !transport_req && persist_pending && erases == before);

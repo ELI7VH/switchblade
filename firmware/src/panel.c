@@ -120,12 +120,12 @@ static void settings_init(void)
         settings.magic = SETTINGS_MAGIC;
         settings.palette = palette_from_stored(settings.palette);
     }
-    if (settings.magic != SETTINGS_MAGIC || settings.palette > NPALETTES) {
+    if (settings.magic != SETTINGS_MAGIC) {
         settings.magic = SETTINGS_MAGIC;
-        settings.palette = UI_PAL_MACHINE;     /* MACHINE (the default since Switch Blade); a chosen palette keeps loading as it was */
         settings.lowcut = 0;
         settings.zoom = 0;                     /* (retired: the LEDS setting, settings_persist.c) */
     }
+    settings.palette = UI_PAL_MACHINE;         /* (any stored palette loads as MACHINE: the one colour scheme) */
     palette_apply();
     fx_lowcut = (uint8_t)(settings.lowcut % 3u);
 }
