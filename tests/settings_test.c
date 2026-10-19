@@ -15,6 +15,8 @@ static void lcd_wake_now(void) {}
 static void lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint16_t *p)
 { (void)x; (void)y; (void)w; (void)h; (void)p; }
 #include "../firmware/src/gfx.c"
+static struct { uint8_t eng_req; } sel_stub;     /* (the selected track: favorites.c palette_apply follows its machine) */
+#define TSEL (&sel_stub)
 #include "../firmware/src/panel.c"
 static void settings_save(void) {}
 #if __has_include("../firmware/src/favorites.c")
@@ -48,6 +50,42 @@ int main(void)
         assert(settings_import(&q, sizeof q) == 1 && settings.palette == 5u);
         settings.magic = SETTINGS_MAGIC_OLD; settings.palette = 13; settings_init();   /* retained SET3 */
         assert(settings.magic == SETTINGS_MAGIC && settings.palette == 6u);
+        p = original; assert(settings_import(&p, sizeof p) == 1); settings_init();
+    }
+    {   /* Switch Blade: MACHINE is the default of fresh settings and has a stored id of its own; old ids load as before */
+        persist_t q = original;
+        uint32_t i;
+        settings.magic = 0; settings.palette = 5; settings_init();             /* fresh: no valid record */
+        assert(settings.palette == UI_PAL_MACHINE && trim_machine == 0u);       /* (palette_apply: the selected track's machine) */
+        assert(palette_to_stored(UI_PAL_MACHINE) == UI_PAL_TAG + NPALETTES && palette_stored_ok(UI_PAL_TAG + NPALETTES));
+        assert(palette_from_stored(UI_PAL_TAG + NPALETTES) == UI_PAL_MACHINE);
+        assert(!palette_stored_ok(UI_PAL_TAG + NPALETTES + 1u) && palette_from_stored(UI_PAL_TAG + NPALETTES + 1u) == UI_GREY_INDEX);
+        assert(UI_PAL_MACHINE != NPALETTES - 1u && UI_NMACHINE == NENGINES);   /* (CUSTOM is NPALETTES in palette_set; the menu's value is separate) */
+        for (i = 0; i < NENGINES; i++) {                                         /* the palette in use follows the machine */
+            sel_stub.eng_req = (uint8_t)i;
+            settings.palette = UI_PAL_MACHINE;
+            palette_apply();
+            assert(ux.trim == 1u + i && T_BG == UI_MACHINE_PALS[i].bg && T_THEME == UI_MACHINE_PALS[i].theme && trim_machine == i);
+            settings.palette = 3; palette_apply();                               /* a fixed palette: no trim, the same colours */
+            assert(!ux.trim && T_BG == UI_PALETTES[3].bg);
+        }
+        sel_stub.eng_req = 0;
+        settings.palette = UI_PAL_MACHINE;                                       /* MACHINE saved and restored */
+        settings_export(&p);
+        assert(p.palette == UI_PAL_TAG + NPALETTES);
+        settings.palette = 5;
+        assert(settings_import(&p, sizeof p) == 1 && settings.palette == UI_PAL_MACHINE && p.palette == UI_PAL_TAG + NPALETTES);
+        settings_init();
+        assert(settings.palette == UI_PAL_MACHINE);                              /* (a retained record: the choice stays) */
+        for (i = 0; i < NPALETTES; i++) {                                        /* every earlier choice still loads as it was */
+            q.palette = palette_to_stored(i);
+            assert(settings_import(&q, sizeof q) == 1 && settings.palette == i && q.palette == UI_PAL_TAG + i);
+            settings_init(); assert(settings.palette == i);
+        }
+        for (i = 0; i < 20u; i++) {                                              /* ... and the earlier firmware's ids */
+            q.palette = i;
+            assert(settings_import(&q, sizeof q) == 1 && settings.palette == UI_PALETTE_MIGRATE[i]);
+        }
         p = original; assert(settings_import(&p, sizeof p) == 1); settings_init();
     }
 #ifdef FELUCCA_FAVORITES

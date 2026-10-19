@@ -49,18 +49,42 @@ static int favorite_set(uint32_t engine, uint32_t preset, int on)
 #define CPAL_STORED 1u
 #define CPAL_ACTIVE 2u
 static uint32_t cpal_on(void) { return (ui_cpal_flags & (CPAL_STORED | CPAL_ACTIVE)) == (CPAL_STORED | CPAL_ACTIVE); }
-static uint32_t palette_n(void) { return NPALETTES + ((ui_cpal_flags & CPAL_STORED) ? 1u : 0u); }     /* COLOR's values */
-static uint32_t palette_cur(void) { return cpal_on() ? NPALETTES : settings.palette % NPALETTES; }
-static const char *palette_name(uint32_t v) { return v == NPALETTES ? "CUSTOM" : UI_PALETTES[v % NPALETTES].name; }
-/* the palette in use into gfx.c (the settings changed under it: a start, an import, a restore, a STYLE change) */
+/* COLOR's values: 0 MACHINE (the palette follows the selected track's machine, with its trim: gfx.c UI_MACHINE_PALS,
+ * ui_trim.c), 1 .. NPALETTES the fixed palettes, then CUSTOM while one is stored. settings.palette is a fixed palette's
+ * index or UI_PAL_MACHINE; a fixed one pins the look (and there is no trim) */
+#define COLOR_CUSTOM (NPALETTES + 1u)
+static uint32_t palette_n(void) { return 1u + NPALETTES + ((ui_cpal_flags & CPAL_STORED) ? 1u : 0u); }
+static uint32_t palette_cur(void)
+{
+    return cpal_on() ? COLOR_CUSTOM : settings.palette == UI_PAL_MACHINE ? 0u : 1u + settings.palette % NPALETTES;
+}
+static const char *palette_name(uint32_t v)
+{
+    return v == 0 ? "MACHINE" : v == COLOR_CUSTOM ? "CUSTOM" : UI_PALETTES[(v - 1u) % NPALETTES].name;
+}
+static uint8_t trim_machine = 0xFF;                    /* the machine the MACHINE palette was set for (palette_follow) */
+/* the palette in use into gfx.c (the settings changed under it: a start, an import, a restore, a STYLE change, a new
+ * machine on the selected track in MACHINE mode) */
 static void palette_apply(void)
 {
     if (cpal_on()) {
         palette_custom_load(ui_cpal);
         palette_set(NPALETTES);
+    } else if (settings.palette == UI_PAL_MACHINE) {
+        trim_machine = (uint8_t)(TSEL->eng_req % NENGINES);
+        palette_set(PAL_MACHINE_ID(trim_machine));
     } else {
         palette_set(settings.palette % NPALETTES);
     }
+}
+/* MACHINE mode: another machine on the selected track (a track change, a machine change, a project or sound load) sets
+ * its palette and trim; one full redraw, as a palette change in the menu */
+static int palette_follow(void)
+{
+    if (cpal_on() || settings.palette != UI_PAL_MACHINE || trim_machine == (uint8_t)(TSEL->eng_req % NENGINES))
+        return 0;
+    palette_apply();
+    return 1;
 }
 
 /* the five colours into the settings' bytes (stored; not yet the palette in use: palette_choose / palette_apply) */

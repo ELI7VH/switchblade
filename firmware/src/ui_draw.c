@@ -13,6 +13,7 @@ static void draw_menu(void);
 static int name_on(void);                              /* NAME (ui_name.c) */
 static uint64_t lock_held(void);                       /* parameter locks: the steps held on STEP (ui_input.c) */
 static void name_draw(void);
+#include "ui_trim.c"                                   /* MACHINE mode: the machines' trim (header, HOME, EDIT) */
 #include "ui_help.c"                                   /* 1.5: HELP's hints (draw_foot, ui_layer.c draw_layer) */
 
 /* --------------------------------------------------------- drawing --- */
@@ -365,6 +366,7 @@ static void draw_head(void)
     if (!ui.force && sig == ui.head_sig) {
         if (ui.roll[ROLL_BPM].from[0] && centre) {     /* rolling: the BPM's strip only */
             cv_begin((uint32_t)(g.sx1 - g.sx0), H_HEAD, T_BG);
+            trim_cv(TG_HEAD, g.sx0, 0, g.sx1 - g.sx0, H_HEAD);
             roll_text(ROLL_BPM, g.bx - g.sx0, HEAD_MY, b, ui.bpm_t ? T_ACCENT : T_THEME);
             cv_blit((uint32_t)g.sx0, Y_HEAD);
         }
@@ -372,6 +374,7 @@ static void draw_head(void)
             int32_t cx = g.mx0 - (g.sx0 - g.mx1);
             metro_beat = (int8_t)beat;
             cv_begin((uint32_t)(g.sx0 - cx), H_HEAD, T_BG);
+            trim_cv(TG_HEAD, cx, 0, g.sx0 - cx, H_HEAD);
             head_metro(g.mx0 - cx, beat);
             cv_blit((uint32_t)cx, Y_HEAD);
         }
@@ -380,6 +383,7 @@ static void draw_head(void)
     ui.head_sig = sig;
     metro_x = -1;
     cv_begin(240, H_HEAD, T_BG);
+    trim_cv(TG_HEAD, 0, 0, 240, H_HEAD);
     cv_icon_mid(HEAD_TRK_X, H_HEAD / 2, 16, trk_icon(song.sel, 1), midi_lit(song.sel) ? T_TEXT : T_ACCENT, T_BG);   /* (1.5.5:
                                                        * a MIDI IN note into it, #208: lit) */
     if (slot && (centre || !msg)) {                    /* the slot letter (not under a message centred: its room) */
@@ -801,6 +805,8 @@ static void draw_foot(void)
         return;
     ui.foot_sig = sig;
     cv_begin(240, big ? BIG_FOOT_H : H_FOOT, T_BG);
+    if (big)
+        trim_cv(TG_BOTH, 0, BIG_FOOT_Y, 240, BIG_FOOT_H);
     cv_oy = oy;                                       /* (EDIT: row 1 lower) */
     if (help) {                                       /* row 1: the hint in place of the steps or the OCT+ / OCT- hint */
         help_row(help, 2);
@@ -1423,6 +1429,8 @@ static void ui_draw(void)
 {
     static uint8_t counting;
     style_apply();
+    if (palette_follow())                               /* MACHINE mode: the selected track's machine changed */
+        ui.force = 1;
     ui.frame++;
     if (counting != (uint8_t)seq_counting()) {          /* a count-in began or ended: the page drawn again after it */
         counting = (uint8_t)seq_counting();

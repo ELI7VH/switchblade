@@ -20,7 +20,7 @@ typedef struct {
     uint8_t psh;                        /* log2 of the phases per glyph: g[i << psh] .. g[(i << psh) + phases - 1] */
     const uint8_t *hc;                  /* data's Huffman code (cv_alpha_hc), 0 = 2 px per byte (cv_alpha) */
 } aafont_t;
-typedef struct { const char *name; uint16_t bg, surf, text, theme, accent; } ui_pal_t;
+typedef struct { const char *name; uint16_t bg, surf, text, theme, accent, key; } ui_pal_t;   /* key: a keycap fill of its own (0: derived) */
 typedef struct { uint16_t off; uint8_t w; const char *label; } kc_t;
 #include "ui_fonts.h"                   /* AF_S 12 px / 400, AF_M 15 px / 500, AF_L 28 px / 600, AF_XL 40 px figures */
 #include "ui_palettes.h"
@@ -43,6 +43,9 @@ typedef struct { uint16_t off; uint8_t w; const char *label; } kc_t;
 #endif
 #ifndef GFX_HOOK_INK
 #define GFX_HOOK_INK(ink, bg) ((void)0)            /* a text, icon or keycap label's ink and what it is drawn on */
+#endif
+#ifndef GFX_HOOK_TRIM
+#define GFX_HOOK_TRIM(x0, y0, x1, y1, c) ((void)0)    /* a machine trim rectangle on the canvas (ui_trim.c) and its colour: it must still be whole at the blit (nothing drawn over it) */
 #endif
 #ifndef GFX_HOOK_RULE
 #define GFX_HOOK_RULE(x, y, w, h) ((void)0)        /* a divider drawn on the screen (ui_draw.c lcd_rule): no box may touch it */
@@ -84,6 +87,7 @@ static struct {
     uint16_t bg, surf, text, theme, accent;
     uint16_t mid, dim, line, sel, tint, ink, rec, raise, key, lane, grid;
     uint8_t light, mono;
+    uint8_t trim;                /* MACHINE mode: the machine's trim to draw (ui_trim.c), 1 + engine; 0: none (a fixed palette, CUSTOM) */
     uint8_t style;               /* MENU > STYLE (ui.c style_apply): ST_FLAT, ST_LINE */
     uint32_t gen;                /* bumped by palette_set (the text ramps follow) */
 } ux;
@@ -146,12 +150,18 @@ static void palette_custom_load(const uint8_t *b)
     ux_cust.accent = (uint16_t)(b[8] | b[9] << 8);
 }
 
+/* Palette ids for palette_set: 0 .. NPALETTES - 1 the fixed ones, NPALETTES CUSTOM, NPALETTES + 1 + e the machine e's palette
+ * (UI_MACHINE_PALS, MENU > COLOR > MACHINE: the palette follows the selected track's machine; only these carry a trim).
+ * settings.palette holds a fixed palette's index, or UI_PAL_MACHINE (= NPALETTES) for MACHINE mode */
+#define UI_PAL_MACHINE NPALETTES
+#define PAL_MACHINE_ID(e) (NPALETTES + 1u + (e) % UI_NMACHINE)
 static void palette_set(uint32_t i)
 {
-    int cust = i == NPALETTES;
-    const ui_pal_t *p = cust ? &ux_cust : &UI_PALETTES[i % NPALETTES];
+    int cust = i == NPALETTES, mach = i > NPALETTES, fixed = !cust && !mach;
+    const ui_pal_t *p = cust ? &ux_cust : mach ? &UI_MACHINE_PALS[(i - NPALETTES - 1u) % UI_NMACHINE] : &UI_PALETTES[i % NPALETTES];
     i %= NPALETTES;
-    ux.mono = !cust && i == UI_GREY_INDEX;
+    ux.trim = mach ? (uint8_t)(1u + (p - UI_MACHINE_PALS)) : 0;
+    ux.mono = fixed && i == UI_GREY_INDEX;
     ux.bg = p->bg; ux.surf = ux.style ? p->bg : p->surf; ux.text = p->text; ux.theme = p->theme; ux.accent = p->accent;
     ux.mid = ux_mix(p->bg, p->text, UI_MID_PCT);
     ux.dim = ux_mix(p->bg, p->text, UI_DIM_PCT);
@@ -160,12 +170,12 @@ static void palette_set(uint32_t i)
     ux.tint = ux_mix(p->bg, p->theme, UI_TINT_PCT);
     ux.ink = p->bg;
     ux.raise = ux_mix(p->surf, p->text, UI_RAISE_PCT);
-    ux.key = ux_mix(p->bg, p->text, UI_KEY_PCT);
+    ux.key = p->key ? p->key : ux_mix(p->bg, p->text, UI_KEY_PCT);
     ux.lane = ux_mix(ux.surf, p->theme, 10);
     ux.grid = ux_mix(ux.surf, p->text, 6);
     ux.light = ux_luma(p->bg) > 128u;
     ux.rec = ux.mono ? p->accent : ux.light ? UI_REC_LIGHT : UI_REC_DARK;
-    if (!cust && i == UI_BW_INDEX) {             /* MONO: black and white, set, not blended (tools/gen_ui_palettes.py) */
+    if (fixed && i == UI_BW_INDEX) {             /* MONO: black and white, set, not blended (tools/gen_ui_palettes.py) */
         ux.mid = ux.sel = ux.key = ux.rec = p->text;   /* a selection, a keycap, REC: white, its INK black */
         ux.dim = ux.line = ux.raise = ux.lane = UI_BW_GREY;   /* the one grey: inactive, tracks, wells */
         ux.tint = ux.grid = p->bg;
@@ -173,14 +183,15 @@ static void palette_set(uint32_t i)
     ux.gen++;                                    /* the text ramps change with the coverage curve */
 }
 
-/* settings store a tagged id; ids below 20 are the palettes of earlier firmware */
+/* settings store a tagged id; ids below 20 are the palettes of earlier firmware. UI_PAL_TAG + NPALETTES is MACHINE
+ * (firmware before it reads an unknown id as GREY) */
 static uint32_t palette_from_stored(uint32_t v)
 {
-    if (v >= UI_PAL_TAG && v - UI_PAL_TAG < NPALETTES) return v - UI_PAL_TAG;
+    if (v >= UI_PAL_TAG && v - UI_PAL_TAG <= NPALETTES) return v - UI_PAL_TAG;
     return v < 20u ? UI_PALETTE_MIGRATE[v] : UI_GREY_INDEX;
 }
-static uint32_t palette_to_stored(uint32_t i) { return UI_PAL_TAG + i % NPALETTES; }
-static int palette_stored_ok(uint32_t v) { return v < 20u || (v >= UI_PAL_TAG && v - UI_PAL_TAG < NPALETTES); }
+static uint32_t palette_to_stored(uint32_t i) { return UI_PAL_TAG + (i <= NPALETTES ? i : UI_GREY_INDEX); }
+static int palette_stored_ok(uint32_t v) { return v < 20u || (v >= UI_PAL_TAG && v - UI_PAL_TAG <= NPALETTES); }
 
 static inline uint16_t swap16(uint32_t c) { return (uint16_t)(((c >> 8) & 0xFFu) | ((c & 0xFFu) << 8)); }
 

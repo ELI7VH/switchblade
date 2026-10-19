@@ -985,9 +985,15 @@ the favorites' 16th row). Firmware before 1.6 keeps the bytes (a round trip thro
 the built-in palette that was in use before CUSTOM was chosen (the settings' palette field is never CUSTOM). INFO
 advertises `45 01 5` (five colours) after `4B 01 NCOND`; firmware without the tag answers neither command.
 
-While one is stored, CUSTOM is the 11th name of `UI_PALETTES` (cmd 36: count 11, the last "CUSTOM"), `UI_SET` id 0 takes
-10, `UI_STATE`'s palette byte is 10 while it is in use, and MENU's COLOR (id 0 in `MENU_DESC` / `MENU_SET`) has 11 values
-(max 10, the last "CUSTOM"). With none stored: 10 values as before, and `UI_SET` 0 with 10 answers rc 1.
+Switch Blade: COLOR's first value is MACHINE, the default of fresh settings: the palette follows the selected track's machine
+(OB-Z WAVE ACID DRIFT, `UI_MACHINE_PALS`) and its trim is drawn (`ui_trim.c`); the ten fixed palettes follow as values 1..10 (a
+fixed one, or CUSTOM, pins the look, with no trim). The settings store MACHINE as `UI_PAL_TAG + 10` (a firmware before it reads
+that as GREY); every earlier stored palette loads as it did.
+
+While one is stored, CUSTOM is the last name of `UI_PALETTES` (cmd 36: count 12, the last "CUSTOM"), `UI_SET` id 0 takes
+11, `UI_STATE`'s palette byte is 11 while it is in use, and MENU's COLOR (id 0 in `MENU_DESC` / `MENU_SET`) has 12 values
+(max 11, the last "CUSTOM"). With none stored: 11 values (MACHINE, then the ten fixed palettes), and `UI_SET` 0 with 11 answers
+rc 1. (Before Switch Blade: CUSTOM was the 11th value, with 10 built-in ones.)
 
 | cmd | Request args | Reply args |
 | --- | --- | --- |

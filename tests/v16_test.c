@@ -208,7 +208,7 @@ static uint16_t rgb(uint32_t r, uint32_t g, uint32_t b) { return (uint16_t)((r >
 static void custom_store(const uint16_t *c, int use)
 {
     cpal_store(c);
-    if (use) palette_choose(NPALETTES);
+    if (use) palette_choose(COLOR_CUSTOM);
 }
 static int screens_lit(const char *what)          /* every page, HOME, the menu: drawn, ink on the screen, the screen not flat */
 {
@@ -239,25 +239,27 @@ static int custom_palette_ui(void)
     const uint16_t light[5] = {rgb(250, 246, 235), rgb(230, 224, 208), rgb(20, 24, 40), rgb(30, 90, 160), rgb(200, 60, 40)};
     const uint16_t edge[5] = {rgb(0, 0, 0), rgb(36, 36, 36), rgb(136, 136, 136), rgb(88, 88, 88), rgb(70, 70, 70)};
     ui_power_on();
-    ok = menu_n(MI_COLOR) == NPALETTES && !(ui_cpal_flags & CPAL_STORED);
-    palette_choose(NPALETTES);                       /* (none stored: nothing changes) */
-    ok &= palette_cur() == settings.palette && !cpal_on();
-    bad += check("CUSTOM: none stored, COLOR has the 10 built-in values (CUSTOM does nothing)", ok);
-    palette_choose(4);
+    /* (Switch Blade: COLOR's value 0 is MACHINE, 1 .. NPALETTES the fixed palettes, COLOR_CUSTOM the one after them) */
+    ok = menu_n(MI_COLOR) == NPALETTES + 1u && !(ui_cpal_flags & CPAL_STORED);
+    palette_choose(COLOR_CUSTOM);                    /* (none stored: nothing changes) */
+    ok &= palette_cur() == 1u + settings.palette && !cpal_on();
+    bad += check("CUSTOM: none stored, COLOR has MACHINE and the 10 fixed values (CUSTOM does nothing)", ok);
+    palette_choose(1u + 4u);
     custom_store(dark, 0);
-    ok = menu_n(MI_COLOR) == NPALETTES + 1u && menu_get(MI_COLOR) == 4u && !strcmp(menu_vname(MI_COLOR, NPALETTES), "CUSTOM") &&
+    ok = menu_n(MI_COLOR) == NPALETTES + 2u && menu_get(MI_COLOR) == 1u + 4u && !strcmp(menu_vname(MI_COLOR, COLOR_CUSTOM), "CUSTOM") &&
          cpal_on() == 0u;
-    bad += check("CUSTOM: stored (not in use): COLOR has 11 values, the built-in 4 still in use, CUSTOM named last", ok);
-    palette_choose(NPALETTES);
-    ok = menu_get(MI_COLOR) == NPALETTES && T_BG == dark[0] && T_TEXT == dark[2] && settings.palette == 4u;
+    bad += check("CUSTOM: stored (not in use): COLOR has 12 values, the fixed 4 still in use, CUSTOM named last", ok);
+    palette_choose(COLOR_CUSTOM);
+    ok = menu_get(MI_COLOR) == COLOR_CUSTOM && T_BG == dark[0] && T_TEXT == dark[2] && settings.palette == 4u;
     bad += check("  CUSTOM chosen: its colours are the palette (BG TEXT), settings.palette stays 4 (what older firmware shows)", ok);
-    ok = menu_step(MI_COLOR, 1) == 0u && menu_step(MI_COLOR, -1) == NPALETTES - 1u;
-    palette_choose(0);
-    ok &= menu_step(MI_COLOR, -1) == NPALETTES && menu_step(MI_COLOR, 1) == 1u;
-    bad += check("  the menu steps COLOR through CUSTOM: past the last built-in one, round to the first", ok);
+    ok = menu_step(MI_COLOR, 1) == 0u && menu_step(MI_COLOR, -1) == NPALETTES;
+    palette_choose(0);                               /* MACHINE */
+    ok &= menu_step(MI_COLOR, -1) == COLOR_CUSTOM && menu_step(MI_COLOR, 1) == 1u;
+    bad += check("  the menu steps COLOR through CUSTOM: past the last fixed one, round to MACHINE, the first", ok);
+    palette_choose(1);                               /* GREY */
     {
         persist_t p;
-        palette_choose(NPALETTES);
+        palette_choose(COLOR_CUSTOM);
         settings_export(&p);
         ok = p.palette == palette_to_stored(0u) && p.favorites.factory[15][12] == 3u && palette_from_stored(p.palette) == 0u;
         bad += check("  saved: persist_t.palette is the built-in palette (the base), the colours and flags in favorites", ok);
@@ -278,7 +280,7 @@ static int custom_palette_ui(void)
         uint32_t k;
         for (k = 0; k < 2u; k++) {
             cpal_store(k ? white : same);
-            palette_choose(NPALETTES);
+            palette_choose(COLOR_CUSTOM);
             ui.home = 0; ui.menu = 0; ui.page = 0; page_entered(); ui.force = 1;
             frame(); frame();
             ui.menu = 1; ui.force = 1; frame();            /* the menu drawn too */
@@ -286,10 +288,10 @@ static int custom_palette_ui(void)
         }
         ok = cpal_on() && menu_step(MI_COLOR, 1) == 0u;
         palette_choose(menu_step(MI_COLOR, 1));
-        ok &= !cpal_on() && T_BG == UI_PALETTES[0].bg;
-        bad += check("  colours nobody can read (one grey, all white): drawn without a fault, COLOR steps back to a built-in palette", ok);
+        ok &= !cpal_on() && settings.palette == UI_PAL_MACHINE && T_BG == UI_MACHINE_PALS[TSEL->eng_req % NENGINES].bg;
+        bad += check("  colours nobody can read (one grey, all white): drawn without a fault, COLOR steps back to MACHINE", ok);
     }
-    palette_choose(0);
+    palette_choose(1);
     return bad;
 }
 

@@ -1224,6 +1224,102 @@ static int test_categories(void)
     return bad;
 }
 
+/* Switch Blade, MACHINE mode (MENU > COLOR > MACHINE, the default): the palette follows the selected track's machine, with its
+ * trim; a fixed palette and CUSTOM pin the look and have no trim */
+static int test_machine_palette(void)
+{
+    int bad = 0, ok = 1;
+    uint32_t t, e;
+    uint16_t bg[NENGINES];
+    ui_power_on();
+    settings.magic = 0;                                  /* fresh settings (settings_init's defaults) */
+    settings_init();
+    bad += check("fresh settings default to MACHINE (COLOR value 0, named MACHINE)",
+                 settings.palette == UI_PAL_MACHINE && palette_cur() == 0u && str_eq(palette_name(0), "MACHINE") &&
+                 str_eq(palette_name(1), "GREY") && palette_n() == 1u + NPALETTES);
+    for (e = 0; e < NENGINES; e++)                       /* the machines' palettes differ, and carry the machine's name */
+        for (t = 0; t < e; t++)
+            ok &= UI_MACHINE_PALS[e].bg != UI_MACHINE_PALS[t].bg || UI_MACHINE_PALS[e].theme != UI_MACHINE_PALS[t].theme;
+    bad += check("the four machine palettes are four looks (OB-Z WAVE ACID DRIFT, in engine order)",
+                 ok && UI_NMACHINE == NENGINES && str_eq(UI_MACHINE_PALS[ENGI_OBX].name, "OB-Z") &&
+                 str_eq(UI_MACHINE_PALS[ENGI_WAVE].name, "WAVE") && str_eq(UI_MACHINE_PALS[ENGI_ACID].name, "ACID") &&
+                 str_eq(UI_MACHINE_PALS[ENGI_DRIFT].name, "DRIFT"));
+    for (t = 0; t < NTRK; t++)                           /* a machine per track */
+        set_engine_of(&trk[t], t);
+    ui.menu = 0; ui.home = 1; ui.force = 1;
+    for (t = 0, ok = 1; t < NTRK; t++) {                 /* the track changes (ALGORITHM, or any route): the palette follows */
+        uint16_t before = T_BG;
+        song.sel = t;
+        ui_draw();
+        bg[t] = T_BG;
+        ok &= ux.trim == 1u + t && T_BG == UI_MACHINE_PALS[t].bg && T_THEME == UI_MACHINE_PALS[t].theme &&
+              (t == 0 || before != T_BG);
+    }
+    bad += check("MACHINE mode: selecting another track sets that machine's palette and trim on the next frame", ok);
+    ok = 1;
+    song.sel = 0;
+    ui_draw();
+    for (e = 0; e < NENGINES; e++) {                     /* the machine of the selected track changes */
+        set_engine_of(TSEL, e);
+        ui.force = 0;
+        ui_draw();
+        ok &= ux.trim == 1u + e && T_BG == bg[e];
+    }
+    bad += check("MACHINE mode: changing the selected track's machine sets that machine's palette", ok);
+    {   /* the change is one full redraw (ui.force): no pixel of the old machine's background is left on the screen */
+        uint32_t i, old_bg = 0;
+        song.sel = 0; set_engine_of(TSEL, ENGI_OBX); ui.force = 1; ui_draw();
+        for (i = 0; i < 240u * 240u; i++) old_bg += host_screen[i] == swap16(UI_MACHINE_PALS[ENGI_OBX].bg);
+        ok = old_bg > 1000u;                             /* (it is there before: OB-Z's near-black) */
+        set_engine_of(TSEL, ENGI_ACID); ui.force = 0; ui_draw();     /* no force from the test: the follow sets it */
+        for (i = 0, old_bg = 0; i < 240u * 240u; i++) old_bg += host_screen[i] == swap16(UI_MACHINE_PALS[ENGI_OBX].bg);
+        bad += check("MACHINE mode: the change redraws the whole screen in the new palette (no OB-Z background left)",
+                     ok && !old_bg && ux.light && ux.trim == 1u + ENGI_ACID);
+    }
+    /* a fixed palette pins the look: no follow, no trim */
+    palette_choose(1u + 3u);                             /* ICE */
+    for (t = 0, ok = 1; t < NTRK; t++) {
+        song.sel = t;
+        ui.force = 0;
+        ui_draw();
+        ok &= settings.palette == 3u && T_BG == UI_PALETTES[3].bg && !ux.trim;
+    }
+    bad += check("a fixed palette pins the colours across tracks and machines: no follow, no trim", ok);
+    palette_choose(0);                                   /* MACHINE again */
+    song.sel = 2;
+    ui_draw();
+    bad += check("COLOR > MACHINE after a fixed palette: the selected track's palette comes back", settings.palette == UI_PAL_MACHINE &&
+                 ux.trim == 1u + TSEL->eng_req % NENGINES);
+    {   /* CUSTOM: a stored palette is the value after the fixed ones, pins the look, and MACHINE comes back after it */
+        uint16_t c[5] = {0x0841, 0xCE59, 0xEF5D, 0xFFDF, 0xFD20};
+        cpal_store(c);
+        bad += check("CUSTOM stays the value after the fixed palettes (NPALETTES + 1) once one is stored",
+                     palette_n() == NPALETTES + 2u && COLOR_CUSTOM == NPALETTES + 1u && str_eq(palette_name(COLOR_CUSTOM), "CUSTOM"));
+        palette_choose(COLOR_CUSTOM);
+        for (t = 0, ok = 1; t < NTRK; t++) {
+            song.sel = t;
+            ui.force = 0;
+            ui_draw();
+            ok &= cpal_on() && palette_cur() == COLOR_CUSTOM && T_BG == c[0] && !ux.trim;
+        }
+        bad += check("CUSTOM pins the look across tracks (no follow, no trim)", ok);
+        palette_choose(0);
+        song.sel = 1;
+        ui_draw();
+        bad += check("choosing MACHINE leaves CUSTOM and follows the track again", !cpal_on() && palette_cur() == 0u &&
+                     ux.trim == 1u + TSEL->eng_req % NENGINES);
+        memset(ui_cpal, 0, 10);
+        ui_cpal_flags = 0;
+    }
+    {   /* STYLE LINE: the dividers are the seams: no trim (the palette is still the machine's) */
+        ui_style = ST_LINE; style_apply();
+        ui.force = 1; ui_draw();
+        bad += check("STYLE LINE keeps the machine's palette and draws no trim", ux.trim && T_BG == UI_MACHINE_PALS[TSEL->eng_req % NENGINES].bg);
+        ui_style = ST_FLAT; style_apply();
+    }
+    return bad;
+}
+
 static int test_display_preferences(void)
 {
     int bad = 0, k;
@@ -1241,11 +1337,13 @@ static int test_display_preferences(void)
                  settings.palette == 6 && T_BG == UI_PALETTES[6].bg && ux.light && ui.menu == 1 && !song.octave &&
                  memcmp(before, host_screen, sizeof before) && !memcmp(sounds, trk, sizeof sounds));
     turn(EN_K1, 1);
-    bad += check("COLOR KNOB 1 steps on to HI-CON, NIGHT (#50: true black), MONO (1.0.2: black and white), then wraps to GREY",
+    bad += check("COLOR KNOB 1 steps on to HI-CON, NIGHT (#50: true black), MONO (1.0.2: black and white), then wraps to MACHINE (Switch Blade), then GREY",
                  settings.palette == 7 && (turn(EN_K1, 1), settings.palette == 8u) && T_BG == 0u &&
                  str_eq(UI_PALETTES[8].name, "NIGHT") && (turn(EN_K1, 1), settings.palette == UI_BW_INDEX) &&
                  str_eq(UI_PALETTES[UI_BW_INDEX].name, "MONO") && T_BG == 0u && T_TEXT == 0xFFFFu &&
-                 (turn(EN_K1, 1), settings.palette == UI_GREY_INDEX) && str_eq(UI_PALETTES[UI_GREY_INDEX].name, "GREY"));
+                 (turn(EN_K1, 1), settings.palette == UI_PAL_MACHINE) && ux.trim == 1u + TSEL->eng_req % NENGINES &&
+                 (turn(EN_K1, 1), settings.palette == UI_GREY_INDEX) && str_eq(UI_PALETTES[UI_GREY_INDEX].name, "GREY") &&
+                 !ux.trim);
     settings.lowcut = 2;
     ui.menu_sel = MI_LOWCUT;
     press(B_OCTUP);
@@ -8375,6 +8473,7 @@ int main(void)
     bad += test_favorites();
     bad += test_categories();
     bad += test_display_preferences();
+    bad += test_machine_palette();
     bad += test_menu_tabs();
     bad += test_menu_project_rows();
     bad += test_information();

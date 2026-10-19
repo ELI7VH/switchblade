@@ -120,9 +120,9 @@ static void settings_init(void)
         settings.magic = SETTINGS_MAGIC;
         settings.palette = palette_from_stored(settings.palette);
     }
-    if (settings.magic != SETTINGS_MAGIC || settings.palette >= NPALETTES) {
+    if (settings.magic != SETTINGS_MAGIC || settings.palette > NPALETTES) {
         settings.magic = SETTINGS_MAGIC;
-        settings.palette = UI_GREY_INDEX;      /* GREY (default; named MONO before 1.0.2) */
+        settings.palette = UI_PAL_MACHINE;     /* MACHINE (the default since Switch Blade); a chosen palette keeps loading as it was */
         settings.lowcut = 0;
         settings.zoom = 0;                     /* (retired: the LEDS setting, settings_persist.c) */
     }

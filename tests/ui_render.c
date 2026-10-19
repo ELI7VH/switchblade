@@ -212,9 +212,25 @@ static void rules_cover(int32_t x0, int32_t y0, int32_t x1, int32_t y1)
 }
 #define GFX_HOOK_TEXT(x0, y0, x1, y1, s, flags) hk_text(x0, y0, x1, y1, s, flags)
 #define GFX_HOOK_BLIT(x, y, r0) hk_blit(x, y, r0, cv_w, cv_h)
-#define GFX_HOOK_BEGIN() (npend = ncells = 0, al_flush())
+#define GFX_HOOK_BEGIN() (npend = ncells = ntrim = 0, al_flush())
 #define GFX_HOOK_CELL(x0, y0, x1, y1) hk_cell(x0, y0, x1, y1)
 #define GFX_HOOK_RULE(x, y, w, h) hk_rule(x, y, w, h)
+/* the machines' trim (ui_trim.c): a rectangle drawn on the canvas first, in canvas pixels; at the blit every pixel of it
+ * must still be its colour: nothing the canvas holds (a text, an icon, a card, a keycap) was drawn over it, so the trim
+ * lives on the free rows and columns only (an exact, pixel check: an icon's box is its whole cell, its ink is not) */
+static int16_t trims[48][4];
+static uint16_t trim_c[48];
+static uint32_t ntrim, n_trim_rects, n_trim_checked, n_trim_bad;
+#define GFX_HOOK_TRIM(x0, y0, x1, y1, c) hk_trim(x0, y0, x1, y1, c)
+static void hk_trim(int32_t x0, int32_t y0, int32_t x1, int32_t y1, uint16_t c)
+{
+    if (ntrim < 48u) {
+        trims[ntrim][0] = (int16_t)x0; trims[ntrim][1] = (int16_t)y0; trims[ntrim][2] = (int16_t)x1; trims[ntrim][3] = (int16_t)y1;
+        trim_c[ntrim] = c;
+        ntrim++;
+    }
+    n_trim_rects++;
+}
 static uint32_t nink;                           /* GFX_HOOK_INK: inks drawn on their own colour */
 static void hk_ink(uint16_t ink, uint16_t bg);
 #define GFX_HOOK_INK(ink, bg) hk_ink(ink, bg)
@@ -396,11 +412,30 @@ static void contain(int32_t x, int32_t y)
         }
     }
 }
+static void trim_check(int32_t x, int32_t y)
+{
+    uint32_t i;
+    for (i = 0; i < ntrim; i++) {
+        const int16_t *t = trims[i];
+        int32_t px, py, bad = 0;
+        rbox_t o = {(int16_t)(t[0] + x), (int16_t)(t[1] + y), (int16_t)(t[2] + x), (int16_t)(t[3] + y), 0, "trim"};
+        n_trim_checked++;
+        for (py = t[1]; py < t[3]; py++)
+            for (px = t[0]; px < t[2]; px++)
+                bad += cv_px[(uint32_t)py * cv_w + (uint32_t)px] != swap16(trim_c[i]);
+        if (bad) {
+            n_trim_bad++;
+            finding("trim drawn over (under content)", &o, 0);
+        }
+    }
+    ntrim = 0;
+}
 static void hk_blit(uint32_t x, uint32_t y, uint32_t r0, uint32_t w, uint32_t h)
 {
     uint32_t i, k = 0;
     al_flush();
     contain((int32_t)x, (int32_t)y);
+    trim_check((int32_t)x, (int32_t)y);
     ncells = 0;
     blit_px += (uint64_t)w * (h > r0 ? h - r0 : 0u);
     for (i = 0; i < npend; i++) {
@@ -550,6 +585,19 @@ static void write_ppm(const char *dir, const char *pal, const char *name)
 
 /* ------------------------------------------------------------------ the screens --- */
 static void pal(uint32_t p) { settings.palette = p; palette_set(p); }
+/* machine e's palette and trim forced (a fixed palette pinned in the settings, so the UI's palette_follow leaves it alone) */
+static void palm(uint32_t e) { settings.palette = UI_GREY_INDEX; palette_set(PAL_MACHINE_ID(e)); }
+/* MACHINE mode as the menu sets it: the palette is the selected track's machine's (palette_apply) */
+static uint32_t mach_bad;
+static void machine_mode(void)
+{
+    settings.palette = UI_PAL_MACHINE;
+    trim_machine = 0xFFu;
+    palette_apply();
+    if (ux.trim != 1u + TSEL->eng_req % NENGINES || T_BG != UI_MACHINE_PALS[TSEL->eng_req % NENGINES].bg) mach_bad++;
+}
+static int32_t sweep_machine = -1;                /* the value sweeps: a machine's palette, or (-1) GREY */
+static void pal_sweep(void) { if (sweep_machine >= 0) palm((uint32_t)sweep_machine); else pal(UI_GREY_INDEX); }
 static void state(void)                          /* a playing song with steps on every track */
 {
     uint32_t i;
@@ -1497,7 +1545,7 @@ static void sweep_columns(void)
     for (e = 0; e < NENGINES; e++) {
         for (i = 0; i < NPAGES; i++) {
             state();
-            pal(UI_GREY_INDEX);
+            pal_sweep();
             eng(e);
             TSEL->p[P_ESYNC] = (int16_t)esync_pass;
             ui.home = 0; ui.page = (uint8_t)i; page_entered();
@@ -1533,7 +1581,7 @@ static void sweep_columns(void)
                 esync_pass = 0;
             }
         }
-        state(); pal(UI_GREY_INDEX); eng(e); go_home();   /* HOME's four knobs of this engine */
+        state(); pal_sweep(); eng(e); go_home();   /* HOME's four knobs of this engine */
         snprintf(name, sizeof name, "%s%s/HOME", large_on ? "LARGE " : "", ENGINES[e]->name);
         cur_name = name;
         draw(-1);
@@ -1557,7 +1605,7 @@ static void sweep_columns(void)
             lint();
             nsweep++;
         }
-        state(); pal(UI_GREY_INDEX); eng(e); go_home();   /* HOME, this machine on every track, every one muted */
+        state(); pal_sweep(); eng(e); go_home();   /* HOME, this machine on every track, every one muted */
         for (i = 0; i < NTRK; i++)
             trk[i].p[P_MUTE] = 1, set_engine_of(&trk[i], e);
         snprintf(name, sizeof name, "%s%s/HOME MUTED", large_on ? "LARGE " : "", ENGINES[e]->name);
@@ -1567,7 +1615,7 @@ static void sweep_columns(void)
     }
     for (e = 0; e < 4u; e++) {                           /* the MOD page: every source and destination */
         int32_t v;
-        state(); pal(UI_GREY_INDEX); go_title("MOD");
+        state(); pal_sweep(); go_title("MOD");
         cur_name = large_on ? "LARGE MOD sweep" : "MOD sweep";
         for (v = 0; v < MD_N; v++) {
             TSEL->p[P_M1SRC] = (int16_t)(v % MS_N); TSEL->p[P_M1DST] = (int16_t)v; TSEL->p[P_M1AMT] = (int16_t)(e * 40 - 64);
@@ -1972,6 +2020,20 @@ int main(int argc, char **argv)
             al_count -= 2u;
             npend = 0;
         }
+        {   /* the trim check: a trim rectangle with a text drawn over it is a finding, a clear one is not */
+            uint32_t f0 = nfind, b0 = n_trim_bad;
+            cv_begin(60, 20, T_BG);
+            cv_rect(0, 0, 40, 3, 0xF800u);
+            hk_trim(0, 0, 40, 3, 0xF800u);
+            cv_rect(0, 8, 40, 2, 0x07E0u);
+            hk_trim(0, 8, 40, 10, 0x07E0u);
+            cv_text(2, 0, &AF_S, "OVER", T_TEXT);                   /* over the first, clear of the second */
+            cv_blit(8, 200);
+            lint();
+            if (n_trim_bad - b0 != 1u) { fprintf(stderr, "ui_render: the trim check missed its self-test (%u)\n", n_trim_bad - b0); return 1; }
+            (void)f0;
+            npend = 0; nscr = 0;
+        }
         if (nfind < 5u || !nspill) { fprintf(stderr, "ui_render: the lint missed its self-test (%u)\n", nfind); return 1; }
         fprintf(rep, "(self-test: %u findings above are expected)\n\n", nfind);
         nfind = 0;
@@ -1992,6 +2054,75 @@ int main(int argc, char **argv)
             for (k = 0; k < sizeof SHOW / sizeof SHOW[0]; k++)
                 if (!strcmp(UI_PALETTES[p].name, SHOW[k])) write_ppm(out, SHOW[k], S_NAME[s]);
         }
+    {   /* the machines' palettes and trims (MENU > COLOR > MACHINE): every screen with each machine's palette forced; then in
+         * MACHINE mode on each machine's track (every screen with the selected track set to the machine); then in MACHINE mode as
+         * each screen sets its own track. HOME and EDIT of each machine: OUTDIR/ppm/<MACHINE>_<screen>.ppm. 0 lint findings,
+         * and no trim under a text, icon or card (hk_trim) */
+        static const char *const SHOT[] = {"home_big", "home_big_playing", "edit_big_obx", "edit_big_wave", "edit_big_acid",
+                                           "edit_big_drift", "home", "menu", "presets", "step"};
+        uint32_t m, k, n0 = nfind, nm = 0, nshot = 0;
+        n_trim_rects = n_trim_checked = 0;
+        for (m = 0; m < UI_NMACHINE; m++)
+            for (s = 0; s < S_COUNT; s++) {
+                char name[64];
+                snprintf(name, sizeof name, "MACHINE-%s/%s", UI_MACHINE_PALS[m].name, S_NAME[s]);
+                cur_name = name;
+                setup((int)s);
+                palm(m);
+                draw((int)s);
+                lint();
+                nm++;
+            }
+        for (m = 0; m < UI_NMACHINE; m++)
+            for (s = 0; s < S_COUNT; s++) {
+                char name[64];
+                snprintf(name, sizeof name, "TRACK-%s/%s", UI_MACHINE_PALS[m].name, S_NAME[s]);
+                cur_name = name;
+                setup((int)s);
+                eng(m);
+                machine_mode();
+                draw((int)s);
+                lint();
+                nm++;
+            }
+        for (s = 0; s < S_COUNT; s++) {
+            char name[64];
+            snprintf(name, sizeof name, "MACHINE/%s", S_NAME[s]);
+            cur_name = name;
+            setup((int)s);
+            machine_mode();
+            draw((int)s);
+            lint();
+            nm++;
+            for (k = 0; k < sizeof SHOT / sizeof SHOT[0]; k++)
+                if (!strcmp(S_NAME[s], SHOT[k])) {
+                    write_ppm(out, UI_MACHINE_PALS[TSEL->eng_req % NENGINES].name, S_NAME[s]);
+                    nshot++;
+                }
+        }
+        for (m = 0; m < UI_NMACHINE; m++) {          /* HOME of each machine's track in MACHINE mode: the shots */
+            setup(S_HOME_BIG);
+            eng(m);
+            machine_mode();
+            draw(S_HOME_BIG);
+            write_ppm(out, UI_MACHINE_PALS[m].name, "home_big");
+            nshot++;
+        }
+        for (m = 0; m < UI_NMACHINE; m++) {          /* the value sweeps (every page, engine and column value) in each machine's palette */
+            sweep_machine = (int32_t)m;
+            sweep_columns();
+        }
+        sweep_machine = -1;
+        printf("ui_render: MACHINE mode: %u screens (4 machine palettes forced, on each machine's track, as set up) and the value sweeps; "
+               "%u trim rectangles drawn, each still whole at the blit (%u checks); %u wrong palettes\n",
+               nm, n_trim_rects, n_trim_checked, mach_bad);
+        fprintf(rep, "MACHINE mode (every screen, 4 machine palettes forced, on each track, as set up; the value sweeps): %u screens, "
+                "%u trim rectangles drawn, %u checked against the texts and cards of their canvas; %u lint findings; %u wrong palettes\n",
+                nm, n_trim_rects, n_trim_checked, nfind - n0, mach_bad);
+        if (n_trim_rects < 1000u) { fprintf(stderr, "ui_render: the trim was drawn %u times only\n", n_trim_rects); nfind++; }
+        if (mach_bad) { fprintf(stderr, "ui_render: MACHINE mode set the wrong palette %u times\n", mach_bad); nfind++; }
+        (void)nshot;
+    }
     {   /* STYLE LINE (gfx.c ST_*): every screen in every palette, linted (GREY: gray, MONO: neutral); GREY MONO NIGHT
          * PAPER as OUTDIR/ppm/<STYLE>_<PALETTE>_<screen>.ppm (ui_render.py: sheet_<STYLE>_<PALETTE>.png) */
         static const char *const ST_N[2] = {"FLAT", "LINE"}, *const ST_PAL[] = {"GREY", "MONO", "NIGHT", "PAPER"};

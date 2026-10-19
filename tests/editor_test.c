@@ -155,7 +155,7 @@ static int motion_locks(void)
 static int preferences(void)
 {
     int bad = 0;
-    uint8_t a[4] = {0, 7, 0, 0};
+    uint8_t a[4] = {0, 8, 0, 0};                         /* (COLOR's value 8: Switch Blade's MACHINE is value 0, so the fixed palette 7) */
     reset();
     uint32_t n = request(ED_INFO, a, 0);
     uint32_t e = n - 6u;                                  /* (1.5.5: 4B 01 NCOND, 1.6: 45 01 5 last, below) */
@@ -180,7 +180,7 @@ static int preferences(void)
     request(ED_UI_SET, a, 2);
     bad += check("UI_SET updates the actual palette and reports RAM-only saving",
         host_wire[5] == 3 && settings.palette == 7 && T_BG == UI_PALETTES[7].bg);
-    a[1] = NPALETTES; request(ED_UI_SET, a, 2);
+    a[1] = NPALETTES + 1u; request(ED_UI_SET, a, 2);
     bad += check("out-of-range palette leaves the display unchanged", host_wire[5] == 1 && settings.palette == 7);
     a[0] = 1; a[1] = 1; request(ED_UI_SET, a, 2);
     bad += check("the retired font weight is not supported (rc 2), UI_STATE says 127",
@@ -767,11 +767,11 @@ static int menu_protocol(void)
                          !it.nnames && !strcmp(it.unit, "ct") && !strcmp(it.name, "TUNE")     /* (a number: cents) */
                        : n > 10u && it.index == idx && it.id == i && it.kind == 0 && it.min == 0 && !it.unit[0] &&
                          it.max + 1 == (int32_t)it.nnames && !strcmp(it.name, WANT[i][0]) &&
-                         (WANT[i][1] ? !strcmp(joined, WANT[i][1]) : it.nnames == NPALETTES);
-        ok &= it.value == (DEF[i] < 0 ? (int32_t)settings.palette : DEF[i]) &&
+                         (WANT[i][1] ? !strcmp(joined, WANT[i][1]) : it.nnames == NPALETTES + 1u);
+        ok &= it.value == (DEF[i] < 0 ? (int32_t)palette_cur() : DEF[i]) &&
               it.tab == TAB[i] && !strcmp(it.tabname, TABN[TAB[i]]) && !it.rest;
         if (i == 0)
-            for (k = 0; k < NPALETTES; k++) ok &= !strcmp(it.names[k], UI_PALETTES[k].name);
+            for (k = 0; k < NPALETTES; k++) ok &= !strcmp(it.names[0], "MACHINE") && !strcmp(it.names[k + 1u], UI_PALETTES[k].name);   /* (Switch Blade: MACHINE first) */
         if (!ok) { printf("  MENU_DESC %u: %s [%s] value %d max %d tab %u %s\n", i, it.name, joined, it.value, it.max, it.tab, it.tabname); break; }
         if (jf) {
             fprintf(jf, "%s\n {\"id\":%u,\"kind\":%u,\"min\":%d,\"max\":%d,\"value\":%d,\"name\":\"%s\",\"names\":[", i ? "," : "",
@@ -811,8 +811,8 @@ static int menu_protocol(void)
     /* MENU_SET: each setting, applied as the menu applies it; RAM only here (no flash: rc 3) */
     reset();
     ui.force = 0;
-    ok = menu_set(0, 2) == 3 && host_wire[6] == 0 && ed_rv(host_wire + 7) == 2 && settings.palette == 2u &&
-         T_BG == UI_PALETTES[2].bg && ui.force;
+    ok = menu_set(0, 2) == 3 && host_wire[6] == 0 && ed_rv(host_wire + 7) == 2 && settings.palette == 1u &&
+         T_BG == UI_PALETTES[1].bg && ui.force;
     ok &= menu_set(1, 1) == 3 && ui_style == ST_LINE;
     ok &= menu_set(2, 1) == 3 && (ui_prefs & PREF_LARGE);
     ok &= menu_set(3, 1) == 3 && (ui_prefs & PREF_ANIM_OFF);
@@ -856,8 +856,8 @@ static int menu_protocol(void)
     bad += check("MENU_SET: a flag back to its default leaves the other flags", ok);
 
     /* clamping: the reply carries the device's value */
-    ok = menu_set(0, 50) == 3 && ed_rv(host_wire + 7) == (int32_t)NPALETTES - 1 && settings.palette == NPALETTES - 1u;
-    ok &= menu_set(0, -5) == 3 && ed_rv(host_wire + 7) == 0 && settings.palette == 0u;
+    ok = menu_set(0, 50) == 3 && ed_rv(host_wire + 7) == (int32_t)NPALETTES && settings.palette == NPALETTES - 1u;
+    ok &= menu_set(0, -5) == 3 && ed_rv(host_wire + 7) == 0 && settings.palette == UI_PAL_MACHINE;   /* (0: MACHINE) */
     ok &= menu_set(4, 99) == 3 && ed_rv(host_wire + 7) == 5 && settings_leds == LEDS_INV && leds_inv() == 2u;   /* (1.5.6: INV HI last) */
     ok &= menu_set(5, 8191) == 3 && ed_rv(host_wire + 7) == 3 && settings_hold == 3u;
     ok &= menu_set(2, 7) == 3 && ed_rv(host_wire + 7) == 1 && (ui_prefs & PREF_LARGE);
@@ -1015,7 +1015,7 @@ static int custom_palette(void)
     ok = n > 0u && (host_wire[5] == 0 || host_wire[5] == 3) && (ui_cpal_flags & CPAL_STORED) && cpal_on() && T_BG == flat[0];
     bad += check("  and stored (op 1: rc as UI_SET, no rc 5)", ok);
     a[0] = 2; request(ED_PALETTE_SET, a, 1);
-    ok = ui_cpal_flags == 0u && palette_n() == NPALETTES;
+    ok = ui_cpal_flags == 0u && palette_n() == NPALETTES + 1u;
     bad += check("  a way back: op 2 removes it", ok);
     {
         uint8_t b[16] = {1, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};          /* red 32: out of range */
@@ -1030,7 +1030,7 @@ static int custom_palette(void)
     bad += check("  a value out of range, an unknown op: rc 1, nothing stored", ok);
     n = pal_send(0, good);                                                          /* the preview: gfx.c's copy only */
     ok = n > 0u && host_wire[5] == 0 && T_BG == good[0] && T_TEXT == good[2] && T_THEME == good[3] && T_ACCENT == good[4] &&
-         ui_cpal_flags == 0u && ui_cpal[0] == 0 && palette_n() == NPALETTES;
+         ui_cpal_flags == 0u && ui_cpal[0] == 0 && palette_n() == NPALETTES + 1u;
     bad += check("PALETTE_SET op 0 (preview): the colours are shown at once, nothing is stored", ok);
     ok = T_SEL == ux_mix(good[0], good[3], UI_SEL_PCT) && T_MID == ux_mix(good[0], good[2], UI_MID_PCT) && T_INK == good[0] &&
          !ux.mono && ux.light == 0u;
@@ -1040,7 +1040,7 @@ static int custom_palette(void)
     bad += check("PALETTE_SET op 3: the preview dropped, the palette in use again", ok);
     n = pal_send(1, good);
     ok = n > 0u && host_wire[4] == ED_PALETTE_SET && (host_wire[5] == 3 || host_wire[5] == 0) && ui_cpal_flags == (CPAL_STORED | CPAL_ACTIVE) &&
-         palette_cur() == NPALETTES && palette_n() == NPALETTES + 1u && T_BG == good[0] && host_wire[6] == 3 && host_wire[7] == 5;
+         palette_cur() == COLOR_CUSTOM && palette_n() == NPALETTES + 2u && T_BG == good[0] && host_wire[6] == 3 && host_wire[7] == 5;
     for (i = 0; i < 5u; i++) ok &= (uint16_t)(ui_cpal[2 * i] | ui_cpal[2 * i + 1] << 8) == good[i];
     bad += check("PALETTE_SET op 1: stored, in use (flags 3), five colours little endian in the settings' bytes", ok);
     n = palette_cmd(ED_PALETTE_GET, a, 0);
@@ -1048,54 +1048,54 @@ static int custom_palette(void)
          host_wire[9] == (good[0] & 31u);
     bad += check("PALETTE_GET after: flags 3 and the stored colours (r5 g6 b5, three 7-bit bytes each)", ok);
     n = palette_cmd(ED_UI_PALETTES, a, 0);
-    ok = n > 0u && host_wire[5] == NPALETTES + 1u && !strncmp((const char *)host_wire + 6 + 0, UI_PALETTES[0].name, 1);
+    ok = n > 0u && host_wire[5] == NPALETTES + 2u && !strncmp((const char *)host_wire + 6 + 0, "MACHINE", 8);
     {   /* the names: each a 12-byte field (ed_str): the last one is CUSTOM */
         uint32_t pos = 6, k;
-        for (k = 0; k < NPALETTES; k++) pos += (uint32_t)strlen((const char *)host_wire + pos) + 1u;
+        for (k = 0; k < NPALETTES + 1u; k++) pos += (uint32_t)strlen((const char *)host_wire + pos) + 1u;
         ok &= !strcmp((const char *)host_wire + pos, "CUSTOM");
     }
     bad += check("UI_PALETTES: CUSTOM listed last while one is stored", ok);
-    a[0] = 0; a[1] = NPALETTES; n = request(ED_UI_SET, a, 2);
-    ok = n > 0u && host_wire[5] != 1 && palette_cur() == NPALETTES;
-    a[1] = 3; request(ED_UI_SET, a, 2);
-    ok &= palette_cur() == 3u && settings.palette == 3u && (ui_cpal_flags & CPAL_STORED) && !(ui_cpal_flags & CPAL_ACTIVE) &&
+    a[0] = 0; a[1] = COLOR_CUSTOM; n = request(ED_UI_SET, a, 2);
+    ok = n > 0u && host_wire[5] != 1 && palette_cur() == COLOR_CUSTOM;
+    a[1] = 4; request(ED_UI_SET, a, 2);                                            /* (value 4: the fixed palette 3) */
+    ok &= palette_cur() == 4u && settings.palette == 3u && (ui_cpal_flags & CPAL_STORED) && !(ui_cpal_flags & CPAL_ACTIVE) &&
           T_BG == UI_PALETTES[3].bg;
-    a[1] = NPALETTES; request(ED_UI_SET, a, 2);
-    ok &= palette_cur() == NPALETTES && T_BG == good[0] && settings.palette == 3u;
-    a[1] = NPALETTES + 1u; request(ED_UI_SET, a, 2);
+    a[1] = COLOR_CUSTOM; request(ED_UI_SET, a, 2);
+    ok &= palette_cur() == COLOR_CUSTOM && T_BG == good[0] && settings.palette == 3u;
+    a[1] = COLOR_CUSTOM + 1u; request(ED_UI_SET, a, 2);
     ok &= host_wire[5] == 1;
-    bad += check("UI_SET 0: CUSTOM (10) selectable like a built-in palette, a built-in one leaves it stored (settings.palette the base)", ok);
+    bad += check("UI_SET 0: CUSTOM (11, after MACHINE and the ten fixed palettes) selectable like a built-in palette, a built-in one leaves it stored (settings.palette the base)", ok);
     {   /* COLOR in MENU: 11 values, CUSTOM last */
         menu_item_t it;
         menu_desc(0, &it);
-        ok = it.max == (int32_t)NPALETTES && it.nnames == NPALETTES + 1u && !strcmp(it.names[NPALETTES], "CUSTOM") &&
-             it.value == (int32_t)NPALETTES;
-        ok &= menu_set(0, 5) == 3 && palette_cur() == 5u && T_BG == UI_PALETTES[5].bg;
-        ok &= menu_set(0, 99) == 3 && palette_cur() == NPALETTES && T_BG == good[0];
-        bad += check("MENU COLOR: 11 values while CUSTOM is stored (CUSTOM last), MENU_SET reaches it", ok);
+        ok = it.max == (int32_t)COLOR_CUSTOM && it.nnames == NPALETTES + 2u && !strcmp(it.names[COLOR_CUSTOM], "CUSTOM") &&
+             !strcmp(it.names[0], "MACHINE") && it.value == (int32_t)COLOR_CUSTOM;
+        ok &= menu_set(0, 6) == 3 && palette_cur() == 6u && T_BG == UI_PALETTES[5].bg;
+        ok &= menu_set(0, 99) == 3 && palette_cur() == COLOR_CUSTOM && T_BG == good[0];
+        bad += check("MENU COLOR: 12 values while CUSTOM is stored (MACHINE first, CUSTOM last), MENU_SET reaches it", ok);
     }
     n = palette_cmd(ED_UI_STATE, a, 0);
-    ok = n > 0u && host_wire[6] == NPALETTES;
-    bad += check("UI_STATE: the palette byte is 10 while CUSTOM is in use", ok);
+    ok = n > 0u && host_wire[6] == COLOR_CUSTOM;
+    bad += check("UI_STATE: the palette byte is 11 while CUSTOM is in use", ok);
     a[0] = 2; n = palette_cmd(ED_PALETTE_SET, a, 1);
-    ok = n > 0u && ui_cpal_flags == 0u && palette_cur() == settings.palette && palette_n() == NPALETTES && T_BG == UI_PALETTES[settings.palette].bg;
+    ok = n > 0u && ui_cpal_flags == 0u && palette_cur() == 1u + settings.palette && palette_n() == NPALETTES + 1u && T_BG == UI_PALETTES[settings.palette].bg;
     for (i = 0; i < 10u; i++) ok &= ui_cpal[i] == 0;
-    bad += check("PALETTE_SET op 2: removed (flags 0, bytes 0), the built-in palette is back, COLOR has 10 values again", ok);
-    a[0] = 0; a[1] = NPALETTES; n = request(ED_UI_SET, a, 2);
+    bad += check("PALETTE_SET op 2: removed (flags 0, bytes 0), the built-in palette is back, COLOR has 11 values again", ok);
+    a[0] = 0; a[1] = COLOR_CUSTOM; n = request(ED_UI_SET, a, 2);
     ok = host_wire[5] == 1;
-    bad += check("UI_SET 0 with CUSTOM (10) but none stored: rc 1", ok);
+    bad += check("UI_SET 0 with CUSTOM (11) but none stored: rc 1", ok);
     {   /* a settings object with the bytes round trips (settings_export / settings_import), none stored reads as none */
         persist_t p;
         pal_send(1, good);
         settings_export(&p);
         memset(&favorites, 0, sizeof favorites);
-        ok = settings_import(&p, sizeof p) == 1 && ui_cpal_flags == 3u && palette_n() == NPALETTES + 1u;
+        ok = settings_import(&p, sizeof p) == 1 && ui_cpal_flags == 3u && palette_n() == NPALETTES + 2u;
         palette_apply();
         ok &= T_BG == good[0] && T_ACCENT == good[4];
         bad += check("settings: CUSTOM kept by an export and an import, in use after palette_apply", ok);
         p.favorites.factory[15][12] = 3; p.favorites.factory[15][0] = p.favorites.factory[15][4] = 0x55;   /* hard to read: kept as saved */
         p.favorites.factory[15][1] = p.favorites.factory[15][5] = 0x55;
-        ok = settings_import(&p, sizeof p) == 1 && ui_cpal_flags == 3u && ui_cpal[0] == 0x55 && palette_n() == NPALETTES + 1u;
+        ok = settings_import(&p, sizeof p) == 1 && ui_cpal_flags == 3u && ui_cpal[0] == 0x55 && palette_n() == NPALETTES + 2u;
         bad += check("settings: colours that are hard to read are kept as saved (the user's choice)", ok);
         p.favorites.factory[15][12] = 0xFE;
         ok = settings_import(&p, sizeof p) == 1 && ui_cpal_flags == 0u && ui_cpal[0] == 0;

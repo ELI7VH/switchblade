@@ -184,6 +184,7 @@ static void draw_edit_big(void)
             continue;
         big_sig[r] = sig;
         cv_begin(240, BIG_SH, T_BG);
+        trim_cv(TG_EDIT, 0, BIG_Y0 + (int32_t)r * BIG_SH, 240, BIG_SH);
         for (k = 2u * r; k < 2u * r + 2u; k++)
             draw_big_card(k, (uint32_t)BIG_CX(k), 1u);
         if (ux.style) {                                 /* LINE: the dividers (no SURF): between the cards, under the
@@ -283,6 +284,7 @@ static void home_tab(uint32_t c)
         return;
     home_sig[c] = sig;
     cv_begin(CARD_W, HOME_TH, T_BG);
+    trim_cv(TG_HOME, CARD_X(c), HOME_TY, CARD_W, HOME_TH);
     cv_rrect(0, 1, CARD_W, HT_H, 6, bg, T_BG);
     if (ux.style) {                                     /* LINE: the rules over and under the tab */
         cv_rect(0, 0, CARD_W, 1, T_RULE);
@@ -350,6 +352,7 @@ static void home_panel(void)
         return;
     home_sig[NTRK] = sig;
     cv_begin(240, HOME_PH, T_BG);
+    trim_cv(TG_HOME, 0, HOME_PY, 240, HOME_PH);
     cv_rrect(3, 1, 234, HOME_PH - 2, 6, T_SURF, T_BG);
     if (ux.style)                                       /* LINE: the rule under it */
         cv_rect(3, HOME_PH - 1, 234, 1, T_RULE);
@@ -432,6 +435,7 @@ static void home_cards(void)
         return;
     home_sig[NTRK + 1u] = sig;
     cv_begin(240, HOME_CH, T_BG);
+    trim_cv(TG_HOME, 0, HOME_CY, 240, HOME_CH);
     for (k = 0; k < 4u; k++) {
         int32_t x = CARD_X(k), lw = ink_w(&AF_S, L[k]);
         int hot = k == ui.hot_col && ui.hot_t, face;
@@ -481,6 +485,7 @@ static void home_gaps(void)
             lcd_fill(x, y, w, h, T_BG);
         }
     }
+    trim_screen(TG_HOME, (int32_t)y, (int32_t)h);       /* (MACHINE mode: the margins and the gaps' trim; the tabs redraw their own) */
 }
 
 static void draw_home_big(void)

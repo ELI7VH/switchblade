@@ -310,7 +310,7 @@ int main(void)
     reset();
     settings_init();
     {
-        const uint8_t amber[] = {0, 2};
+        const uint8_t amber[] = {0, 3};                  /* (COLOR's value 3: the fixed palette 2; value 0 is MACHINE) */
         song.playing = 1;
         bad += check("editor display change while playing is applied and reports deferred saving",
                       ed_ui_set(amber, sizeof amber) == 4 && settings.palette == 2u && persist_pending == 1 && !erases);
@@ -322,7 +322,7 @@ int main(void)
         bad += check("repeating an unchanged editor preference succeeds without erasing",
                       ed_ui_set(amber, sizeof amber) == 0 && erases == before);
         erase_error = 1;
-        const uint8_t mono[] = {0, 0};
+        const uint8_t mono[] = {0, 1};                   /* (value 1: the fixed palette 0) */
         bad += check("editor reports failed saving while preserving the previous flash setting",
                       ed_ui_set(mono, sizeof mono) == 3 && settings.palette == 0u && persist_pending == 2 &&
                       persist_saved.palette == palette_to_stored(2));

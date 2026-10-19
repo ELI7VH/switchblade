@@ -130,6 +130,38 @@ int main(int argc, char **argv)
                 sheet[(p / 4 * 124 + y) * 960 + p % 4 * 240 + x] = v;
             }
     }
+    {   /* Switch Blade: the four machines' palettes (MACHINE mode; UI_MACHINE_PALS, engine order) under the same rules as every
+         * palette: the contrast of text, labels, values, selection and keycaps (DRIFT's tan keys), the light ACID's derived tokens,
+         * and the trim only on them (a fixed palette and CUSTOM: none) */
+        assert(UI_NMACHINE == 4u && !strcmp(UI_MACHINE_PALS[0].name, "OB-Z") && !strcmp(UI_MACHINE_PALS[1].name, "WAVE") &&
+               !strcmp(UI_MACHINE_PALS[2].name, "ACID") && !strcmp(UI_MACHINE_PALS[3].name, "DRIFT"));
+        for (unsigned m = 0; m < UI_NMACHINE; m++) {
+            palette_set(PAL_MACHINE_ID(m));
+            struct { uint16_t fg, bg; double min; } c[] = {
+                {T_TEXT, T_BG, 12.0}, {T_TEXT, T_SURF, 9.0}, {T_MID, T_BG, 5.0}, {T_MID, T_SURF, 4.0},
+                {T_THEME, T_BG, 4.5}, {T_THEME, T_SURF, 4.5}, {T_ACCENT, T_BG, 4.5}, {T_ACCENT, T_SURF, 4.5},
+                {T_INK, T_SEL, 4.5}, {T_INK, T_THEME, 4.5}, {T_DIM, T_BG, 2.2}, {T_LINE, T_BG, 1.25}, {T_REC, T_BG, 3.0},
+                {T_INK, T_KEY, 4.5}, {T_KEY, T_BG, 3.0}, {T_KEY, T_SURF, 2.5}, {T_INK, T_DIM, 1.8}, {T_INK, T_ACCENT, 4.5},
+                {T_TEXT, T_RAISE, 7.0}, {T_INK, T_REC, 4.5}};
+            for (unsigned i = 0; i < sizeof c / sizeof c[0]; i++) {
+                double r = contrast(c[i].fg, c[i].bg);
+                if (r < c[i].min) printf("%s: pairing %u contrast %.2f < %.2f\n", UI_MACHINE_PALS[m].name, i, r, c[i].min);
+                assert(r >= c[i].min);
+            }
+            assert(ux.trim == 1u + m && !ux.mono && ux.light == (m == 2u) && T_BG == UI_MACHINE_PALS[m].bg);
+            assert(ux.light ? T_REC == UI_REC_LIGHT : T_REC == UI_REC_DARK);
+            assert(T_KEY == (UI_MACHINE_PALS[m].key ? UI_MACHINE_PALS[m].key : ux_mix(T_BG, T_TEXT, UI_KEY_PCT)));
+            assert((m == 3u) == (UI_MACHINE_PALS[m].key != 0));  /* DRIFT: tan keycaps, as the Juno-106's buttons */
+            assert(text_w(&AF_S, UI_MACHINE_PALS[m].name) <= 60);
+            printf("%-7s (machine) text %.1f:1, labels %.1f:1, values %.1f:1, selection %.1f:1\n", UI_MACHINE_PALS[m].name,
+                   contrast(T_TEXT, T_BG), contrast(T_MID, T_BG), contrast(T_THEME, T_BG), contrast(T_INK, T_SEL));
+        }
+        for (unsigned p = 0; p < NPALETTES; p++) { palette_set(p); assert(!ux.trim && !UI_PALETTES[p].key); }
+        palette_set(NPALETTES);
+        assert(!ux.trim);                                        /* CUSTOM */
+        palette_set(PAL_MACHINE_ID(1u));
+        assert(ux.trim == 2u && !ux.mono);                       /* (a machine palette is never the GREY / MONO special case) */
+    }
     /* the ramp cache follows the palette (a stale ramp would blend toward the old background) */
     palette_set(1);
     cv_begin(3, 1, T_BG); cv_text(0, 0, &probe, "A", T_THEME);

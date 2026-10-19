@@ -592,16 +592,16 @@ static void cursor_fix(void)                           /* LEN got shorter: onto 
         cursor_set(TSEL->p[P_SLEN] - 1);
 }
 
-/* COLOR's value v (the menu, the editor): a built-in palette, or CUSTOM when one is stored */
+/* COLOR's value v (the menu, the editor): MACHINE, a fixed palette, or CUSTOM when one is stored */
 static void palette_choose(uint32_t v)
 {
     if (v >= palette_n())                              /* (CUSTOM with none stored: nothing changes) */
         return;
-    if (v >= NPALETTES) {
+    if (v == COLOR_CUSTOM) {
         ui_cpal_flags |= CPAL_ACTIVE;
     } else {
         ui_cpal_flags &= (uint8_t)~CPAL_ACTIVE;
-        settings.palette = v;
+        settings.palette = v == 0 ? UI_PAL_MACHINE : v - 1u;
     }
     palette_apply();
     ui.force = 1;

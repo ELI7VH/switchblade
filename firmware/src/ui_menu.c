@@ -124,6 +124,7 @@ static void menu_dots(void);
 static void menu_head(void)
 {
     cv_begin(240, H_HEAD, T_BG);
+    trim_cv(TG_HEAD, 0, 0, 240, H_HEAD);
     GFX_HOOK_ALIGN(0, HEAD_MY + AF_M_CAP_Y, 0, HEAD_MY + AF_M_CAP_Y + AF_M_CAP_H, AL_V, "header icon on its title's line");
     cv_icon_mid(8, H_HEAD / 2, 16, ui.menu >= 2 ? ICON_X_INFO : ICON_X_COG, T_THEME, T_BG);   /* (as draw_head's) */
     GFX_HOOK_ALIGN(0, 0, 0, H_HEAD, AL_V, "header text on its middle");
