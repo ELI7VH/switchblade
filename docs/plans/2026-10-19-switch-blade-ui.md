@@ -150,3 +150,32 @@ comes one build and flash, and the user judges the look on the device.
 3. **MACHINE is the default colour mode.** The fixed palettes stay selectable.
 4. **The logo:** use the supplied artwork as is (`assets/switchblade_logo.jpg`).
 5. **The rename covers user-visible strings only.** The repo folder and the internal C names stay.
+
+## Reference images received (2026-10-19), and the derived palettes and trims
+
+The references are in `assets/refs/`: `drift_juno106.webp`, `obz_ob6.webp`, `acid_tb303.webp` and
+`wave_voidwave.webp`.
+
+- **Method.** The colours are sampled from them by quantising the saturated pixels for the signature
+  colours, and all pixels for the panel greys. Signature colours are lifted where needed, so values stay
+  readable on a 240 px screen.
+- **Status.** These are starting points: the `ui_render` contrast lint must pass on each, and the user
+  tunes them on the device.
+
+| Machine | bg | surf | text | theme | accent |
+|---|---|---|---|---|---|
+| DRIFT (Juno-106) | #0b0d11 | #2e3540 | #e4e6e8 | #c8403c | #3d86c8 |
+| OB-Z (OB-6) | #05080d | #111e2f | #e8ebef | #5b8fc8 | #e8352c |
+| ACID (TB-303), a light palette | #aebfcc | #c4d1db | #121820 | #25262d | #e8742a |
+| WAVE (VOID) | #131418 | #2a2d36 | #f2e8dc | #f5a623 | #ffd08a |
+
+**Trims (UI.3).** Each trim is data per machine, drawn with fills and rects; there are no bitmaps.
+
+| Machine | Trim |
+|---|---|
+| DRIFT | Red section bands (#a83032) across the header strip, the right-most band blue (#266ba1), as the Juno-106's top row; a 1-2 px red rule under the band row; keycap fills tan / cream (#e0c590), as its buttons |
+| OB-Z | Fine horizontal pinstripes (#1a406a, 1 px every 4 px) behind panels and cards, never under text: they are drawn in the gaps and margins only; 2-3 px wood-brown (#3c2e30) end cheeks on the left and right screen edges |
+| ACID | A dark band (#0d141b) along the bottom footer, like the 303's step section; red LED dots (#c83a30) as the step / active markers |
+| WAVE | A 1 px amber glow rule (#a46136 over #f5a623) under the header; cards with the plugin's rounded "screen" look (T_SURF over T_BG, as today) |
+
+**UI.2 and UI.3 run as one task** (UI.2+3), after UI.1, because both touch the drawing and palette code.
