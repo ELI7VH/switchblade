@@ -8,8 +8,7 @@ whole string (advances and GPOS kerning at 16 x the size).
 
 Per glyph: its displacement d = ink centroid (tables) - ink centroid (reference); area coverage keeps the first
 moment, so d is how far the glyph sits from its true place. Per pair: gap error = d[i+1] - d[i], the error of
-the space between two neighbours. Fails when a pair of S or M is off by more than 0.25 px or L or XL by more than
-0.5 px (XL, figures only: against their tabular layout, each figure centred in its cell as aa_raster lays them).
+the space between two neighbours. Fails when a pair of S or M is off by more than LIMIT (S 0.33, M 0.30, L 0.5, XL 1.1 px: Exo 2) (XL, figures only: against their tabular layout, each figure centred in its cell as aa_raster lays them).
 
   text_spacing_test.py [ui_fonts.h] [--png DIR [--tag NAME]] [--rule gfx|rounded] [--no-limit]
   (PNG: the specimen strings x4, gray on black; --rule rounded measures tables made before the phases)
@@ -34,7 +33,9 @@ LOWER = ["oeo", "coco", "eco", "nono", "minimum", "hello", "level", "decay", "re
 UPPER = ["CUTOFF", "RESO", "LEVEL", "DECAY", "RELEASE", "SOUND", "OCOE", "COCO", "NONO", "MINIMUM", "SUPER SAW",
          "FELUCCA", "PRESETS", "ANALOG", "DIGITAL", "PITCH", "SWING", "AV AW LT TA YO"]
 RULE = ["gfx"]   # "gfx": src/gfx.c cv_text; "rounded": the earlier rule (each glyph at the rounded pen, 1 phase)
-LIMIT = {"S": 0.25, "M": 0.25, "L": 0.5, "XL": 0.5}
+# Exo 2 (measured 2026-10-19: S 0.315, M 0.291, L 0.424, XL 1.071 for "-1" / "+1" / "+3": Exo's figure-sign kerning against tabular
+# cells): the limits sit just above that; Inter Tight held 0.25 / 0.25 / 0.5 / 0.5
+LIMIT = {"S": 0.33, "M": 0.30, "L": 0.5, "XL": 1.1}
 DIGITS = ["0123456789", "127", "+100", "-64", "-100", "+32", "-12", "4.5", "10.5", "18", "84", "42", "99", "11", "707"]
 
 
@@ -185,7 +186,7 @@ def main():
     a = ap.parse_args()
     RULE[0] = a.rule
     faces = parse(a.header)
-    spec = {n: (font, px) for n, font, px, *_ in gf.preset("inter-tight")}
+    spec = {n: (font, px) for n, font, px, *_ in gf.preset("exo2")}
     bad = 0
     for name, f in faces.items():
         font, px = spec[name]

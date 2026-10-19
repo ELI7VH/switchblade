@@ -41,7 +41,12 @@ static const menu_credit_t MENU_CREDITS[] = {
     {"Fukiai icon font: MIT", MC_TEXT},
     {"https://github.com/hugelton", MC_URL},
     {"", MC_TEXT},
-    {"INTER TIGHT", MC_TITLE},
+    {"EXO 2", MC_TITLE},                         /* the UI type (tools/gen_aa_font.py --preset exo2) */
+    {"Natanael Gama", MC_TEXT},
+    {"SIL Open Font License 1.1", MC_TEXT},
+    {"https://github.com/googlefonts/Exo-2.0", MC_URL},
+    {"", MC_TEXT},
+    {"INTER TIGHT", MC_TITLE},                   /* the keycap pills (tools/gen_aa_keycaps.py) */
     {"The Inter Project Authors", MC_TEXT},
     {"SIL Open Font License 1.1", MC_TEXT},
     {"https://github.com/rsms/inter-tight", MC_URL},
