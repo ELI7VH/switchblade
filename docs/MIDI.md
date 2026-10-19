@@ -1,6 +1,6 @@
-# VOID FOUR and MIDI
+# Switch Blade and MIDI
 
-VOID FOUR has four tracks, and each track is one machine: OB-Z, WAVE, ACID and DRIFT.
+Switch Blade has four tracks, and each track is one machine: OB-Z, WAVE, ACID and DRIFT.
 Each track can play its own machine, drive an external synth, or do both.
 The same CC numbers work in both directions. A controller turning CC74 on channel 1 moves track 1's CUT.
 When track 1 is set to send, turning track 1's CUT knob sends CC74 on channel 1.
@@ -44,11 +44,11 @@ What comes **in** over MIDI (USB or TRS) is not passed through:
 - Notes received are played, not sent out. If the track's arpeggiator is on, the notes it plays from them do go out, because the arpeggiator generates them.
 - CCs received set their parameters, but are not sent out. The same is true when MIDI LEARN maps a received CC to a parameter.
 - A Program Change received loads the preset, but sends no Program Change.
-- While VOID FOUR follows an external clock, it sends no clock.
+- While Switch Blade follows an external clock, it sends no clock.
 
-A DAW that echoes VOID FOUR's own output back to it can still double what it sent, for example by playing the echoed notes on the track's own voice in BOTH. Turn off the DAW's MIDI thru for VOID FOUR's port.
+A DAW that echoes Switch Blade's own output back to it can still double what it sent, for example by playing the echoed notes on the track's own voice in BOTH. Turn off the DAW's MIDI thru for Switch Blade's port.
 
-When you load a factory preset, VOID FOUR sends its Program Change but not the preset's CUT, RES and other values. The external synth keeps the sound its own program chose. After that, only the changes you make are sent.
+When you load a factory preset, Switch Blade sends its Program Change but not the preset's CUT, RES and other values. The external synth keeps the sound its own program chose. After that, only the changes you make are sent.
 
 Switching a track to EXT or BOTH sends nothing until you change something.
 
@@ -84,13 +84,13 @@ With MENU > CONTROL > SELECT set to MODW, turning SELECT on a track set to EXT o
 
 ## Clock
 
-MENU > MIDI OUT > CLOCK OUT (default ON) sends MIDI clock over USB while VOID FOUR runs on its own clock (CLK INT):
+MENU > MIDI OUT > CLOCK OUT (default ON) sends MIDI clock over USB while Switch Blade runs on its own clock (CLK INT):
 
 - **Start (FA)** when you press PLAY. A restart (GLO + PLAY) sends Stop and then Start.
 - **Clock (F8)** at 24 pulses per quarter note, locked to the sequencer.
 - **Stop (FC)** when you press STOP, when you turn CLOCK OUT off while playing, and when you switch CLK to an external clock.
 
-When VOID FOUR follows an external clock (CLK USB or CLK TRS), it sends no clock. This prevents clock loops. If you turn CLOCK OUT on in the middle of a song, the clock starts with the next PLAY.
+When Switch Blade follows an external clock (CLK USB or CLK TRS), it sends no clock. This prevents clock loops. If you turn CLOCK OUT on in the middle of a song, the clock starts with the next PLAY.
 Clock goes out for the whole device, whatever each track's OUT setting is.
 
 ## MIDI LEARN
@@ -100,6 +100,6 @@ MIDI OUT always sends the fixed map, not learned CCs.
 
 ## Recipe: drive an external synth from track N
 
-1. Connect VOID FOUR to your computer or USB MIDI host. On the external synth, set its MIDI input to receive **channel N** from VOID FOUR's USB port. If MENU > MIDI > MIDI IN is not CH1-4, use the channel shown for track N.
-2. Go to **MENU > MIDI OUT > TN OUT** and choose **EXT**, or **BOTH** if you also want VOID FOUR's machine to play.
-3. Play the keys or press PLAY. Track N's notes now play the external synth, and EDIT knobs 1..4 move its filter and more on **CC 74, 71, 79 and 70**. Load a preset on track N to send a Program Change. If the synth should follow VOID FOUR's tempo, leave CLOCK OUT on and set the synth to external clock.
+1. Connect Switch Blade to your computer or USB MIDI host. On the external synth, set its MIDI input to receive **channel N** from Switch Blade's USB port. If MENU > MIDI > MIDI IN is not CH1-4, use the channel shown for track N.
+2. Go to **MENU > MIDI OUT > TN OUT** and choose **EXT**, or **BOTH** if you also want Switch Blade's machine to play.
+3. Play the keys or press PLAY. Track N's notes now play the external synth, and EDIT knobs 1..4 move its filter and more on **CC 74, 71, 79 and 70**. Load a preset on track N to send a Program Change. If the synth should follow Switch Blade's tempo, leave CLOCK OUT on and set the synth to external clock.

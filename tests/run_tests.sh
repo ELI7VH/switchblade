@@ -426,6 +426,8 @@ run "regression: target cost of the render loops (pi32v2 disassembly)" python3 t
     build/felucca.dis tests/target_budget.txt
 
 run "installer CLI (fm1_install.py) against a simulated FM-1" python3 tests/install_test.py
+run "Switch Blade: boot logo header (size, <= 128 colours, black 0, indices, const, deterministic), identity FM-1_940 kept, release name" \
+    python3 tests/switchblade_test.py build/gen/ui_logo.h
 
 # web editor deferred (FM1-Four plan Phase 9): web/test_web.mjs, web/test_backup.mjs and the browser emulator (web/emu)
 echo "== skip the web tests and the browser emulator (web editor deferred, FM1-Four plan Phase 9)"

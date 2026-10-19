@@ -1421,33 +1421,35 @@ static void draw(int s)
     }
     if (s == S_SPLASH) {                          /* the power-on splash (main.c, before the UI): its lines, the version
                                                    * shown FELUCCA_VERSION (run_tests.sh: src/felucca.c's) */
-        static const char WANT[] = "VOID FOUR|" FELUCCA_VERSION "|Void Audio|on Felucca by H\xFCgelton";
+        static const char WANT[] = FELUCCA_VERSION "|Void Audio|on Felucca by H\xFCgelton";
         splash_seen[0] = 0;
         in_splash = 1;
         draw_splash();
         in_splash = 0;
-        {   /* the square whole on the screen (176 x 176 at 32,32, more than the canvas): its edges and square corners
-             * RAISE, BG just outside; its text's ink 16 px in from the left and the top (the bottom: AL_B, the hook) */
-            const int32_t q0 = 32, q1 = 32 + 176 - 1;
-            uint16_t bg = host_screen[0], ra = host_screen[(uint32_t)(q0 + 1) * 240u + (uint32_t)q0 + 1];
-            int32_t i, x, y, ix = 999, iy = 999, bad = ra == bg;
-            for (i = q0 - 1; i <= q1 + 1; i++) {
-                int32_t in = i >= q0 && i <= q1;
-                bad |= host_screen[(uint32_t)(q0 - 1) * 240u + (uint32_t)i] != bg || host_screen[(uint32_t)(q1 + 1) * 240u + (uint32_t)i] != bg
-                    || host_screen[(uint32_t)i * 240u + (uint32_t)(q0 - 1)] != bg || host_screen[(uint32_t)i * 240u + (uint32_t)(q1 + 1)] != bg;
-                if (in)
-                    bad |= host_screen[(uint32_t)q0 * 240u + (uint32_t)i] != ra || host_screen[(uint32_t)q1 * 240u + (uint32_t)i] != ra
-                        || host_screen[(uint32_t)i * 240u + (uint32_t)q0] != ra || host_screen[(uint32_t)i * 240u + (uint32_t)q1] != ra;
-            }
-            for (y = q0; y <= q1; y++)
-                for (x = q0; x <= q1; x++)
-                    if (host_screen[(uint32_t)y * 240u + (uint32_t)x] != ra) {
-                        if (x - q0 < ix) ix = x - q0;
-                        if (y - q0 < iy) iy = y - q0;
-                    }
-            if (bad || ix != 16 || iy != 16) {
-                if (rep) fprintf(rep, "FIND %-26s the splash square not whole (edges %s) or its text not 16 px in (left %d, top %d)\n",
-                                 cur_name, bad ? "off" : "ok", (int)ix, (int)iy);
+        {   /* Switch Blade's logo (ui_logo.h): the generated header's limits, then the screen holding it exactly: every
+             * pixel the palette's colour of its index, centred in x, SPL_LOGO_Y down; black (0) above, beside and
+             * between it and the text, and the text below it (some ink in each of the three lines' bands) */
+            uint32_t x, y, bad = 0, i, x0 = (240u - UI_LOGO_W) / 2u, ink[3] = {0, 0, 0};
+            static const uint32_t band[3][2] = {{SPL_VER_Y, SPL_VER_Y + 22u}, {SPL_CRED_Y, SPL_CRED_Y + 17u},
+                                                {SPL_CRED_Y + SPL_CRED_PITCH, SPL_CRED_Y + SPL_CRED_PITCH + 17u}};
+            bad |= UI_LOGO_NCOL > 128 || UI_LOGO_W != 236 || UI_LOGO_H != 135 || UI_LOGO_PAL[0] != 0;
+            for (i = 0; i < UI_LOGO_W * UI_LOGO_H; i++)
+                bad |= UI_LOGO_PX[i] >= UI_LOGO_NCOL;
+            for (y = 0; y < 240u; y++)
+                for (x = 0; x < 240u; x++) {
+                    uint16_t px = host_screen[y * 240u + x];
+                    if (y >= SPL_LOGO_Y && y < SPL_LOGO_Y + UI_LOGO_H && x >= x0 && x < x0 + UI_LOGO_W)
+                        bad |= px != swap16(UI_LOGO_PAL[UI_LOGO_PX[(y - SPL_LOGO_Y) * UI_LOGO_W + x - x0]]);
+                    else if (y >= SPL_VER_Y)
+                        for (i = 0; i < 3u; i++) {
+                            if (y >= band[i][0] && y < band[i][1]) ink[i] += px != 0;
+                        }
+                    else
+                        bad |= px != 0;
+                }
+            if (bad || !ink[0] || !ink[1] || !ink[2] || SPL_CRED_Y + SPL_CRED_PITCH + 17u > 240u) {
+                if (rep) fprintf(rep, "FIND %-26s the splash is not the logo whole and centred on black with the three text lines under it (%s, ink %u %u %u)\n",
+                                 cur_name, bad ? "logo/black off" : "ok", ink[0], ink[1], ink[2]);
                 nfind++;
             }
         }

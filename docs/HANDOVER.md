@@ -1,10 +1,10 @@
-# VOID FOUR firmware: handover (2026-10-16)
+# Switch Blade firmware (working name VOID FOUR): handover (2026-10-16)
 
 This file hands the work over to the next agent. Read it top to bottom before you touch anything.
 
 ## 1. What this is
 
-VOID FOUR is a fork of the Felucca 1.6 firmware for the M-VAVE FM-1 (a JieLi AC79 chip with a 240×240 ST7789V screen). It is plain C, built as one unity build from `firmware/src/felucca.c`, with fixed-point DSP. The fork keeps exactly four synth machines, each with 32 factory presets:
+Switch Blade (working name VOID FOUR; the repo folder FM1-Four, the FOR4 format and the identity FM-1_940 keep their names) is a fork of the Felucca 1.6 firmware for the M-VAVE FM-1 (a JieLi AC79 chip with a 240×240 ST7789V screen). It is plain C, built as one unity build from `firmware/src/felucca.c`, with fixed-point DSP. The fork keeps exactly four synth machines, each with 32 factory presets:
 
 | id | Machine (display) | C ids | Source file | State |
 |---|---|---|---|---|
@@ -201,3 +201,7 @@ mkdir -p build/ui_new/ppm build/ui_slot && build/host/ui_render build/ui_new bui
 - Earlier "the only failure is perform" claims were once wrong because of 80 splash findings. Verify claims like that against `build/ui_new/report.txt`.
 - Implementers sometimes skip RED. Ask for the RED output explicitly.
 - `scripts/task-brief` matches "Task N" by regex. For dotted task ids, pass `"1\\.1"` and an explicit out-file.
+
+## Switch Blade: rename and boot logo (UI.1, 2026-10-19)
+- User-visible name is **Switch Blade**: splash, USB product string (`usb.c` STR2), console banner, MENU > INFO > FIRMWARE, editor INFO string, release package `switchblade-X.Y.fwsc`. Unchanged: installer identity `FM-1_940`, the FOR4 format, machine names, C identifiers, the folder name.
+- Boot logo: `assets/switchblade_logo.jpg` -> `tools/gen_logo.py` (run by `build.py`) -> `build/gen/ui_logo.h` (236x135, <= 128 colours, index 0 black, 8 bpp + RGB565 palette, `const`). `draw_splash` blits it row by row to the LCD in its own colours (not themed). Tests: `tests/switchblade_test.py`, `tests/usb_desc_test.c`, `tests/ui_render.c` splash.

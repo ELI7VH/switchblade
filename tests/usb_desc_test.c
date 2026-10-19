@@ -175,6 +175,15 @@ int main(void)
            T_UAC ? (AS_FIRST ? ", AS first" : ", MIDI first") : "", T_LAYOUT);
     check("GET_DESCRIPTOR device", get_desc(0x0100, &dev, &dev_len) && dev_len == 18 && dev[0] == 18 && dev[1] == 1);
     check("GET_DESCRIPTOR configuration", get_desc(0x0200, &c, &n) && c[1] == 2);
+    {   /* Switch Blade (Task UI.1): the product string, string 2, reads "Switch Blade" (UTF-16LE, bLength 2 + 2 x 12) */
+        const uint8_t *sp = 0;
+        uint16_t sl = 0;
+        static const char NAME[] = "Switch Blade";
+        uint32_t i, ok = get_desc(0x0302, &sp, &sl) && sl == 2u + 2u * (sizeof NAME - 1u) && sp[0] == sl && sp[1] == 3;
+        for (i = 0; ok && i + 1u < sizeof NAME; i++)
+            ok = sp[2u + 2u * i] == (uint8_t)NAME[i] && sp[3u + 2u * i] == 0;
+        check("product string (string 2) is \"Switch Blade\"", ok);
+    }
 
     /* ---- the device ---- */
     if (!CDC_SHOWN)
