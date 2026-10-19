@@ -143,3 +143,10 @@ comes one build and flash, and the user judges the look on the device.
    "H" at small size. Keep it, or supply a cleaned export?
 5. **Scope of the rename:** also rename the repo folder `FM1-Four`, or the internal C names?
    Recommendation: no, user-visible strings only.
+
+## Answers from the user (2026-10-19)
+1. **ACID:** TB-303 style: silver / light-grey surfaces with an **orange** accent.
+2. **Reference images:** the user will send OB-6 and Juno-106 panels; UI.3 waits for them.
+3. **MACHINE is the default colour mode.** The fixed palettes stay selectable.
+4. **The logo:** use the supplied artwork as is (`assets/switchblade_logo.jpg`).
+5. **The rename covers user-visible strings only.** The repo folder and the internal C names stay.
