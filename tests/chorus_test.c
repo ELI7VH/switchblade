@@ -454,7 +454,7 @@ static mixr_t mix_run(uint32_t e, uint32_t pi, int chor, uint32_t note, uint32_t
 /* the hashes of DRIFT's output with CHOR OFF (1.5 s, one note, the preset's own sends): the OFF path must not move (the golden file pins the
  * same on all 32 presets). Recorded from the tree before Task 6.2 (8ed17cc7.. 86d05a87.. b2a34c3a..); re-recorded in Task 6.3, which changed
  * the voice itself on purpose (the ladder's small-signal path and k-cache, the blep's reciprocal: the same filter to 1e-5, not the same bits) */
-static const uint64_t PIN_OFF[3] = {0x0c352095350b31b3ull, 0xed726d2e46a9a57dull, 0x8b2c3ebc642e43f1ull};   /* [2] (HOOVER, 21) re-pinned in FX.1: its DIST is the Scream-style one now (was 0xc5f249a37e6af565); 0 and 22 have no DIST: unchanged */
+static const uint64_t PIN_OFF[3] = {0x0c352095350b31b3ull, 0xed726d2e46a9a57dull, 0x0d9f33a3f575bda5ull};   /* [2] (HOOVER, 21) re-pinned in FX.1 (its DIST is the Scream-style one; was 0xc5f249a37e6af565) and in FX.2 (the oversampled loop; was 0x8b2c3ebc642e43f1); 0 and 22 have no DIST: unchanged */
 static const uint8_t PIN_PRESET[3] = {0, 22, 21};
 static void test_mix_off(void)
 {

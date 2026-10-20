@@ -1227,7 +1227,7 @@ static double mix_cost(const uint8_t (*parts)[3])
  *  - it MEASURES and prints the dearest legal four-track mix it can construct (the figure Task 8.1 must check on the device,
  *    recorded in docs/BASELINE.md): the engines' dearest presets, every split of the shared 8-voice budget over the four parts, any engine
  *    on any part (the same one on several), the dearest total; 4parts_light and 4parts_full are printed for reference. */
-#define DRIFT_COST_MAX 1525.0  /* the measured worst (FAT SAW BASS, 1386 at DRIFT_POLY 3, DRIFT_OS 1, DRIFT_CTRL 8, -O2) + 10 % */
+#define DRIFT_COST_MAX 1885.0  /* the measured worst (HOOVER, 1712 at DRIFT_POLY 3, DRIFT_OS 1, DRIFT_CTRL 8, -O2) + 10 %: FX.2 moved it from 1525 (FAT SAW BASS 1386 + 10 %), because the part path includes its DIST (4x oversampled: +280) and HOOVER has one */
 
 static uint32_t engine_cap(uint32_t e)
 {

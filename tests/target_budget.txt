@@ -32,4 +32,4 @@ bass303_render 8524
 drift_render 46616
 void_render 8579
 void_block_slow 1135
-track_dist 5150
+track_dist 11112

@@ -87,7 +87,9 @@
 #                   without a click, the output bounded (<= 32767) on 8 FS noise / squares / sweeps and through the real part path (OVERDRIVE ACID, JUNO FAT SAW BASS x3, OB-Z x8),
 #                   silence in -> exactly silence out within 50 ms (the gate) and clean state after the part's tail, no NaN / denormal, a P_DIST sweep (every block)
 #                   without a step at the block edges, the level within +-3 dB of the old DIST on a saw chord, the alias floor of a 2 kHz sine (printed), the cost; --wav
-#                   writes the listening renders.
+#                   writes the listening renders. FX.2: the DIST loop runs 4x oversampled (DIST_OS 4; 2 is built and run as a second dist_test): the alias floor of a
+#                   band-limited saw at 0.7 FS (110 / 440 Hz, <= -50 dB below 20 kHz up to P_DIST 102, -40 dB at 127), the oversampler's pass band and images, the resonance
+#                   frozen above d 0.4, the harmonic density of a sine rising at every step of the knob.
 # SOUND 1.5 (tests/sound15_test.c; #104 #175): ANALOG's filter TYPE (LP bit for bit, every other engine ignores it, BP / HP
 #                   responses around the cutoff, RES, bounded at the corners), ENV SYNC (OFF bit for bit, the note values
 #                   on the knob, attack / decay / release times at 60 / 120 / 173 BPM and on the external clock), the cost;
@@ -309,8 +311,11 @@ if [ -f build/gen/felucca_tables.h ]; then
     run "INSERT (1.5): OFF / MIX 0 bit for bit, each TYPE (no DC, bounded, dry / wet), MIX glide, automation, stored, cost, demos" \
         "$OUT/insert_test" build/insert_demo
     $CC -O2 -w -ffp-contract=off -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/dist_test" tests/dist_test.c -lm
-    run "DIST (FX.1): P_DIST 0 bypass bit for bit, no click on switch-on, bounded, the gate (silence in, silence out), no NaN / denormal, no zipper on a sweep, level against the old DIST, alias floor, cost" \
+    run "DIST (FX.1, FX.2): P_DIST 0 bypass bit for bit, no click on switch-on, bounded, the gate (silence in, silence out), no NaN / denormal, no zipper on a sweep, level against the old DIST, alias floor (saw at 0.7 FS, 4x oversampled), the oversampler's pass band / images, resonance frozen above d 0.4, intensity rising, cost" \
         "$OUT/dist_test"
+    $CC -O2 -w -DDIST_OS=2 -ffp-contract=off -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/dist_test_os2" tests/dist_test.c -lm
+    run "DIST (FX.2) with DIST_OS 2, the cheaper fallback: the same checks with its own alias gates and cost caps" \
+        "$OUT/dist_test_os2"
     $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/sound15_test" tests/sound15_test.c -lm
     mkdir -p build/sound15_demo
     run "1.5 sound items: ANALOG filter TYPE LP / BP / HP (responses, LP and other engines bit for bit), ENV SYNC (times at several tempi), cost, demos" \

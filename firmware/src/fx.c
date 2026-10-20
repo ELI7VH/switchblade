@@ -98,8 +98,8 @@ static struct {                          /* HALL's state (in the pool: no .bss) 
  * block, the tanh Scream's rational x (27 + x^2) / (27 + 9 x^2) clamped at +-3 (one divide), no ADAA (no doubles).
  * The macro P_DIST 0..127 (d = P_DIST / 127, one-pole smoothed per block so a sweep, the mod matrix' MD_DIST or a
  * motion record does not zipper; the gains ramp across the block):
- *   drive     0 .. +24 dB, d^2 (the first third is subtle)
- *   RESONANCE 0 up to d = 0.2, then up to 0.85: the feedback gain -12 .. +12 dB (Scream's law) and the HP's Q 0.707 ..
+ *   drive     0 .. +24 dB as d^2 up to d = 0.4 (+3.8 dB), then 24 d^2 + 3 ((d - 0.4) / 0.6)^2: +27 dB at the top (it keeps rising)
+ *   RESONANCE 0 up to d = 0.2, then up to 0.2125 at d = 0.4 and FROZEN there up to 1 (FX.2): the feedback gain -12 .. +12 dB (Scream's law) and the HP's Q 0.707 ..
  *             1.414 follow it; the feedback itself fades in over d 0 .. 0.25 (d -> 0 is a plain tanh + low-pass)
  *   LP cutoff 5 kHz at E1 (the README's figure: an octave per octave from the latest note-on, t->m_key), x1.8 at d = 0
  *             (9 kHz) down to x1 at d = 1; clamped to 150 Hz .. 0.45 fs
@@ -110,8 +110,22 @@ static struct {                          /* HALL's state (in the pool: no .bss) 
  * Kept from the old DIST: the 55 Hz low cut in front of the clipper (the bass stays tight; it also keeps DC out of the
  * loop). Dropped: its asymmetric bias (even harmonics): Scream is symmetric.
  * P_DIST 0: a true bypass (nothing touched; the float state is cleared once, so switching on starts clean). */
+/* FX.2: the clipper loop (tanh -> SVF low-pass -> feedback SVF high-pass -> tanh) runs at DIST_OS x 44.1 kHz (4 by default, 2 is
+ * the cheaper fallback: build with -DDIST_OS=2): the aliases the tanh folds back (tones at 9-18 kHz that track the note: the
+ * whistle above P_DIST ~50) are filtered out before they are folded. The up- and down-samplers are polyphase all-pass IIR half-band
+ * filters, H(z) = (A0(z^2) + z^-1 A1(z^2)) / 2, 3 + 2 first-order sections at the first stage (flat to 0.0001 dB below 19.8 kHz,
+ * -65.8 dB above 24.3 kHz) and 1 + 1 at the second (-65.9 dB above 68.4 kHz; tools/gen_dist_halfband.py), one float of state per section, ~1.5 samples
+ * of delay at low frequencies. The drive is applied at the base rate, the output gain and the hard limit after the down-sampler.
+ * The resonance is frozen from d = 0.4 up (the top half has the bottom half's voice; only the drive rises). */
+#ifndef DIST_OS
+#define DIST_OS 4
+#endif
+#if DIST_OS != 2 && DIST_OS != 4
+#error "DIST_OS is 2 or 4"
+#endif
 #define DIST_MAXF 32767.0f
 #define DIST_FS 44100.0f
+#define DIST_FSO (DIST_FS * (float)DIST_OS)
 static inline float dist_tanh(float x)           /* Pade, +-1 past +-3 (exact there) */
 {
     float x2;
@@ -122,7 +136,7 @@ static inline float dist_tanh(float x)           /* Pade, +-1 past +-3 (exact th
 typedef struct { float a1, a2, a3, k; } dist_svf_t;
 static inline void dist_svf_set(dist_svf_t *c, float hz, float q)
 {
-    float g = fm_tanf(FM_PI * hz * (1.0f / DIST_FS));
+    float g = fm_tanf(FM_PI * hz * (1.0f / DIST_FSO));
     c->k = 1.0f / q;
     c->a1 = 1.0f / (1.0f + g * (g + c->k));
     c->a2 = g * c->a1;
@@ -142,15 +156,73 @@ static inline float dist_svf_hp(float v0, const dist_svf_t *c, float *s)        
     s[1] = 2.0f * v2 - s[1];
     return v0 - c->k * v1 - v2;
 }
-/* the output gain at smoothed d: the old DIST's level at the same knob (a saw chord at 0.37 FS peak, within 3 dB at
- * P_DIST 32 / 64 / 96 / 127 and the other levels tried: dist_test.c), unity at 0 (switching on is not a step) */
+/* the half-band stages: A(x) first-order all-pass in the stage's own rate, (a + z^-1) / (1 + a z^-1), one state */
+static inline float dist_ap(float x, float a, float *w)
+{
+    float t = x - a * *w, y = *w + a * t;
+    *w = t;
+    return y;
+}
+/* stage 1 (44.1 -> 88.2 kHz): x -> e (the earlier sample), o. States st[0..2] A0, st[3..4] A1 */
+static inline void dist_up1(float x, float *st, float *e, float *o)
+{
+    *e = dist_ap(dist_ap(dist_ap(x, 0.080707f, st), 0.512351f, st + 1), 0.908188f, st + 2);
+    *o = dist_ap(dist_ap(x, 0.279608f, st + 3), 0.723591f, st + 4);
+}
+static inline float dist_dn1(float t0, float t1, float *st)      /* the pair (earlier, later) -> one sample; phase 1: the later one goes through A0 */
+{
+    return 0.5f * (dist_ap(dist_ap(dist_ap(t1, 0.080707f, st), 0.512351f, st + 1), 0.908188f, st + 2) +
+                   dist_ap(dist_ap(t0, 0.279608f, st + 3), 0.723591f, st + 4));
+}
+/* stage 2 (88.2 -> 176.4 kHz): one section a branch */
+static inline void dist_up2(float x, float *st, float *e, float *o)
+{
+    *e = dist_ap(x, 0.130007f, st);
+    *o = dist_ap(x, 0.571541f, st + 1);
+}
+static inline float dist_dn2(float t0, float t1, float *st)
+{
+    return 0.5f * (dist_ap(t1, 0.130007f, st) + dist_ap(t0, 0.571541f, st + 1));
+}
+/* one base-rate sample in -> DIST_OS samples at the oversampled rate (os: this track's 14 floats: up 1 (5), down 1 (5), up 2 (2), down 2 (2)) */
+static inline void dist_up(float x, float *os, float *u)
+{
+#if DIST_OS == 4
+    float e, o;
+    dist_up1(x, os, &e, &o);
+    dist_up2(e, os + 10, &u[0], &u[1]);
+    dist_up2(o, os + 10, &u[2], &u[3]);
+#else
+    dist_up1(x, os, &u[0], &u[1]);
+#endif
+}
+static inline float dist_down(const float *y, float *os)
+{
+#if DIST_OS == 4
+    float z0 = dist_dn2(y[0], y[1], os + 12), z1 = dist_dn2(y[2], y[3], os + 12);
+    return dist_dn1(z0, z1, os + 5);
+#else
+    return dist_dn1(y[0], y[1], os + 5);
+#endif
+}
+/* the loop at the oversampled rate: the output y is the low-pass, fb the sample the next iteration adds */
+static inline float dist_loop(float u, float *fb, const dist_svf_t *lp, const dist_svf_t *hp, float *sl, float *sh, float fbg)
+{
+    float y = dist_svf_lp(dist_tanh(u + *fb), lp, sl);
+    *fb = dist_tanh(dist_svf_hp(y * fbg, hp, sh));
+    return y;
+}
+/* the output gain at smoothed d, 9 knots 1/8 apart: the old DIST's level at the same knob (a saw chord at 0.37 FS peak,
+ * within 3 dB at P_DIST 32 / 64 / 96 / 127: dist_test.c), unity at 0 (switching on is not a step), and from d 0.25 to 0.75
+ * kept under the level at which a band-limited saw at 0.7 FS (its peak 0.82 FS) would reach the hard limit (a clip at the base
+ * rate is an alias source of its own: -44 dB at P_DIST 51 with the old 0.96) */
 static inline float dist_out_gain(float d)
 {
-    static const float K[5] = {1.00f, 0.99f, 0.96f, 0.41f, 0.33f};
-    float x = d * 4.0f, f;
+    static const float K[9] = {1.00f, 0.91f, 0.90f, 0.84f, 0.78f, 0.73f, 0.52f, 0.37f, 0.30f};
+    float x = d * 8.0f, f;
     int i = (int)x;
-    if (i > 3)
-        i = 3;
+    if (i > 7)
+        i = 7;
     f = x - (float)i;
     return 32768.0f * (K[i] + (K[i + 1] - K[i]) * f);
 }
@@ -158,8 +230,9 @@ static inline float dist_out_gain(float d)
  * the HP's Q, the LP / HP cutoffs (Hz) */
 static void dist_macro(const track_t *t, float d, float *gin, float *gout, float *fbg, float *hpq, float *lp, float *hp)
 {
-    float res = 0.85f * fm_clampf((d - 0.2f) * 1.25f, 0.0f, 1.0f), f = fm_minf(d * 4.0f, 1.0f), key = (float)t->m_key;
-    *gin = (1.0f / 32768.0f) * fm_exp2f(24.0f * d * d * 0.166096405f);
+    float res = 0.85f * fm_clampf((fm_minf(d, 0.4f) - 0.2f) * 1.25f, 0.0f, 1.0f), f = fm_minf(d * 4.0f, 1.0f), key = (float)t->m_key;
+    float top = fm_maxf(d - 0.4f, 0.0f) * (1.0f / 0.6f);      /* the drive's extra 3 dB over d 0.4 .. 1 (+27 dB at the top) */
+    *gin = (1.0f / 32768.0f) * fm_exp2f((24.0f * d * d + 3.0f * top * top) * 0.166096405f);
     *gout = dist_out_gain(d);
     *fbg = fm_exp2f((-12.0f + 24.0f * res) * 0.166096405f) * f;
     *hpq = 0.70710678f * (1.0f + res);
@@ -170,8 +243,9 @@ static __attribute__((noinline)) void track_dist(track_t *t, int32_t *b, uint32_
 {
     dist_st_t *s = &t->dst;
     dist_svf_t lp, hp;
-    float tgt, gi, go, fbg, hpq, lhz, hhz, gi1, go1, dgi, fb, gate;
+    float tgt, gi, go, fbg, hpq, lhz, hhz, gi1, go1, dgi, dgo, fb, gate;
     int32_t d = t->p[P_DIST], i, fresh, pk = 0, hs;
+    float os[14], sl[2], sh[2];
     if (!d) {
         if (s->gi != 0.0f)
             memset(s, 0, sizeof *s);                    /* off: the next switch-on starts clean (and ramps from nothing) */
@@ -189,15 +263,30 @@ static __attribute__((noinline)) void track_dist(track_t *t, int32_t *b, uint32_
         s->ds += (tgt - s->ds) * 0.5f;                  /* ~2 blocks (2 ms) to a step */
     dist_macro(t, s->ds, &gi1, &go1, &fbg, &hpq, &lhz, &hhz);
     if (fresh) {                                        /* the filters at the first sample's steady state (a DC input): no start-up step */
-        float y0 = dist_tanh((float)b[0] * s->gi);
+        float y0 = dist_tanh((float)b[0] * s->gi), x0 = (float)b[0] * s->gi;
         s->lp[1] = y0;
         s->hp[1] = y0 * fbg;
+        {   /* the half-band all-passes at a DC input's steady state: w = x / (1 + a) */
+            static const float A1S[5] = {0.080707f, 0.512351f, 0.908188f, 0.279608f, 0.723591f};
+            int k;
+            for (k = 0; k < 5; k++) {
+                s->os[k] = x0 * (1.0f / (1.0f + A1S[k]));
+                s->os[5 + k] = y0 * (1.0f / (1.0f + A1S[k]));
+            }
+#if DIST_OS == 4
+            s->os[10] = x0 * (1.0f / 1.130007f);
+            s->os[11] = x0 * (1.0f / 1.571541f);
+            s->os[12] = y0 * (1.0f / 1.130007f);
+            s->os[13] = y0 * (1.0f / 1.571541f);
+#endif
+        }
     }
     dist_svf_set(&lp, lhz, 0.70710678f);
     dist_svf_set(&hp, hhz, hpq);
     gi = s->gi;
-    go = go1;                                           /* (the output gain steps once a block: the macro is smoothed, the steps are small) */
+    go = s->go;                                         /* (FX.2: the output gain ramps across the block like the input gain: a step of it once a block was a zipper) */
     dgi = (gi1 - gi) * (1.0f / (float)n);
+    dgo = (go1 - go) * (1.0f / (float)n);
     /* the feedback gate: Scream's input peak follower (1 ms release) at the block's rate: this block's feedback gain is
      * scaled by the follower's value after the last block, so that silence closes the loop (fbg 0: the HP rings out in
      * a few samples) and no input, however the loop was driven before, stays silent */
@@ -205,9 +294,12 @@ static __attribute__((noinline)) void track_dist(track_t *t, int32_t *b, uint32_
     fbg *= gate > 1.0f ? 1.0f : gate;
     fb = s->fb;
     hs = t->dist_hp;
+    memcpy(os, s->os, sizeof os);                       /* the states in locals: the compiler keeps them in registers over the block */
+    sl[0] = s->lp[0], sl[1] = s->lp[1], sh[0] = s->hp[0], sh[1] = s->hp[1];
     for (i = 0; i < (int32_t)n; i++) {
         int32_t x = b[i];
-        float y, o;
+        float o, u[DIST_OS], v[DIST_OS];
+        int k;
         hs += (x * 256 - hs) >> 7;                      /* ~55 Hz low cut (state in Q8: it decays to exactly 0, no DC left over) */
         x -= (hs + 128) >> 8;                           /* (no int clamp: the float tanh flattens a hot input) */
         if (!(i & 3)) {                                 /* the gate's peak from every 4th sample */
@@ -215,12 +307,16 @@ static __attribute__((noinline)) void track_dist(track_t *t, int32_t *b, uint32_
             pk = ax > pk ? ax : pk;
         }
         gi += dgi;
-        y = dist_svf_lp(dist_tanh((float)x * gi + fb), &lp, s->lp);
-        o = y * go;
+        go += dgo;
+        dist_up((float)x * gi, os, u);
+        for (k = 0; k < DIST_OS; k++)
+            v[k] = dist_loop(u[k], &fb, &lp, &hp, sl, sh, fbg);
+        o = dist_down(v, os) * go;
         b[i] = (int32_t)(o > DIST_MAXF ? DIST_MAXF : o < -DIST_MAXF ? -DIST_MAXF : o);
-        fb = dist_tanh(dist_svf_hp(y * fbg, &hp, s->hp));
     }
     t->dist_hp = hs;
+    memcpy(s->os, os, sizeof os);
+    s->lp[0] = sl[0], s->lp[1] = sl[1], s->hp[0] = sh[0], s->hp[1] = sh[1];
     s->gi = gi1;
     s->go = go1;
     s->fb = fb;
@@ -230,15 +326,17 @@ static __attribute__((noinline)) void track_dist(track_t *t, int32_t *b, uint32_
     }
     {   /* tiny state to 0 (no denormals; Scream's ROUND_STATE_TO_ZERO) and NaN-proof: a state out of range (or NaN) restarts clean */
         float *v = s->lp;
-        int k;
-        for (k = 0; k < 6; k++) {
-            float a = v[k] < 0.0f ? -v[k] : v[k];       /* (lp[2], hp[2], fb, env are contiguous) */
+        int k, bad = 0;
+        for (k = 0; k < 6 + 14; k++) {                  /* (lp[2], hp[2], fb, env are contiguous; the oversampler's 12 are apart) */
+            float *q = k < 6 ? v + k : s->os + (k - 6), a = *q < 0.0f ? -*q : *q;
             if (a < 1.0e-8f)
-                v[k] = 0.0f;
-            else if (!(a < 1.0e6f)) {
-                s->lp[0] = s->lp[1] = s->hp[0] = s->hp[1] = s->fb = s->env = 0.0f;
-                break;
-            }
+                *q = 0.0f;
+            else
+                bad |= !(a < 1.0e6f);
+        }
+        if (bad) {
+            memset(s->lp, 0, 6 * sizeof(float));
+            memset(s->os, 0, sizeof s->os);
         }
     }
 }

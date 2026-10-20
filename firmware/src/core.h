@@ -283,6 +283,7 @@ typedef struct {                 /* DIST's float state (fx.c track_dist): all ze
     float lp[2], hp[2];          /* the two Cytomic SVFs' integrators (output low-pass, feedback high-pass) */
     float fb, env;               /* the feedback sample, the input peak follower (the gate) */
     float ds, gi, go;            /* the smoothed macro 0..1, the input and output gains the last block ended on */
+    float os[14];                /* the oversampler's all-pass states (FX.2): up 1 (5), down 1 (5), up 2 (2), down 2 (2) */
 } dist_st_t;
 typedef struct track {
     int16_t p[P_COUNT];
@@ -343,7 +344,7 @@ typedef struct track {
     uint8_t tail;                /* blocks to mix after the last voice (the DIST / INSERT tail) */
     uint8_t ins_run;             /* the INSERT still sounds (fx.c track_insert: its wet share above 0) */
     uint8_t cond_loop;           /* 1.5.5 (#209): the loop of its LEN playing (0..COND_LOOPS - 1, seq.c seq_tick) */
-    uint8_t rsv_sz[14];          /* (sizeof(track_t) a multiple of 16: below) */
+    uint8_t rsv_sz[6];           /* (sizeof(track_t) a multiple of 16: below) */
     int16_t armp, aholdp;        /* P_AMODE / P_AHOLD as last seen by the ISR */
     /* engine switch (voice.c engine_block): the old engine's voices fade out, then it switches */
     uint8_t xf_on, xf;           /* fading; blocks of the fade still to render */
