@@ -157,6 +157,9 @@ static void au_name(char *d, size_t n, const char *s)            /* file name pa
     d[i] = 0;
 }
 
+/* FX.1 (tests/dist_test.c): when >= 0, P_DIST forced after the preset loads (the listening renders of the DIST) */
+static int au_dist = -1;
+
 /* the child: one preset, from the process's fresh state; writes the WAV, returns the figures */
 static int render_one(uint32_t e, uint32_t pi, uint32_t cat, const char *path, result_t *r)
 {
@@ -168,6 +171,8 @@ static int render_one(uint32_t e, uint32_t pi, uint32_t cat, const char *path, r
     host_tracks_init();
     song.g[G_BPM] = 120;
     host_preset(t, e, pi);
+    if (au_dist >= 0)
+        t->p[P_DIST] = (int16_t)au_dist;
     if (pat != ~0u) {                                  /* PATTERNS[pat] in steps 1..16, as ui.c load_pat16 */
         for (i = 0; i < 16u; i++) {
             uint8_t n = PATTERNS[pat].note[i], fl = PATTERNS[pat].flags[i];
@@ -301,6 +306,7 @@ static int render_all(const char *out)
     return anyfail;
 }
 
+#ifndef AUDITION_NO_MAIN                       /* (tests/dist_test.c includes this file for its renderer) */
 int main(int argc, char **argv)
 {
     if (argc > 1 && !strcmp(argv[1], "--selftest"))
@@ -310,3 +316,4 @@ int main(int argc, char **argv)
     fprintf(stderr, "usage: audition OUTDIR | --selftest\n");
     return 2;
 }
+#endif

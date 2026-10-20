@@ -135,3 +135,7 @@ cpu/mix/idle 321
 cpu/mix/4parts_light 2292
 cpu/mix/4parts_full 2248
 cpu/mix/idle_click 343
+cpu/DIST/1part_off 685
+cpu/DIST/1part_on 752
+cpu/DIST/worst_mix_off 3654
+cpu/DIST/worst_mix_on 4012

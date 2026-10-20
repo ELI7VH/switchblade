@@ -83,6 +83,11 @@
 #                   bit (POLY, SPREAD), each TYPE at its corners on 3 and 8 voices (no DC, bounded, MIX 50 % halfway
 #                   to the wet), the MIX glide and TYPE changes, MIX / TYPE as automation and locks, FUN10 and user
 #                   presets of 109 and 104, the pages' labels, the cost per type; demos in build/insert_demo/.
+# DIST (tests/dist_test.c, Task FX.1; src/fx.c track_dist, the Scream-style distortion after cure.audio's Scream, MIT): P_DIST 0 a bit-identical bypass, the switch-on
+#                   without a click, the output bounded (<= 32767) on 8 FS noise / squares / sweeps and through the real part path (OVERDRIVE ACID, JUNO FAT SAW BASS x3, OB-Z x8),
+#                   silence in -> exactly silence out within 50 ms (the gate) and clean state after the part's tail, no NaN / denormal, a P_DIST sweep (every block)
+#                   without a step at the block edges, the level within +-3 dB of the old DIST on a saw chord, the alias floor of a 2 kHz sine (printed), the cost; --wav
+#                   writes the listening renders.
 # SOUND 1.5 (tests/sound15_test.c; #104 #175): ANALOG's filter TYPE (LP bit for bit, every other engine ignores it, BP / HP
 #                   responses around the cutoff, RES, bounded at the corners), ENV SYNC (OFF bit for bit, the note values
 #                   on the knob, attack / decay / release times at 60 / 120 / 173 BPM and on the external clock), the cost;
@@ -303,6 +308,9 @@ if [ -f build/gen/felucca_tables.h ]; then
     mkdir -p build/insert_demo
     run "INSERT (1.5): OFF / MIX 0 bit for bit, each TYPE (no DC, bounded, dry / wet), MIX glide, automation, stored, cost, demos" \
         "$OUT/insert_test" build/insert_demo
+    $CC -O2 -w -ffp-contract=off -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/dist_test" tests/dist_test.c -lm
+    run "DIST (FX.1): P_DIST 0 bypass bit for bit, no click on switch-on, bounded, the gate (silence in, silence out), no NaN / denormal, no zipper on a sweep, level against the old DIST, alias floor, cost" \
+        "$OUT/dist_test"
     $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/sound15_test" tests/sound15_test.c -lm
     mkdir -p build/sound15_demo
     run "1.5 sound items: ANALOG filter TYPE LP / BP / HP (responses, LP and other engines bit for bit), ENV SYNC (times at several tempi), cost, demos" \

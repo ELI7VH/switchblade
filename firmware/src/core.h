@@ -279,6 +279,11 @@ typedef struct {
 } chain_config_t;
 _Static_assert(sizeof(chain_config_t) == 84u, "song chain layout (FOR4)");
 
+typedef struct {                 /* DIST's float state (fx.c track_dist): all zero = fresh (gi == 0) */
+    float lp[2], hp[2];          /* the two Cytomic SVFs' integrators (output low-pass, feedback high-pass) */
+    float fb, env;               /* the feedback sample, the input peak follower (the gate) */
+    float ds, gi, go;            /* the smoothed macro 0..1, the input and output gains the last block ended on */
+} dist_st_t;
 typedef struct track {
     int16_t p[P_COUNT];
     uint8_t engine, preset;      /* engine: what the audio ISR renders */
@@ -333,11 +338,12 @@ typedef struct track {
     uint8_t rr;                  /* POLY ROTATE: next voice to try */
     /* mix runtime */
     int32_t peak;
-    int32_t dist_hp, dist_lp1, dist_lp2;   /* DIST insert state (fx.c) */
+    int32_t dist_hp;             /* DIST (fx.c): the 55 Hz low cut's state */
+    dist_st_t dst;               /* .. and the Scream-style clipper's (float: filters, feedback, gate, smoothed macro, gains) */
     uint8_t tail;                /* blocks to mix after the last voice (the DIST / INSERT tail) */
     uint8_t ins_run;             /* the INSERT still sounds (fx.c track_insert: its wet share above 0) */
     uint8_t cond_loop;           /* 1.5.5 (#209): the loop of its LEN playing (0..COND_LOOPS - 1, seq.c seq_tick) */
-    uint8_t rsv_sz[26];          /* (sizeof(track_t) a multiple of 16: below) */
+    uint8_t rsv_sz[14];          /* (sizeof(track_t) a multiple of 16: below) */
     int16_t armp, aholdp;        /* P_AMODE / P_AHOLD as last seen by the ISR */
     /* engine switch (voice.c engine_block): the old engine's voices fade out, then it switches */
     uint8_t xf_on, xf;           /* fading; blocks of the fade still to render */

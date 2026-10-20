@@ -165,6 +165,7 @@ typedef struct {
     char name[64];
     uint8_t kind, e, pi, arg, cpu_notes;
     uint8_t chor;                              /* J_CPU: 0 = the DRIFT presets as they load; m + 1 = CHOR forced to m (Task 6.2) */
+    uint8_t dist;                              /* J_CPU: 0 = P_DIST as the preset loads; 255 = forced to 0; else forced to this (FX.1) */
     const uint8_t (*parts)[3];                 /* J_CPU mixes */
     int (*check)(char *msg, uint32_t n);       /* J_CHECK */
     res_t r;
@@ -306,6 +307,8 @@ static void job_cpu(const job_t *j)
         trk[p].p[P_VOICE] = V_POLY;
         trk[p].p[P_SUS] = 127;
         trk[p].p[P_AMODE] = 0;
+        if (j->dist)
+            trk[p].p[P_DIST] = j->dist == 255u ? 0 : j->dist;
         for (i = 0; i < parts[p][2]; i++)
             trk_note_on(&trk[p], NOTES[i] + 12u * p, 100);
     }
@@ -1030,6 +1033,33 @@ int main(int argc, char **argv)
         j->e = ENGI_DRIFT;
         j->pi = 22;
         j->chor = (uint8_t)(cm + 1u);
+    }
+    {   /* DIST (FX.1): the per-track Scream-style distortion's cost: one OB-Z part with P_DIST forced off / 127, and the dearest legal mix
+         * (2 x ACID OVERDRIVE x1 + 2 x DRIFT FAT SAW BASS x3, CHOR off) with P_DIST forced off / 127 on all four tracks; the pairs' difference is DIST's */
+        static const char *const DN[4] = {"cpu/DIST/1part_off", "cpu/DIST/1part_on", "cpu/DIST/worst_mix_off", "cpu/DIST/worst_mix_on"};
+        uint32_t k, a = 0, f = 0, q;
+        for (q = 0; q < ENGINES[ENGI_ACID]->npresets; q++)
+            if (!strcmp(ENGINES[ENGI_ACID]->presets[q].name, "OVERDRIVE"))
+                a = q;
+        for (q = 0; q < ENGINES[ENGI_DRIFT]->npresets; q++)
+            if (!strcmp(ENGINES[ENGI_DRIFT]->presets[q].name, "FAT SAW BASS"))
+                f = q;
+        for (k = 0; k < 4u; k++) {
+            job_t *j = add(J_CPU, DN[k]);
+            memset(cpu_parts[ncpu], 0, sizeof cpu_parts[ncpu]);
+            if (k < 2u) {
+                cpu_parts[ncpu][0][0] = ENGI_OBX, cpu_parts[ncpu][0][1] = 0, cpu_parts[ncpu][0][2] = 3;
+            } else {
+                cpu_parts[ncpu][0][0] = ENGI_ACID, cpu_parts[ncpu][0][1] = (uint8_t)a, cpu_parts[ncpu][0][2] = 1;
+                cpu_parts[ncpu][1][0] = ENGI_ACID, cpu_parts[ncpu][1][1] = (uint8_t)a, cpu_parts[ncpu][1][2] = 1;
+                cpu_parts[ncpu][2][0] = ENGI_DRIFT, cpu_parts[ncpu][2][1] = (uint8_t)f, cpu_parts[ncpu][2][2] = 3;
+                cpu_parts[ncpu][3][0] = ENGI_DRIFT, cpu_parts[ncpu][3][1] = (uint8_t)f, cpu_parts[ncpu][3][2] = 3;
+                j->chor = 1u;                               /* (CHOR OFF on the DRIFT parts) */
+            }
+            j->parts = (const uint8_t (*)[3])cpu_parts[ncpu++];
+            j->e = 0xFF;
+            j->dist = (k & 1u) ? 127u : 255u;
+        }
     }
     {   /* mixes: idle (subtracted from the presets' counts), the four machines a light (3 + 3 + 2 + 1 notes) and a full
          * load (WAVE 8 + OB-Z 8 + DRIFT 4 + ACID 1 asked for: the budget keeps 8) */
