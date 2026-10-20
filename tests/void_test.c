@@ -1020,8 +1020,8 @@ static void test_other_machines(void)
 {
     uint32_t ok_obz, ok_acid, ok_drift;
     ok_obz = eng_hash("OB-Z", 6) == eng_hash("OB-Z", 0) && eng_hash("OB-Z", 6) != eng_hash("OB-Z", 1);
-    ok_acid = eng_hash("ACID", 6) == eng_hash("ACID", 0) && eng_hash("ACID", 3) == eng_hash("ACID", 0);
-    ok_drift = eng_hash("DRIFT", 6) == eng_hash("DRIFT", 0) && eng_hash("DRIFT", 6) == eng_hash("DRIFT", 4) && eng_hash("DRIFT", 1) != eng_hash("DRIFT", 0);
+    ok_acid = eng_hash("SB303", 6) == eng_hash("SB303", 0) && eng_hash("SB303", 3) == eng_hash("SB303", 0);
+    ok_drift = eng_hash("JUNO", 6) == eng_hash("JUNO", 0) && eng_hash("JUNO", 6) == eng_hash("JUNO", 4) && eng_hash("JUNO", 1) != eng_hash("JUNO", 0);
     check("TYPE VOWEL on an OB-Z track plays as LP (its MODE morph is not pinned), on ACID as any TYPE (ignored), on DRIFT as FLAT", ok_obz && ok_acid && ok_drift);
 }
 

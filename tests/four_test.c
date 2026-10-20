@@ -8,7 +8,7 @@ static int fails;
 
 static void test_engine_table(void)
 {
-    static const char *const NAME[4] = {"OB-Z", "WAVE", "ACID", "DRIFT"};
+    static const char *const NAME[4] = {"OB-Z", "WAVE", "SB303", "JUNO"};
     uint32_t e;
     CHECK(NENGINES == 4u, "NENGINES %u", (unsigned)NENGINES);
     for (e = 0; e < NENGINES; e++) {

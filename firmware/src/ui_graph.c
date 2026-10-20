@@ -790,7 +790,7 @@ static uint32_t graph_signature(void)
 /* 4-letter engine tags of the preset list */
 static const char *eng_abbr(const char *name)
 {
-    static const char *const A[][2] = {{"DRIFT", "DRFT"}};   /* (OB-Z WAVE ACID: their own four letters) */
+    static const char *const A[][2] = {{"SB303", "S303"}};   /* (OB-Z WAVE JUNO: their own four letters) */
     uint32_t i;
     for (i = 0; i < sizeof A / sizeof A[0]; i++)
         if (str_eq(name, A[i][0]))

@@ -386,7 +386,7 @@ static void drift_track_loaded(track_t *t)
 }
 
 static const engine_t ENG_DRIFT = {
-    .name = "DRIFT", .page_title = {"OSC", "FLT"},
+    .name = "JUNO", .page_title = {"OSC", "FLT"},
     .edit = {
         {"MIX", F_PCT, 0, 127, 64, 0, 0},           {"PW", F_PCT, 0, 127, 64, 0, 0},
         {"DRFT", F_PCT, 0, 127, 20, 0, 0},          {"VAR", F_PCT, 0, 127, 0, 0, 0},

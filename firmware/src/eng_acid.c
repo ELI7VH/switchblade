@@ -205,7 +205,7 @@ static void acid_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
 
 static const char *const N_ACID_WAVE[] = {"SAW", "SQR"};
 static const engine_t ENG_ACID = {
-    .name = "ACID", .page_title = {"OSC", "FLT"},
+    .name = "SB303", .page_title = {"OSC", "FLT"},
     .edit = {
         {"WAVE", F_ENUM, 0, 1, 0, N_ACID_WAVE, 0}, {"TUNE", F_BIPCT, -64, 63, 0, 0, 0},
         {"DECY", F_PCT, 0, 127, 60, 0, 0},          {"ACC", F_PCT, 0, 127, 80, 0, 0},
