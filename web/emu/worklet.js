@@ -93,6 +93,7 @@ if (typeof registerProcessor === "function") {
       else if (m.type === "master") ex.web_master(m.value | 0);
       else if (m.type === "midi") ex.web_midi(m.data[0] | 0, m.data[1] | 0, m.data[2] | 0);
       else if (m.type === "visible") this.period = m.on ? 1 / 30 : 1 / 4;
+      else if (m.type === "demo") ex.web_test_heavy();   /* the page's demo song: one machine per track (felucca_web.c) */
     }
 
     publish() {

@@ -444,35 +444,31 @@ EXPORT uint8_t *web_anim_levels(void)
 }
 
 /* for the test and the bench (web/emu/emu_test.mjs), a heavy song straight into the tracks (as hostsim's
- * renders set them): T1 FM6 PAD, T2 PHYS DRONE STRING (SYMP), T3 GRAIN CLOUD PAD, 4-note chords on all 16
- * steps, held; T4 DRUM, kick snare and hats. PLAY is the page's (or the test's) to press */
+ * renders set them): Switch Blade's four machines, one per track: T1 OB-Z, T2 WAVE, T4 JUNO with 4-note
+ * chords on all 16 steps, held; T3 SB303 a 16th-note bassline. PLAY is the page's (or the test's) to press */
 EXPORT void web_test_heavy(void)
 {
-    static const uint8_t ENG[3][2] = {{12, 4}, {ENGI_PHYS, 7}, {8, 0}};
     static const uint8_t CH[4][4] = {{48, 55, 60, 64}, {45, 52, 57, 60}, {41, 48, 53, 57}, {43, 50, 55, 59}};
+    static const uint8_t ENG[4] = {ENGI_OBX, ENGI_WAVE, ENGI_ACID, ENGI_DRIFT};
     uint32_t p, i;
-    for (p = 0; p < 3u; p++) {
+    for (p = 0; p < 4u; p++) {
         track_t *t = &trk[p];
-        host_preset(t, ENG[p][0], ENG[p][1]);
-        t->p[P_VOICE] = V_POLY;
-        t->p[P_SUS] = 127;
+        host_preset(t, ENG[p], 0);
+        if (ENG[p] != ENGI_ACID) {
+            t->p[P_VOICE] = V_POLY;
+            t->p[P_SUS] = 127;
+        }
         for (i = 0; i < 16u; i++) {
             uint8_t n[4], k;
+            if (ENG[p] == ENGI_ACID) {
+                n[0] = (uint8_t)(CH[i / 4u][0] - 12u + (i % 3u == 2u ? 12u : 0u));
+                put_step(t, i, 1, n, ST_NOTE, 0);
+                continue;
+            }
             for (k = 0; k < 4u; k++)
-                n[k] = (uint8_t)(CH[i / 4u][k] + 12u * p);
+                n[k] = (uint8_t)(CH[i / 4u][k] + (p == 1u ? 12u : 0u));
             put_step(t, i, 4, n, ST_NOTE, 0);
         }
-    }
-    host_drums(&trk[3]);
-    for (i = 0; i < 16u; i++) {
-        uint8_t n[4];
-        uint32_t k = 0;
-        if (i % 4u == 0u)
-            n[k++] = 36;
-        if (i == 4u || i == 12u)
-            n[k++] = 38;
-        n[k++] = i % 2u ? 42 : 46;
-        put_step(&trk[3], i, k, n, ST_NOTE, 0);
     }
     ui.force = 1;
 }
