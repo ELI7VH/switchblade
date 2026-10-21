@@ -1,7 +1,9 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* DIST (Task FX.1): the per-track Scream-style distortion (src/fx.c track_dist), through the firmware's own code.
+/* DIST: the per-track distortion (src/fx.c track_dist), through the firmware's own code. Task FX.1 / FX.2 (the Scream-style loop); 2026-10-21 the
+ * integer drive of fm1_drive_1.h replaced it: the Scream-only checks (the frozen resonance, the oversampler) are gone, the alias figures are pinned
+ * to the drive's own (it has no anti-aliasing), the rest stands.
  *   dist_test              the checks
- *   dist_test --wav OUTDIR [P_DIST ...]   the listening renders (OB-Z bass, SB303 line, JUNO chord; default P_DIST 40 / 60 / 80 / 100 / 127), tagged os4 / os2
+ *   dist_test --wav OUTDIR [P_DIST ...]   the listening renders (OB-Z bass, NANO line, JUNO chord; default P_DIST 40 / 60 / 80 / 100 / 127), tagged drive
  *   dist_test --old        (build against an earlier commit: its DIST's renders, P_DIST 80 / 127, tagged old; the FX.2 comparison uses FX.1's)
  * The checks: P_DIST 0 a bit-identical bypass; switching on without a click; the output bounded (|out| <= 32767) at
  * the worst input and P_DIST (an OVERDRIVE ACID patch, a dense JUNO chord, 8 FS noise / squares); silence in, silence
@@ -65,6 +67,12 @@ static void old_dist(old_st_t *t, int32_t d, int32_t *b, uint32_t n)
     }
 }
 
+/* the drive's own figures (2026-10-21, measured, pinned): the alias floor of test 7b (dB, 110 / 440 Hz x P_DIST 51 / 76 / 102 / 127),
+ * the cost (host instructions a sample, +10 %), the state after the part's tail (FS) */
+static const double ALIAS_PIN[2][4] = {{-32.4, -33.1, -34.3, -35.2}, {-26.9, -27.3, -28.3, -29.1}};
+#define DIST_COST_MAX 52.0       /* measured 46.6 (the Scream loop: 370) */
+#define DIST_MIX_MAX 155.0       /* measured +140 (the Scream loop: +1117) */
+#define DIST_TAIL_FS 0.001       /* measured 0: the state settles exactly */
 static track_t T;                                 /* the track the DIST is run on (state: dst, dist_hp) */
 static void run_new(int32_t *x, uint32_t n, int p)
 {
@@ -137,7 +145,7 @@ static void test_bypass(void)
             a[i] = b[i] = k == 2 ? rnd() * 8 : k ? rnd() : (int32_t)(30000 * sin(i * 0.05));
         T.dist_hp = 1234;
         run_new(b, CTL * 64u, 0);
-        ok &= !memcmp(a, b, sizeof a) && T.dist_hp == 1234 && T.dst.gi == 0.0f;
+        ok &= !memcmp(a, b, sizeof a) && T.dist_hp == 1234 && !T.dst.on;
     }
     check(ok, "P_DIST 0 is a bit-identical bypass (sine, noise, 8 FS noise), the low cut's state untouched");
     /* after running, back to 0: the float state is cleared once, and the output is the input again */
@@ -148,8 +156,8 @@ static void test_bypass(void)
     ok = !memcmp(a, b, sizeof a) || 1;
     memcpy(b, a, sizeof a);
     run_new(b, CTL * 64u, 0);
-    check(!memcmp(a, b, sizeof a) && T.dst.gi == 0.0f && T.dst.fb == 0.0f && T.dst.env == 0.0f && T.dst.lp[1] == 0.0f,
-          "on then off: bypass again, the float state cleared (the next switch-on starts clean)");
+    check(!memcmp(a, b, sizeof a) && !T.dst.on && T.dst.lp == 0 && T.dst.dcy == 0 && T.dst.gain == 0,
+          "on then off: bypass again, the state cleared (the next switch-on starts clean)");
 }
 
 /* 2: switching on does not click: the step at the switch-on against the signal's own largest step */
@@ -306,15 +314,15 @@ static void test_silence(void)
             run_new(x, 20000u / CTL * CTL, P[k]);
             memset(x, 0, 16u * CTL * 4u);
             run_new(x, 16u * CTL, P[k]);
-            worst = fmax(worst, fmax(fabs(T.dst.fb), fmax(fabs(T.dst.lp[0]) + fabs(T.dst.lp[1]), fabs(T.dst.hp[0]) + fabs(T.dst.hp[1]))));
+            worst = fmax(worst, (fabs((double)T.dst.lp) + fabs((double)T.dst.dcy)) / 32768.0);
         }
-        check(worst < 1e-3, "after the part's tail (16 blocks of silence) after a 5 ms release the loop state is below 1e-3 FS (worst %.2g): a note after it does not inherit a ring", worst);
+        printf("dist:   after the part's tail: the DC blocker + tone state %.4f FS\n", worst);
+        check(worst < DIST_TAIL_FS, "after the part's tail (16 blocks of silence) after a 5 ms release the state is below %.3f FS (worst %.4f): a note after it does not inherit a step", DIST_TAIL_FS, worst);
     }
-    /* a long silence: no NaN, no denormal, no state stuck */
+    /* a long silence: the state settles to exactly 0 (the DC blocker's decay rounds toward zero, the tone's step away from it), and a +-2^22
+     * input after it stays bounded */
     {
-        int32_t *y = x;
-        float *v = &T.dst.lp[0];
-        int k, nanb = 0, den = 0;
+        int32_t *y = x, mx;
         memset(&T, 0, sizeof T);
         T.m_key = 33;
         for (i = 0; i < 20000u; i++)
@@ -324,21 +332,11 @@ static void test_silence(void)
             int32_t z[CTL] = {0};
             run_new(z, CTL, 127);
         }
-        for (i = 0; i < 6u; i++)
-            v[i] = v[i];
-        for (k = 0; k < 9; k++) {
-            float f = *(&T.dst.lp[0] + k), a = fabsf(f);
-            nanb |= f != f || isinf(f);
-            den |= a != 0.0f && a < 1.1754944e-38f;
-            den |= a != 0.0f && a < 1e-8f && k < 6;
-        }
-        /* an int32 extreme and a hot random input after it: still finite */
+        mx = T.dst.lp | T.dst.dcy;
         for (i = 0; i < CTL * 20u; i++)
             y[i] = i & 1u ? 0x3FFFFF : -0x3FFFFF;
         run_new(y, CTL * 20u, 127);
-        for (k = 0; k < 9; k++)
-            nanb |= !(fabsf(*(&T.dst.lp[0] + k)) < 1e6f);
-        check(!nanb && !den, "100 blocks of silence after a loud run: every float state finite, 0 or >= 1e-8 (no denormal), still finite after +-2^22 input");
+        check(!mx && peak(y, CTL * 20u) <= 32767, "100 blocks of silence after a loud run: the state exactly 0; then +-2^22 in: |out| <= 32767");
     }
 }
 
@@ -441,12 +439,6 @@ static void test_alias(void)
 }
 
 
-#ifdef DIST_OS
-#define OS_N DIST_OS
-#else
-#define OS_N 4                                 /* (the commit before FX.2 has no DIST_OS: it is held to the OS 4 gates, which is the RED run) */
-#endif
-
 /* a band-limited saw (harmonics to 20 kHz), kbin periods in n samples (n = N: bin-centred), amp */
 static void bl_saw(int32_t *x, uint32_t len, uint32_t n, uint32_t kbin, double amp)
 {
@@ -502,44 +494,18 @@ static void saw_run(int p, uint32_t kbin, int key, double *inh, double *inh20)
 static void test_alias_saw(void)
 {
     static const int P[4] = {51, 76, 102, 127};
-    static const double G4[4] = {-50, -50, -50, -40}, G2[4] = {-50, -50, -35, -33};   /* (OS 2: <= -50 up to d 0.6, -35 at 102 and -33 at 127: the brief's -35 is missed by ~1.5 dB at 440 Hz, reported) */
-    const double *G = OS_N == 4 ? G4 : G2;
     static const struct { uint32_t k; int key; } W[2] = {{41, 45}, {164, 69}};      /* 110.4 Hz (A2), 441.4 Hz (A4) */
     int ok = 1, a, w;
     for (w = 0; w < 2; w++) {
         double v[4], v20[4];
         for (a = 0; a < 4; a++) {
             saw_run(P[a], W[w].k, W[w].key, &v[a], &v20[a]);
-            ok &= v20[a] <= G[a];
+            ok &= v20[a] <= ALIAS_PIN[w][a] + 1.0;
         }
-        printf("dist:   band-limited saw 0.7 FS, %.1f Hz: inharmonic power re total at P_DIST 51 / 76 / 102 / 127: %.1f %.1f %.1f %.1f dB below 20 kHz (%.1f %.1f %.1f %.1f dB with the 20-22 kHz, where a half-band cannot reject the alias of 22-24 kHz)\n",
+        printf("dist:   band-limited saw 0.7 FS, %.1f Hz: inharmonic power re total at P_DIST 51 / 76 / 102 / 127: %.1f %.1f %.1f %.1f dB below 20 kHz (%.1f %.1f %.1f %.1f dB to 22 kHz)\n",
                W[w].k * 44100.0 / 16384.0, v20[0], v20[1], v20[2], v20[3], v[0], v[1], v[2], v[3]);
     }
-    check(ok, "alias (DIST_OS %d): the inharmonic power below 20 kHz of a bin-centred band-limited saw at 0.7 FS (110 and 440 Hz) <= %.0f / %.0f / %.0f / %.0f dB at P_DIST 51 / 76 / 102 / 127",
-          OS_N, G[0], G[1], G[2], G[3]);
-}
-/* 7c: the knob's top half has the bottom half's voice: the resonance (feedback gain, HP Q) frozen at its d = 0.4 value above 0.4, free below */
-static void test_frozen_res(void)
-{
-    float g0, go, f0, q0, l0, h0, g1, o1, f1, q1, l1, h1;
-    int ok = 1, p;
-    double worst = 0;
-    memset(&T, 0, sizeof T);
-    T.m_key = 50;
-    dist_macro(&T, 0.4f, &g0, &go, &f0, &q0, &l0, &h0);
-    for (p = 51; p <= 127; p++) {
-        dist_macro(&T, p / 127.0f, &g1, &o1, &f1, &q1, &l1, &h1);
-        worst = fmax(worst, fmax(fabs(f1 / f0 - 1.0), fabs(q1 / q0 - 1.0)));
-        ok &= fabs(f1 / f0 - 1.0) < 1e-5 && fabs(q1 / q0 - 1.0) < 1e-5;
-    }
-    /* below 0.4 it still opens up: the feedback gain and the Q rise with d between 0.2 and 0.4 */
-    dist_macro(&T, 0.25f, &g1, &o1, &f1, &q1, &l1, &h1);
-    ok &= f1 < f0 * 0.99 && q1 < q0 * 0.99;
-    dist_macro(&T, 0.33f, &g1, &o1, &f1, &q1, &l1, &h1);
-    ok &= f1 < f0 * 0.99 && q1 < q0 * 0.999;
-    printf("dist:   resonance at d 0.4: feedback gain %.4f, HP Q %.4f (the same to %.1g up to d 1; drive %.1f -> %.1f dB)\n", f0, q0, worst,
-           20 * log10(g0 * 32768.0), 20 * log10(g1 * 32768.0));
-    check(ok, "resonance frozen: the feedback gain and the HP Q equal their d = 0.4 values for every P_DIST 51..127, and still rise below it");
+    check(ok, "alias: the inharmonic power below 20 kHz of a bin-centred band-limited saw at 0.7 FS (110 / 440 Hz) at most 1 dB over the drive's own (pinned; no anti-aliasing)");
 }
 /* 7d: the intensity rises with every step of the knob: the harmonic density of a sine, the power of its harmonics 2..40 re the
  * fundamental (a saw is no good for this: its jump sets the high harmonics, and the fundamental grows as it clips) */
@@ -569,88 +535,15 @@ static void test_intensity(void)
         double v[9];
         for (a = 0; a < 9; a++)
             v[a] = thd_run(P[a], W[w].k, W[w].key, W[w].amp);
-        for (a = 1; a < 9; a++)
-            ok &= v[a] >= v[a - 1] + 0.1;
+        for (a = 1; a < 9; a++)                    /* (the drive is fully clipped from about P_DIST 80: the top flattens, it does not fall) */
+            ok &= P[a] <= 76 ? v[a] >= v[a - 1] + 0.1 : v[a] >= v[a - 1] - 0.3;
         printf("dist:   intensity (harmonics 2..40 re the fundamental, dB; sine %.0f Hz %.2f FS) at P_DIST 25 38 51 64 76 89 102 115 127: %.1f %.1f %.1f %.1f %.1f %.1f %.1f %.1f %.1f\n",
                W[w].k * 44100.0 / 16384.0, W[w].amp / 32768.0, v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8]);
     }
-    check(ok, "intensity: the harmonics 2..40 re the fundamental of a sine (110 / 220 / 440 Hz, 0.09 / 0.05 / 0.18 FS) rise by >= 0.1 dB at every step of P_DIST 25 / 38 / ... / 127");
+    check(ok, "intensity: the harmonics 2..40 re the fundamental of a sine (110 / 220 / 440 Hz, 0.09 / 0.05 / 0.18 FS) rise by >= 0.1 dB at every step of P_DIST 25 .. 76, and fall no more than 0.3 dB above (clipped)");
 }
 
 
-/* 7e: the oversampler on its own (fx.c dist_up / dist_down): the pass band is flat to 18 kHz, and the images / aliases are 60 dB down */
-static double os_rms(const float *x, unsigned n)
-{
-    double e = 0;
-    unsigned i;
-    for (i = 0; i < n; i++)
-        e += (double)x[i] * x[i];
-    return sqrt(e / n);
-}
-static void test_oversampler(void)
-{
-    enum { N = 8192, W = 2048 };
-    static const double FP[6] = {500, 2000, 6000, 12000, 16000, 18000};
-    static const double FI[5] = {1000, 8000, 15000, 18000, 19800};
-    static float u[N * DIST_OS], o[N];
-    float os[14];
-    double worst_pb = 0, worst_img = -300, worst_al = -300, fo;
-    unsigned i, k;
-    int j, ok = 1;
-    for (j = 0; j < 6; j++) {                         /* up then down: the level of a tone in the pass band */
-        double a;
-        memset(os, 0, sizeof os);
-        for (i = 0; i < N; i++) {
-            float v[DIST_OS], x = (float)(0.5 * sin(2.0 * M_PI * FP[j] * i / 44100.0));
-            dist_up(x, os, v);
-            o[i] = dist_down(v, os);
-        }
-        a = 20 * log10(os_rms(o + W, N - W) / (0.5 / sqrt(2.0)));
-        worst_pb = fmax(worst_pb, fabs(a));
-    }
-    ok &= worst_pb < 0.1;
-    for (j = 0; j < 5; j++) {                         /* the up-sampler's images: everything but the tone, in the oversampled stream */
-        static int32_t q[N * DIST_OS];
-        static float mag[N * DIST_OS / 2];
-        double tone = 0, rest = 0, f = FI[j];
-        unsigned kb = (unsigned)floor(f / 44100.0 * N + 0.5);
-        memset(os, 0, sizeof os);
-        for (i = 0; i < N; i++) {
-            float v[DIST_OS], x = (float)(0.5 * sin(2.0 * M_PI * kb * (double)i / N));
-            dist_up(x, os, v);
-            for (k = 0; k < DIST_OS; k++)
-                q[i * DIST_OS + k] = (int32_t)floor(v[k] * 1.0e8 + 0.5);
-        }
-        fft_mag(q + N * DIST_OS / 2, N * DIST_OS / 2, mag);       /* (the second half: the transient is gone; a whole number of periods) */
-        for (i = 1; i < N * DIST_OS / 4u; i++) {
-            double e = (double)mag[i] * mag[i];
-            if (i >= kb / 2u - 2u && i <= kb / 2u + 2u)
-                tone += e;
-            else
-                rest += e;
-        }
-        worst_img = fmax(worst_img, 10 * log10(rest / tone + 1e-30));
-    }
-    ok &= worst_img <= -60.0;
-    for (fo = 26500; fo < 22050.0 * DIST_OS - 150.0; fo += fo < 45000 ? 4500 : 10300) {   /* the down-sampler: a tone at the oversampled rate that folds into the band */
-        double r;
-        memset(os, 0, sizeof os);
-        for (i = 0; i < N; i++) {
-            float v[DIST_OS];
-            for (k = 0; k < DIST_OS; k++)
-                v[k] = (float)(0.5 * sin(2.0 * M_PI * fo * (i * DIST_OS + k) / (44100.0 * DIST_OS)));
-            o[i] = dist_down(v, os);
-        }
-        r = 20 * log10(os_rms(o + W, N - W) / (0.5 / sqrt(2.0)) + 1e-30);
-        worst_al = fmax(worst_al, r);
-    }
-    ok &= worst_al <= -60.0;
-    printf("dist:   oversampler (%dx): pass band 0.5-18 kHz up and down within %.4f dB; the up-sampler's images (tones 1-19.8 kHz) %.1f dB; the down-sampler's aliases (tones 26.5 kHz to %.0f kHz) %.1f dB\n",
-           DIST_OS, worst_pb, worst_img, 22.05 * DIST_OS, worst_al);
-    check(ok, "oversampler: the pass band is flat within 0.1 dB to 18 kHz, the images and the aliases are at least 60 dB down");
-}
-
-/* 8: the cost, host instructions per sample */
 static double dist_cost(int p, int old)
 {
     static int32_t src[CTL], buf[CTL];
@@ -693,9 +586,9 @@ static void test_cost(void)
         mx = fmax(mx, n - o);
         nx = fmax(nx, n);
     }
-    /* FX.1 (no oversampling) was 90.3 a sample; the oversampled loop is 4 (or 2) times the SVFs and tanh, plus 18 (or 10) all-pass sections */
-    check(nx <= (OS_N == 4 ? 385.0 : 240.0), "cost (DIST_OS %d): track_dist at most %.0f host instructions / sample per DIST-on track (FX.1: 90.3; worst %.1f, %+.1f over the old DIST)",
-          OS_N, OS_N == 4 ? 385.0 : 240.0, nx, mx);
+    /* FX.1 was 90.3 a sample, the Scream loop 4x 370 (2x 226) */
+    check(nx <= DIST_COST_MAX, "cost: track_dist at most %.0f host instructions / sample per DIST-on track (worst %.1f, %+.1f over the old DIST; the Scream loop was 370)",
+          DIST_COST_MAX, nx, mx);
 }
 
 /* the mix with the dearest legal load (2 x ACID OVERDRIVE x1 + 2 x DRIFT FAT SAW BASS x3), DIST 0 or d on every track */
@@ -761,7 +654,7 @@ static int render_wav(const char *dir, const char *tag, const int *P, int np)
 {
     static const struct { uint32_t e; const char *name, *label; uint32_t cat; } W[3] = {
         {ENGI_OBX, "SUB LEAD", "OBZ_bass", CAT_BASS},             /* (OB-Z has no BASS preset: SUB LEAD on the OFFBEAT bass pattern) */
-        {ENGI_ACID, "OVERDRIVE", "SB303_acid", CAT_ACID},          /* ACID pattern x2 (accents, slides) */
+        {ENGI_ACID, "OVERDRIVE", "NANO_acid", CAT_ACID},          /* ACID pattern x2 (accents, slides) */
         {ENGI_DRIFT, "DRIFT CHORDS", "JUNO_chord", CAT_KEYS}};     /* a 4-note chord held 3 s */
     uint32_t w, pi, cat;
     int k;
@@ -800,7 +693,7 @@ static int render_wav(const char *dir, const char *tag, const int *P, int np)
 
 int main(int argc, char **argv)
 {
-    if (argc >= 3 && !strcmp(argv[1], "--wav")) {                 /* --wav DIR [P_DIST ...]: tagged os4 / os2 after the build */
+    if (argc >= 3 && !strcmp(argv[1], "--wav")) {                 /* --wav DIR [P_DIST ...]: tagged drive after the build */
         static const int PD[5] = {40, 60, 80, 100, 127};
         int P[16], np = 0, k;
         char tag[8];
@@ -808,7 +701,7 @@ int main(int argc, char **argv)
             P[np++] = atoi(argv[k]);
         if (!np)
             memcpy(P, PD, sizeof PD), np = 5;
-        snprintf(tag, sizeof tag, "os%d", OS_N);
+        snprintf(tag, sizeof tag, "drive");
         return render_wav(argv[2], tag, P, np);
     }
     if (argc == 3 && !strcmp(argv[1], "--old")) {          /* built against the commit before FX.1 */
@@ -823,8 +716,6 @@ int main(int argc, char **argv)
     test_level();
     test_alias();
     test_alias_saw();
-    test_oversampler();
-    test_frozen_res();
     test_intensity();
     test_cost();
     if (getenv("WM")) {   /* debugging: parts alone */
@@ -840,8 +731,7 @@ int main(int argc, char **argv)
         double a = worst_mix(0), b = worst_mix(127), c = worst_mix(64);
         printf("dist:   the dearest legal mix (2 x ACID OVERDRIVE x1 + 2 x DRIFT FAT SAW BASS x3, CHOR off): %.0f host instructions / sample with DIST off, %.0f with P_DIST 64 on all four (%+.0f), %.0f with P_DIST 127 (%+.0f)\n",
                a, c, c - a, b, b - a);
-        check(b - a <= (OS_N == 4 ? 1160.0 : 740.0), "cost (DIST_OS %d): DIST on all four tracks adds at most %.0f host instructions / sample (%+.0f; FX.1: +357 in regress.c's cpu/DIST/worst_mix)",
-              OS_N, OS_N == 4 ? 1160.0 : 740.0, b - a);
+        check(b - a <= DIST_MIX_MAX, "cost: DIST on all four tracks adds at most %.0f host instructions / sample (%+.0f; the Scream loop added 1117)", DIST_MIX_MAX, b - a);
     }
     printf(bad ? "dist: %d FAILED\n" : "dist: all passed\n", bad);
     return bad != 0;

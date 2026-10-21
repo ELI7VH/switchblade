@@ -281,11 +281,11 @@ typedef struct {
 } chain_config_t;
 _Static_assert(sizeof(chain_config_t) == 84u, "song chain layout (FOR4)");
 
-typedef struct {                 /* DIST's float state (fx.c track_dist): all zero = fresh (gi == 0) */
-    float lp[2], hp[2];          /* the two Cytomic SVFs' integrators (output low-pass, feedback high-pass) */
-    float fb, env;               /* the feedback sample, the input peak follower (the gate) */
-    float ds, gi, go;            /* the smoothed macro 0..1, the input and output gains the last block ended on */
-    float os[14];                /* the oversampler's all-pass states (FX.2): up 1 (5), down 1 (5), up 2 (2), down 2 (2) */
+typedef struct {                 /* DIST's state (fx.c track_dist, the drive of fm1_drive_1.h): all zero = fresh (on == 0) */
+    int32_t dcx, dcy, lp;        /* the DC blocker's last input and output, the tone filter */
+    int32_t ds;                  /* the smoothed macro, P_DIST in Q8 */
+    int32_t gain, level;         /* the gain (Q8.8) and the make-up (Q12) the last block ended on */
+    uint8_t on;
 } dist_st_t;
 typedef struct track {
     int16_t p[P_COUNT];

@@ -83,13 +83,11 @@
 #                   bit (POLY, SPREAD), each TYPE at its corners on 3 and 8 voices (no DC, bounded, MIX 50 % halfway
 #                   to the wet), the MIX glide and TYPE changes, MIX / TYPE as automation and locks, FUN10 and user
 #                   presets of 109 and 104, the pages' labels, the cost per type; demos in build/insert_demo/.
-# DIST (tests/dist_test.c, Task FX.1; src/fx.c track_dist, the Scream-style distortion after cure.audio's Scream, MIT): P_DIST 0 a bit-identical bypass, the switch-on
-#                   without a click, the output bounded (<= 32767) on 8 FS noise / squares / sweeps and through the real part path (OVERDRIVE ACID, JUNO FAT SAW BASS x3, OB-Z x8),
-#                   silence in -> exactly silence out within 50 ms (the gate) and clean state after the part's tail, no NaN / denormal, a P_DIST sweep (every block)
-#                   without a step at the block edges, the level within +-3 dB of the old DIST on a saw chord, the alias floor of a 2 kHz sine (printed), the cost; --wav
-#                   writes the listening renders. FX.2: the DIST loop runs 4x oversampled (DIST_OS 4; 2 is built and run as a second dist_test): the alias floor of a
-#                   band-limited saw at 0.7 FS (110 / 440 Hz, <= -50 dB below 20 kHz up to P_DIST 102, -40 dB at 127), the oversampler's pass band and images, the resonance
-#                   frozen above d 0.4, the harmonic density of a sine rising at every step of the knob.
+# DIST (tests/dist_test.c; src/fx.c track_dist, 2026-10-21 the integer drive of fm1_drive_1.h, which replaced FX.1 / FX.2's Scream-style loop): P_DIST 0 a
+#                   bit-identical bypass, the switch-on without a click, the output bounded (<= 32767) on 8 FS noise / squares / sweeps and through the real part path
+#                   (OVERDRIVE ACID, JUNO FAT SAW BASS x3, OB-Z x8), silence in -> exactly silence out within 50 ms and the state exactly 0 after a silence, a P_DIST sweep
+#                   (every block) without a step at the block edges, the level within +-3 dB of the old DIST on a saw chord, the alias floor (a 2 kHz sine printed, a saw
+#                   at 0.7 FS pinned to the drive's own: it has no anti-aliasing), the harmonic density rising with the knob, the cost; --wav writes the listening renders.
 # SOUND 1.5 (tests/sound15_test.c; #104 #175): ANALOG's filter TYPE (LP bit for bit, every other engine ignores it, BP / HP
 #                   responses around the cutoff, RES, bounded at the corners), ENV SYNC (OFF bit for bit, the note values
 #                   on the knob, attack / decay / release times at 60 / 120 / 173 BPM and on the external clock), the cost;

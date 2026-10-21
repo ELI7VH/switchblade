@@ -90,255 +90,90 @@ static struct {                          /* HALL's state (in the pool: no .bss) 
 } hl __attribute__((section(".pool")));
 #define rev_side (hl.sd)
 
-/* DIST (FX.1): a Scream-style distortion, one knob. The design is cure.audio's Scream (MIT; src/plugin.c process_audio),
- * itself an approximation of Sytrus' "scream" filter:
- *     y = tanh(x * drive + fb);  out = SVF_LP(y);  fb = tanh(SVF_HP(out * fbgain)) * gate
- * the feedback delayed one sample, the gate an input peak follower (open above -50 dB) (no input, no self-oscillation). Single-precision
- * floats (the FPU has no doubles); the SVFs are Cytomic's trapezoidal ones (Simper), their coefficients computed once a
- * block, the tanh Scream's rational x (27 + x^2) / (27 + 9 x^2) clamped at +-3 (one divide), no ADAA (no doubles).
- * The macro P_DIST 0..127 (d = P_DIST / 127, one-pole smoothed per block so a sweep, the mod matrix' MD_DIST or a
- * motion record does not zipper; the gains ramp across the block):
- *   drive     0 .. +24 dB as d^2 up to d = 0.4 (+3.8 dB), then 24 d^2 + 3 ((d - 0.4) / 0.6)^2: +27 dB at the top (it keeps rising)
- *   RESONANCE 0 up to d = 0.2, then up to 0.2125 at d = 0.4 and FROZEN there up to 1 (FX.2): the feedback gain -12 .. +12 dB (Scream's law) and the HP's Q 0.707 ..
- *             1.414 follow it; the feedback itself fades in over d 0 .. 0.25 (d -> 0 is a plain tanh + low-pass)
- *   LP cutoff 5 kHz at E1 (the README's figure: an octave per octave from the latest note-on, t->m_key), x1.8 at d = 0
- *             (9 kHz) down to x1 at d = 1; clamped to 150 Hz .. 0.45 fs
- *   SCREAM    the HP sits at 0.3 of the LP cutoff (~1.7 octaves under, the README's scream ~50 % setting)
- *   make-up   see dist_macro; the output hard-limited at +-32767: DIST's output is bounded by 1 FS whatever the input
- *             or P_DIST (the tanh is +-1, the Q 0.707 low-pass has no peak; its overshoot is clamped): the mixer's
- *             guards (which see only the part's pre-DIST sum, ACID's 5 FS) hold unchanged.
- * Kept from the old DIST: the 55 Hz low cut in front of the clipper (the bass stays tight; it also keeps DC out of the
- * loop). Dropped: its asymmetric bias (even harmonics): Scream is symmetric.
- * P_DIST 0: a true bypass (nothing touched; the float state is cleared once, so switching on starts clean). */
-/* FX.2: the clipper loop (tanh -> SVF low-pass -> feedback SVF high-pass -> tanh) runs at DIST_OS x 44.1 kHz (4 by default, 2 is
- * the cheaper fallback: build with -DDIST_OS=2): the aliases the tanh folds back (tones at 9-18 kHz that track the note: the
- * whistle above P_DIST ~50) are filtered out before they are folded. The up- and down-samplers are polyphase all-pass IIR half-band
- * filters, H(z) = (A0(z^2) + z^-1 A1(z^2)) / 2, 3 + 2 first-order sections at the first stage (flat to 0.0001 dB below 19.8 kHz,
- * -65.8 dB above 24.3 kHz) and 1 + 1 at the second (-65.9 dB above 68.4 kHz; tools/gen_dist_halfband.py), one float of state per section, ~1.5 samples
- * of delay at low frequencies. The drive is applied at the base rate, the output gain and the hard limit after the down-sampler.
- * The resonance is frozen from d = 0.4 up (the top half has the bottom half's voice; only the drive rises). */
-#ifndef DIST_OS
-#define DIST_OS 4
-#endif
-#if DIST_OS != 2 && DIST_OS != 4
-#error "DIST_OS is 2 or 4"
-#endif
-#define DIST_MAXF 32767.0f
-#define DIST_FS 44100.0f
-#define DIST_FSO (DIST_FS * (float)DIST_OS)
-static inline float dist_tanh(float x)           /* Pade, +-1 past +-3 (exact there) */
+/* DIST (2026-10-21): the drive of fm1_drive_1.h (written for this project, DIST CHORUS SUB/; docs/plans/2026-10-21-dist-chorus-sub.md), integer,
+ * one knob. It replaced the Scream-style loop (FX.1 / FX.2), whose oversampled float loop cost ~370 host instructions a sample a track and
+ * overloaded the FM-1 with DIST on three tracks.
+ * The module's path: in -> gain -> + bias -> SOFT (clamp, then the cubic 1.5 x - 0.5 x^3) -> DC blocker (0.995) -> one-pole tone LPF -> level.
+ * The macro P_DIST 0..127 (smoothed per block, so a sweep, the matrix' MD_DIST or a motion record does not zipper; the gain and the level ramp
+ * across the block) sets it all, with the module's own curves:
+ *   drive  d = P_DIST: gain 1x .. 64x (the module's 256 + d^2 x 16128 / 127^2, Q8.8)
+ *   bias   d x 20 / 127 (0 .. 20 of the module's 0..127): the warmer, diode-ish even harmonics come with the drive; the DC blocker takes the offset
+ *   tone   127 - d x 40 / 127: open at 0, ~4.7 kHz at the top (the module's "tames some of the aliasing fizz at high drive")
+ *   level  DIST_LEVEL below: the make-up that keeps the old DIST's level (tests/dist_test.c test_level), 1.0 at P_DIST 0 (switching on is no step)
+ * Departures (the mixer's integer ranges; no int16 buffer here): the input is held to +-1 FS first (a part's sum reaches 5 FS: the module's
+ * x * gain wants int16); Q12 coefficients for the DC blocker, the tone and the level (the module's Q15 x a DC blocker's output of up to ~4 FS does
+ * not fit int32); the one-pole steps round away from zero and the DC blocker's decay toward zero (an arithmetic shift leaves a state stuck at
+ * -1), so silence in is exactly 0 out within ~35 ms; the output hard-limited at +-32767 (DIST's output is bounded by 1 FS, as before).
+ * No oversampling and no anti-aliasing (the module's): above the clamp the cubic folds its harmonics back (the tone LPF only darkens them).
+ * P_DIST 0: a true bypass (nothing touched; the state is cleared once, so switching on starts clean). */
+static const int16_t DIST_LEVEL[9] = {4096, 2303, 983, 1077, 1181, 1280, 1388, 1380, 1372};   /* Q12 at P_DIST 0, 16, .. 127 (the last at 127): 0, -5, -12.4, -11.6, -10.8, -10.1, -9.4, -9.45, -9.5 dB, the old DIST's level on a saw chord (dist_test test_level) */
+static int32_t dist_level_of(int32_t d)                 /* d 0..127 in Q8 (the smoothed macro) -> the make-up, Q12 */
 {
-    float x2;
-    x = x > 3.0f ? 3.0f : x < -3.0f ? -3.0f : x;
-    x2 = x * x;
-    return x * (27.0f + x2) / (27.0f + 9.0f * x2);
+    int32_t x = d >> 4, i = x >> 8, f = x & 255;        /* (d / 16 in Q8) */
+    if (i >= 8)
+        return DIST_LEVEL[8];
+    return DIST_LEVEL[i] + (((DIST_LEVEL[i + 1] - DIST_LEVEL[i]) * f) >> 8);
 }
-typedef struct { float a1, a2, a3, k; } dist_svf_t;
-static inline void dist_svf_set(dist_svf_t *c, float hz, float q)
+/* the clamp's limit through a volatile: folded into the curve, -Os makes a compare against -127 x 32767 = 0xFFC0807F, which tools/build.py
+ * takes for a reference into the chip ROM (0xFFC00000..) and refuses the image. The same arithmetic */
+static volatile int32_t dist_lim = 32767;
+static inline int32_t dist_soft(int32_t x, int32_t lim)  /* the module's drv_soft, Q15: clamp, then 1.5 x - 0.5 x^3 */
 {
-    float g = fm_tanf(FM_PI * hz * (1.0f / DIST_FSO));
-    c->k = 1.0f / q;
-    c->a1 = 1.0f / (1.0f + g * (g + c->k));
-    c->a2 = g * c->a1;
-    c->a3 = g * c->a2;
-}
-static inline float dist_svf_lp(float v0, const dist_svf_t *c, float *s)         /* the low-pass output v2 */
-{
-    float v3 = v0 - s[1], v1 = c->a1 * s[0] + c->a2 * v3, v2 = s[1] + c->a2 * s[0] + c->a3 * v3;
-    s[0] = 2.0f * v1 - s[0];
-    s[1] = 2.0f * v2 - s[1];
-    return v2;
-}
-static inline float dist_svf_hp(float v0, const dist_svf_t *c, float *s)         /* the high-pass output v0 - k v1 - v2 */
-{
-    float v3 = v0 - s[1], v1 = c->a1 * s[0] + c->a2 * v3, v2 = s[1] + c->a2 * s[0] + c->a3 * v3;
-    s[0] = 2.0f * v1 - s[0];
-    s[1] = 2.0f * v2 - s[1];
-    return v0 - c->k * v1 - v2;
-}
-/* the half-band stages: A(x) first-order all-pass in the stage's own rate, (a + z^-1) / (1 + a z^-1), one state */
-static inline float dist_ap(float x, float a, float *w)
-{
-    float t = x - a * *w, y = *w + a * t;
-    *w = t;
-    return y;
-}
-/* stage 1 (44.1 -> 88.2 kHz): x -> e (the earlier sample), o. States st[0..2] A0, st[3..4] A1 */
-static inline void dist_up1(float x, float *st, float *e, float *o)
-{
-    *e = dist_ap(dist_ap(dist_ap(x, 0.080707f, st), 0.512351f, st + 1), 0.908188f, st + 2);
-    *o = dist_ap(dist_ap(x, 0.279608f, st + 3), 0.723591f, st + 4);
-}
-static inline float dist_dn1(float t0, float t1, float *st)      /* the pair (earlier, later) -> one sample; phase 1: the later one goes through A0 */
-{
-    return 0.5f * (dist_ap(dist_ap(dist_ap(t1, 0.080707f, st), 0.512351f, st + 1), 0.908188f, st + 2) +
-                   dist_ap(dist_ap(t0, 0.279608f, st + 3), 0.723591f, st + 4));
-}
-/* stage 2 (88.2 -> 176.4 kHz): one section a branch */
-static inline void dist_up2(float x, float *st, float *e, float *o)
-{
-    *e = dist_ap(x, 0.130007f, st);
-    *o = dist_ap(x, 0.571541f, st + 1);
-}
-static inline float dist_dn2(float t0, float t1, float *st)
-{
-    return 0.5f * (dist_ap(t1, 0.130007f, st) + dist_ap(t0, 0.571541f, st + 1));
-}
-/* one base-rate sample in -> DIST_OS samples at the oversampled rate (os: this track's 14 floats: up 1 (5), down 1 (5), up 2 (2), down 2 (2)) */
-static inline void dist_up(float x, float *os, float *u)
-{
-#if DIST_OS == 4
-    float e, o;
-    dist_up1(x, os, &e, &o);
-    dist_up2(e, os + 10, &u[0], &u[1]);
-    dist_up2(o, os + 10, &u[2], &u[3]);
-#else
-    dist_up1(x, os, &u[0], &u[1]);
-#endif
-}
-static inline float dist_down(const float *y, float *os)
-{
-#if DIST_OS == 4
-    float z0 = dist_dn2(y[0], y[1], os + 12), z1 = dist_dn2(y[2], y[3], os + 12);
-    return dist_dn1(z0, z1, os + 5);
-#else
-    return dist_dn1(y[0], y[1], os + 5);
-#endif
-}
-/* the loop at the oversampled rate: the output y is the low-pass, fb the sample the next iteration adds */
-static inline float dist_loop(float u, float *fb, const dist_svf_t *lp, const dist_svf_t *hp, float *sl, float *sh, float fbg)
-{
-    float y = dist_svf_lp(dist_tanh(u + *fb), lp, sl);
-    *fb = dist_tanh(dist_svf_hp(y * fbg, hp, sh));
-    return y;
-}
-/* the output gain at smoothed d, 9 knots 1/8 apart: the old DIST's level at the same knob (a saw chord at 0.37 FS peak,
- * within 3 dB at P_DIST 32 / 64 / 96 / 127: dist_test.c), unity at 0 (switching on is not a step), and from d 0.25 to 0.75
- * kept under the level at which a band-limited saw at 0.7 FS (its peak 0.82 FS) would reach the hard limit (a clip at the base
- * rate is an alias source of its own: -44 dB at P_DIST 51 with the old 0.96) */
-static inline float dist_out_gain(float d)
-{
-    static const float K[9] = {1.00f, 0.91f, 0.90f, 0.84f, 0.78f, 0.73f, 0.52f, 0.37f, 0.30f};
-    float x = d * 8.0f, f;
-    int i = (int)x;
-    if (i > 7)
-        i = 7;
-    f = x - (float)i;
-    return 32768.0f * (K[i] + (K[i + 1] - K[i]) * f);
-}
-/* the macro's parameters at smoothed d: input gain (Q15 -> unity float), output gain (float -> Q15), the feedback gain,
- * the HP's Q, the LP / HP cutoffs (Hz) */
-static void dist_macro(const track_t *t, float d, float *gin, float *gout, float *fbg, float *hpq, float *lp, float *hp)
-{
-    float res = 0.85f * fm_clampf((fm_minf(d, 0.4f) - 0.2f) * 1.25f, 0.0f, 1.0f), f = fm_minf(d * 4.0f, 1.0f), key = (float)t->m_key;
-    float top = fm_maxf(d - 0.4f, 0.0f) * (1.0f / 0.6f);      /* the drive's extra 3 dB over d 0.4 .. 1 (+27 dB at the top) */
-    *gin = (1.0f / 32768.0f) * fm_exp2f((24.0f * d * d + 3.0f * top * top) * 0.166096405f);
-    *gout = dist_out_gain(d);
-    *fbg = fm_exp2f((-12.0f + 24.0f * res) * 0.166096405f) * f;
-    *hpq = 0.70710678f * (1.0f + res);
-    *lp = fm_clampf(5000.0f * fm_exp2f((key - 28.0f) * (1.0f / 12.0f) + 0.85f * (1.0f - d)), 150.0f, 0.45f * DIST_FS);
-    *hp = *lp * 0.3f;
+    int32_t x2, x3;
+    x = x > lim ? lim : x < -lim ? -lim : x;
+    x2 = (x * x) >> 15;
+    x3 = (x2 * x) >> 15;
+    return (3 * x - x3) >> 1;
 }
 static __attribute__((noinline)) void track_dist(track_t *t, int32_t *b, uint32_t n)
 {
     dist_st_t *s = &t->dst;
-    dist_svf_t lp, hp;
-    float tgt, gi, go, fbg, hpq, lhz, hhz, gi1, go1, dgi, dgo, fb, gate;
-    int32_t d = t->p[P_DIST], i, fresh, pk = 0, hs;
-    float os[14], sl[2], sh[2];
+    int32_t d = t->p[P_DIST], d8, g0, g1, l0, l1, dg, dl, tone, bias, gq, lq, dcx, dcy, lp, lim;
+    uint32_t i;
     if (!d) {
-        if (s->gi != 0.0f)
+        if (s->on)
             memset(s, 0, sizeof *s);                    /* off: the next switch-on starts clean (and ramps from nothing) */
         return;
     }
-    tgt = (float)d * (1.0f / 127.0f);
-    fresh = s->gi == 0.0f;
-    if (fresh) {                                        /* no old gains to ramp from; the low cut starts at 0 (the signal is AC) */
-        s->ds = tgt;
-        t->dist_hp = 0;
-        dist_macro(t, tgt, &gi, &go, &fbg, &hpq, &lhz, &hhz);
-        s->gi = gi;
-        s->go = go;
+    if (!s->on) {                                       /* fresh: no old gains to ramp from; the DC blocker at the bias' own level (no step) */
+        s->on = 1;
+        s->ds = d << 8;
+        s->gain = 256 + (d * d * 16128) / (127 * 127);
+        s->level = dist_level_of(s->ds);
+        s->dcx = dist_soft((d * 20 / 127) * 8192 / 127, dist_lim);
     } else
-        s->ds += (tgt - s->ds) * 0.5f;                  /* ~2 blocks (2 ms) to a step */
-    dist_macro(t, s->ds, &gi1, &go1, &fbg, &hpq, &lhz, &hhz);
-    if (fresh) {                                        /* the filters at the first sample's steady state (a DC input): no start-up step */
-        float y0 = dist_tanh((float)b[0] * s->gi), x0 = (float)b[0] * s->gi;
-        s->lp[1] = y0;
-        s->hp[1] = y0 * fbg;
-        {   /* the half-band all-passes at a DC input's steady state: w = x / (1 + a) */
-            static const float A1S[5] = {0.080707f, 0.512351f, 0.908188f, 0.279608f, 0.723591f};
-            int k;
-            for (k = 0; k < 5; k++) {
-                s->os[k] = x0 * (1.0f / (1.0f + A1S[k]));
-                s->os[5 + k] = y0 * (1.0f / (1.0f + A1S[k]));
-            }
-#if DIST_OS == 4
-            s->os[10] = x0 * (1.0f / 1.130007f);
-            s->os[11] = x0 * (1.0f / 1.571541f);
-            s->os[12] = y0 * (1.0f / 1.130007f);
-            s->os[13] = y0 * (1.0f / 1.571541f);
-#endif
-        }
-    }
-    dist_svf_set(&lp, lhz, 0.70710678f);
-    dist_svf_set(&hp, hhz, hpq);
-    gi = s->gi;
-    go = s->go;                                         /* (FX.2: the output gain ramps across the block like the input gain: a step of it once a block was a zipper) */
-    dgi = (gi1 - gi) * (1.0f / (float)n);
-    dgo = (go1 - go) * (1.0f / (float)n);
-    /* the feedback gate: Scream's input peak follower (1 ms release) at the block's rate: this block's feedback gain is
-     * scaled by the follower's value after the last block, so that silence closes the loop (fbg 0: the HP rings out in
-     * a few samples) and no input, however the loop was driven before, stays silent */
-    gate = s->env * 333.3f;
-    fbg *= gate > 1.0f ? 1.0f : gate;
-    fb = s->fb;
-    hs = t->dist_hp;
-    memcpy(os, s->os, sizeof os);                       /* the states in locals: the compiler keeps them in registers over the block */
-    sl[0] = s->lp[0], sl[1] = s->lp[1], sh[0] = s->hp[0], sh[1] = s->hp[1];
-    for (i = 0; i < (int32_t)n; i++) {
-        int32_t x = b[i];
-        float o, u[DIST_OS], v[DIST_OS];
-        int k;
-        hs += (x * 256 - hs) >> 7;                      /* ~55 Hz low cut (state in Q8: it decays to exactly 0, no DC left over) */
-        x -= (hs + 128) >> 8;                           /* (no int clamp: the float tanh flattens a hot input) */
-        if (!(i & 3)) {                                 /* the gate's peak from every 4th sample */
-            int32_t ax = x < 0 ? -x : x;
-            pk = ax > pk ? ax : pk;
-        }
-        gi += dgi;
-        go += dgo;
-        dist_up((float)x * gi, os, u);
-        for (k = 0; k < DIST_OS; k++)
-            v[k] = dist_loop(u[k], &fb, &lp, &hp, sl, sh, fbg);
-        o = dist_down(v, os) * go;
-        b[i] = (int32_t)(o > DIST_MAXF ? DIST_MAXF : o < -DIST_MAXF ? -DIST_MAXF : o);
-    }
-    t->dist_hp = hs;
-    memcpy(s->os, os, sizeof os);
-    s->lp[0] = sl[0], s->lp[1] = sl[1], s->hp[0] = sh[0], s->hp[1] = sh[1];
-    s->gi = gi1;
-    s->go = go1;
-    s->fb = fb;
+        s->ds += ((d << 8) - s->ds) >> 1;               /* ~2 blocks (2 ms) to a step */
+    d8 = s->ds;                                         /* the macro, Q8 */
     {
-        float e = (float)pk * gi1, r = s->env * 0.4808f;    /* Scream's follower: attack at once, release 0.9773 a sample = x 0.4808 a block */
-        s->env = e > r ? e : r;
+        int32_t dd = d8 >> 8;
+        g1 = 256 + (int32_t)(((int64_t)d8 * d8 * 16128) / (127 * 127 * 65536));   /* (once a block) */
+        bias = (dd * 20 / 127) * 8192 / 127;
+        tone = 127 - dd * 40 / 127;
+        tone = (1000 + (tone * tone * 31767) / (127 * 127)) >> 3;                   /* the module's coefficient, Q15 -> Q12 */
+        l1 = dist_level_of(d8);
     }
-    {   /* tiny state to 0 (no denormals; Scream's ROUND_STATE_TO_ZERO) and NaN-proof: a state out of range (or NaN) restarts clean */
-        float *v = s->lp;
-        int k, bad = 0;
-        for (k = 0; k < 6 + 14; k++) {                  /* (lp[2], hp[2], fb, env are contiguous; the oversampler's 12 are apart) */
-            float *q = k < 6 ? v + k : s->os + (k - 6), a = *q < 0.0f ? -*q : *q;
-            if (a < 1.0e-8f)
-                *q = 0.0f;
-            else
-                bad |= !(a < 1.0e6f);
-        }
-        if (bad) {
-            memset(s->lp, 0, 6 * sizeof(float));
-            memset(s->os, 0, sizeof s->os);
-        }
+    g0 = s->gain, l0 = s->level;
+    dg = ((g1 - g0) << 8) / (int32_t)n;                 /* the ramps, Q8 per sample */
+    dl = ((l1 - l0) << 8) / (int32_t)n;
+    gq = g0 << 8, lq = l0 << 8;
+    dcx = s->dcx, dcy = s->dcy, lp = s->lp;
+    lim = dist_lim;
+    for (i = 0; i < n; i++) {
+        int32_t x = b[i], y, dc, e;
+        gq += dg;
+        lq += dl;
+        x = x > 32767 ? 32767 : x < -32767 ? -32767 : x;    /* (the module's int16 input) */
+        y = dist_soft(((x * (gq >> 8)) >> 8) + bias, lim);
+        e = dcy * 4075;                                 /* DC blocker, y - x1 + 0.995 y1, the decay rounded toward zero */
+        dc = y - dcx + ((e + (e < 0 ? 4095 : 0)) >> 12);
+        dcx = y, dcy = dc;
+        e = (dc - lp) * tone;                           /* tone: a one-pole step, rounded away from zero */
+        lp += (e + (e > 0 ? 4095 : 0)) >> 12;
+        y = (lp * (lq >> 8)) >> 12;
+        b[i] = y > 32767 ? 32767 : y < -32767 ? -32767 : y;
     }
+    s->dcx = dcx, s->dcy = dcy, s->lp = lp;
+    s->gain = g1, s->level = l1;
 }
 
 /* master: peak limiter in front of the soft clipper. Fast attack (~0.1 ms),
