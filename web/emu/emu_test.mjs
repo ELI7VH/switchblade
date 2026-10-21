@@ -8,7 +8,7 @@
 // starts the sequencer (PLAY's green LED), a user preset saved from the panel (SAVE, OCT+, OCT+) reaches the flash,
 // and the flash sectors kept as the page keeps them bring it back in a fresh instance; the same gestures twice
 // give the same audio (deterministic), with NATIVE.f32 (web/emu/native_check.c) the native build's, bit for bit.
-// Then the cost: 1 s of a heavy song (OB-Z, WAVE and JUNO chords, an SB303 line) against real time (BENCH_MAX, default 0.5:
+// Then the cost: 1 s of a heavy song (OB-Z, WAVE and JUNO chords, a NANO line) against real time (BENCH_MAX, default 0.5:
 // fails above half of real time on this machine).
 import fs from "fs";
 import { storeSectors, restoreSectors, midiKnob, KNOB_CC, MASTER_CC } from "./worklet.js";
@@ -203,6 +203,6 @@ for (let i = 0; i < 3; i++) {
   best = Math.min(best, performance.now() - t0);
 }
 const ratio = best / 1000, max = +(process.env.BENCH_MAX || 0.5);
-check(`1 s of the heavy song (OB-Z WAVE JUNO chords + SB303 line) in ${best.toFixed(1)} ms: ${(ratio * 100).toFixed(1)} % of real time`, ratio < max);
+check(`1 s of the heavy song (OB-Z WAVE JUNO chords + NANO line) in ${best.toFixed(1)} ms: ${(ratio * 100).toFixed(1)} % of real time`, ratio < max);
 console.log(fails ? `emu: ${fails} FAILED` : "emu: all ok");
 process.exit(fails ? 1 : 0);

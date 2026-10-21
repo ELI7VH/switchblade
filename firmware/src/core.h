@@ -190,6 +190,9 @@ typedef struct {                 /* an engine (engines.c ENGINES[]; the eng_*.c 
      * (OB-Z, WAVE, ACID): the part's path is the same code as without it. The output must stay inside the mixer's integer limits (|L|, |R| <= 5 full
      * scales: task-7.2a-review.md) */
     int (*part_fx)(struct track *t, int32_t *b, int32_t *z, uint32_t n);
+    /* optional (2026-10-21, NANO's two models): per track, whether the engine runs its own envelope (else .ownenv) and its voice cap (else .poly) */
+    int (*ownenv_of)(const struct track *t);
+    uint8_t (*poly_of)(const struct track *t);
 } engine_t;
 
 /* ------------------------------------------------- tracks, the song --- */

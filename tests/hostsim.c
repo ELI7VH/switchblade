@@ -113,6 +113,7 @@ static void host_preset_values(track_t *t, uint32_t e, uint32_t pi, const preset
                                                    * parameters at their defaults, as host_tracks_init leaves
                                                    * them and as apply_preset_to restores them first. */
     drift_track_loaded(t);                        /* DRIFT's chorus (DRIFT_PX), as ui.c apply_preset_to */
+    acid_track_loaded(t);                         /* NANO's model and filter TYPE (NANO_PX), as ui.c apply_preset_to */
 }
 static void host_preset_req(track_t *t, uint32_t e, uint32_t pi)
 {

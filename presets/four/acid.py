@@ -1,70 +1,44 @@
-# ACID: 32 seeds, four styles of 8 (CLASSIC, SQUELCH, DISTORTED, DEEP; the category of all is ACID).
-# e = WAVE (0 SAW 1 SQR), TUNE, DECY, ACC, CUT, RES, DRV, SQL: the 303 voice's pots (firmware/src/eng_acid.c, docs/plans/2026-10-17-acid-303.md).
-# TUNE is a +-1.6 semitone fine tune there (it was an octave / interval on the placeholder: those seeds are 0 now; the sequence
-# supplies the octave). Seeds still, re-voiced for real in Task 7.2
+# NANO (was ACID / SB303; 2026-10-21): presets 1-2 the classic TB-303 voice (bass303.c), 3-32 the SUB model (eng_sub.c, fm1_subsynth.h)
+# playing 30 of the 32 factory sounds of fm1_subsynth_presets.h (DIST CHORUS SUB/; Chlorine and Hydrogen, the snare and hi-hat hits, left out).
+# 303: e = WAVE (0 SAW 1 SQR), TUNE, DECY, ACC, CUT, RES, DRV, SQL: the 303 voice's pots (firmware/src/eng_acid.c, docs/plans/2026-10-17-acid-303.md).
+# SUB, the module's 30 values (0..127 as they are) where eng_sub.c keeps them: e = WAVE (osc 1 W1 >= 64 PULS), DTUN (DET - 64), OSC2 (L2), SUB,
+#   CUT, RES, PW, NOIS; env = the amp ADSR (AA AD AS AR); fenv = FENV - 64; ftype from MODE (LP12 LP24 BP HP -> 3 0 1 2); fa..fr the filter
+#   ADSR; ktrk; o1 (L1), w2 (W2), semi, pwm, vel, lrate, lpit, lcut, vol; glide; LEG -> mono 1 (LEGATO); a Bass / Sub / Lead without it mono1
+#   (MONO, every note retriggers), the rest POLY. Categories: ACID 2 (the 303), BASS 12 (Bass, Sub), LEAD 5, KEYS 7 (Keys, Synth), ATMOS 6
+#   (Atmos, the Sulphur riser). The sends and the pattern hint by category (the module has neither).
 PRESETS = [
-    dict(name="ACID TRAX", cat="ACID", e=[0, 0, 60, 80, 50, 90, 0, 0], env=[0, 70, 15, 30], fenv=48, mono=1,
-         fx=(10, 0, 40, 15), pat=1),   # CLASSIC
-    dict(name="PHUTURE", cat="ACID", e=[0, 0, 55, 90, 44, 100, 0, 0], env=[0, 65, 15, 30], fenv=52, mono=1,
-         fx=(10, 0, 45, 15), pat=1),   # CLASSIC
-    dict(name="BASSLINE", cat="ACID", e=[1, 0, 50, 70, 56, 85, 0, 0], env=[0, 60, 15, 30], fenv=40, mono=1,
-         fx=(5, 0, 35, 10), pat=1),   # CLASSIC
-    dict(name="ROLAND", cat="ACID", e=[0, 0, 64, 85, 60, 80, 5, 0], env=[0, 74, 15, 30], fenv=45, mono=1,
-         fx=(0, 0, 40, 20), pat=1),   # CLASSIC
-    dict(name="BLEEP", cat="ACID", e=[1, 0, 35, 100, 70, 70, 0, 0], env=[0, 45, 15, 30], fenv=50, mono=1,
-         fx=(0, 0, 50, 25), pat=1),   # CLASSIC
-    dict(name="HOUSE ACID", cat="ACID", e=[0, 0, 45, 60, 64, 75, 10, 0], env=[0, 55, 15, 30], fenv=36, mono=1,
-         fx=(5, 10, 35, 25), pat=1),   # CLASSIC
-    dict(name="TB BASS", cat="ACID", e=[1, 0, 58, 75, 46, 92, 8, 0], env=[0, 68, 15, 30], fenv=44, mono=1,
-         fx=(5, 0, 30, 10), pat=1),   # CLASSIC
-    dict(name="WAREHOUSE", cat="ACID", e=[0, 0, 72, 95, 40, 105, 15, 0], env=[0, 82, 15, 30], fenv=55, mono=1,
-         fx=(15, 0, 45, 20), pat=1),   # CLASSIC
-    dict(name="SQUELCHER", cat="ACID", e=[0, 0, 50, 100, 34, 118, 0, 0], env=[0, 60, 15, 30], fenv=60, mono=1,
-         fx=(5, 0, 45, 15), pat=1),   # SQUELCH
-    dict(name="RUBBER", cat="ACID", e=[1, 0, 40, 110, 38, 112, 0, 0], env=[0, 50, 15, 30], fenv=58, mono=1,
-         fx=(5, 0, 40, 15), pat=1),   # SQUELCH
-    dict(name="WOW", cat="ACID", e=[0, 0, 80, 90, 28, 115, 10, 0], env=[0, 90, 15, 30], fenv=63, mono=1,
-         fx=(0, 0, 50, 25), pat=1),   # SQUELCH
-    dict(name="RESO FREAK", cat="ACID", e=[0, 0, 45, 85, 42, 122, 0, 0], env=[0, 55, 15, 30], fenv=56, mono=1,
-         fx=(10, 0, 40, 10), pat=1),   # SQUELCH
-    dict(name="LIQUID", cat="ACID", e=[1, 0, 70, 95, 36, 108, 0, 0], env=[0, 80, 15, 30], fenv=52, mono=1,
-         fx=(0, 15, 45, 35), pat=1),   # SQUELCH
-    dict(name="BUBBLES", cat="ACID", e=[0, 0, 38, 105, 48, 116, 5, 0], env=[0, 48, 15, 30], fenv=60, mono=1,
-         fx=(5, 0, 55, 30), pat=1),   # SQUELCH
-    dict(name="ZAP SQUELCH", cat="ACID", e=[1, 0, 28, 120, 60, 110, 0, 0], env=[0, 38, 15, 30], fenv=63, mono=1,
-         fx=(10, 0, 50, 20), pat=1),   # SQUELCH
-    dict(name="SCOOP", cat="ACID", e=[0, 0, 62, 100, 32, 120, 12, 0], env=[0, 72, 15, 30], fenv=62, mono=1,
-         fx=(5, 0, 40, 15), pat=1),   # SQUELCH
-    dict(name="DIRTY 303", cat="ACID", e=[0, 0, 55, 85, 52, 95, 75, 0], env=[0, 65, 15, 30], fenv=48, mono=1,
-         fx=(30, 0, 35, 10), pat=1),   # DISTORTED
-    dict(name="CRUSHER", cat="ACID", e=[1, 0, 48, 95, 46, 100, 100, 0], env=[0, 58, 15, 30], fenv=55, mono=1,
-         fx=(45, 0, 30, 10), pat=1),   # DISTORTED
-    dict(name="FUZZ BOX", cat="ACID", e=[0, 0, 60, 80, 58, 85, 90, 0], env=[0, 70, 15, 30], fenv=42, mono=1,
-         fx=(35, 0, 30, 15), pat=1),   # DISTORTED
-    dict(name="OVERDRIVE", cat="ACID", e=[1, 0, 52, 90, 50, 90, 110, 0], env=[0, 62, 15, 30], fenv=50, mono=1,
-         fx=(40, 0, 35, 10), pat=1),   # DISTORTED
-    dict(name="BURNT", cat="ACID", e=[0, 0, 66, 100, 44, 105, 85, 0], env=[0, 76, 15, 30], fenv=56, mono=1,
-         fx=(50, 0, 40, 15), pat=1),   # DISTORTED
-    dict(name="GRIT", cat="ACID", e=[1, 0, 45, 75, 54, 88, 95, 0], env=[0, 55, 15, 30], fenv=46, mono=1,
-         fx=(30, 0, 25, 10), pat=1),   # DISTORTED
-    dict(name="SCREAM", cat="ACID", e=[0, 0, 40, 110, 62, 112, 120, 0], env=[0, 50, 15, 30], fenv=60, mono=1,
-         fx=(55, 0, 45, 20), pat=1),   # DISTORTED
-    dict(name="RUST", cat="ACID", e=[0, 0, 70, 70, 40, 96, 80, 0], env=[0, 80, 15, 30], fenv=50, mono=1,
-         fx=(40, 10, 35, 25), pat=1),   # DISTORTED
-    dict(name="DEEP ACID", cat="ACID", e=[1, 0, 66, 70, 30, 90, 0, 0], env=[0, 76, 15, 30], fenv=44, mono=1,
-         fx=(0, 0, 30, 20), pat=1),   # DEEP
-    dict(name="SUB 303", cat="ACID", e=[0, 0, 70, 60, 26, 80, 10, 0], env=[0, 80, 15, 30], fenv=38, mono=1,
-         fx=(5, 0, 20, 10), pat=1),   # DEEP
-    dict(name="DARK TRAX", cat="ACID", e=[0, 0, 75, 85, 28, 100, 20, 0], env=[0, 85, 15, 30], fenv=50, mono=1,
-         fx=(10, 0, 35, 30), pat=1),   # DEEP
-    dict(name="MINIMAL", cat="ACID", e=[1, 0, 40, 65, 34, 96, 0, 0], env=[0, 50, 15, 30], fenv=36, mono=1,
-         fx=(0, 0, 25, 15), pat=1),   # DEEP
-    dict(name="ROLLING", cat="ACID", e=[0, 0, 60, 80, 32, 95, 15, 0], env=[0, 70, 15, 30], fenv=46, mono=1,
-         fx=(10, 0, 30, 15), pat=1),   # DEEP
-    dict(name="DUB ACID", cat="ACID", e=[1, 0, 78, 75, 24, 88, 5, 0], env=[0, 88, 15, 30], fenv=42, mono=1,
-         fx=(0, 10, 40, 40), pat=1),   # DEEP
-    dict(name="LOW SQUELCH", cat="ACID", e=[0, 0, 58, 100, 22, 114, 10, 0], env=[0, 68, 15, 30], fenv=58, mono=1,
-         fx=(10, 0, 35, 20), pat=1),   # DEEP
-    dict(name="UNDERTOW", cat="ACID", e=[1, 0, 82, 90, 20, 102, 25, 0], env=[0, 92, 15, 30], fenv=52, mono=1,
-         fx=(15, 0, 35, 30), pat=1),   # DEEP
+    # ------------------------------------------------------------------------------------------------ the 303
+    dict(name='ACID TRAX', cat='ACID', e=[0, 0, 60, 80, 50, 90, 0, 0], env=[0, 70, 15, 30], fenv=48, mono=1, fx=(10, 0, 40, 15), pat=1, model=0, ftype=0),
+    dict(name='BASSLINE', cat='ACID', e=[1, 0, 50, 70, 56, 85, 0, 0], env=[0, 60, 15, 30], fenv=40, mono=1, fx=(5, 0, 35, 10), pat=1, model=0, ftype=0),
+    # ------------------------------------------------------------------------------------------------ SUB (fm1_subsynth_presets.h)
+    dict(name='RUBIDIUM', cat='BASS', e=[0, 0, 0, 60, 40, 45, 0, 0], env=[0, 50, 120, 15], fenv=31, mono=1, fx=(0, 0, 0, 0), pat=2, model=1, ftype=0, mono1=1, glide=0, fa=0, fd=32, fs=10, fr=20, ktrk=40, o1=127, w2=0, semi=64, pwm=0, vel=80, lrate=40, lpit=0, lcut=0, vol=120),   # Rubidium (Bass)
+    dict(name='BROMINE', cat='BASS', e=[0, 0, 0, 0, 30, 112, 0, 0], env=[0, 40, 127, 12], fenv=38, mono=1, fx=(0, 0, 0, 0), pat=2, model=1, ftype=0, mono1=0, glide=22, fa=0, fd=34, fs=0, fr=25, ktrk=30, o1=127, w2=0, semi=64, pwm=0, vel=90, lrate=40, lpit=0, lcut=0, vol=110),   # Bromine (Bass)
+    dict(name='ANTIMONY', cat='BASS', e=[0, 18, 127, 50, 58, 30, 0, 0], env=[0, 60, 127, 20], fenv=6, mono=1, fx=(0, 0, 0, 0), pat=2, model=1, ftype=0, mono1=1, glide=0, fa=0, fd=60, fs=60, fr=30, ktrk=30, o1=127, w2=0, semi=64, pwm=0, vel=40, lrate=25, lpit=0, lcut=10, vol=105),   # Antimony (Bass)
+    dict(name='OSMIUM', cat='BASS', e=[1, 0, 0, 70, 38, 40, 50, 0], env=[0, 40, 110, 12], fenv=34, mono=1, fx=(0, 0, 0, 0), pat=2, model=1, ftype=3, mono1=1, glide=0, fa=0, fd=26, fs=0, fr=15, ktrk=40, o1=127, w2=0, semi=64, pwm=0, vel=80, lrate=40, lpit=0, lcut=0, vol=115),   # Osmium (Bass)
+    dict(name='THALLIUM', cat='BASS', e=[0, 2, 90, 50, 45, 85, 40, 0], env=[0, 50, 127, 15], fenv=21, mono=1, fx=(0, 0, 0, 0), pat=2, model=1, ftype=3, mono1=1, glide=0, fa=0, fd=40, fs=40, fr=20, ktrk=30, o1=127, w2=127, semi=96, pwm=0, vel=70, lrate=50, lpit=0, lcut=0, vol=105),   # Thallium (Bass)
+    dict(name='BISMUTH', cat='BASS', e=[1, 0, 0, 90, 32, 30, 0, 0], env=[0, 38, 0, 25], fenv=28, mono=1, fx=(0, 0, 0, 0), pat=2, model=1, ftype=0, mono1=1, glide=0, fa=0, fd=30, fs=0, fr=25, ktrk=20, o1=127, w2=0, semi=64, pwm=0, vel=70, lrate=40, lpit=0, lcut=0, vol=115),   # Bismuth (Bass)
+    dict(name='GALLIUM', cat='BASS', e=[0, 10, 110, 80, 45, 70, 0, 0], env=[0, 60, 127, 15], fenv=6, mono=1, fx=(0, 0, 0, 0), pat=2, model=1, ftype=0, mono1=1, glide=0, fa=0, fd=60, fs=80, fr=20, ktrk=20, o1=127, w2=0, semi=64, pwm=0, vel=40, lrate=46, lpit=0, lcut=95, vol=110),   # Gallium (Bass)
+    dict(name='COBALT', cat='BASS', e=[0, 6, 100, 60, 50, 55, 0, 0], env=[0, 50, 127, 15], fenv=26, mono=1, fx=(0, 0, 0, 0), pat=2, model=1, ftype=0, mono1=0, glide=12, fa=0, fd=36, fs=20, fr=20, ktrk=30, o1=127, w2=0, semi=96, pwm=0, vel=70, lrate=40, lpit=0, lcut=0, vol=105),   # Cobalt (Bass)
+    dict(name='HELIUM', cat='BASS', e=[0, 0, 0, 127, 52, 45, 0, 0], env=[2, 60, 127, 25], fenv=0, mono=1, fx=(0, 0, 0, 0), pat=2, model=1, ftype=0, mono1=1, glide=0, fa=0, fd=0, fs=127, fr=0, ktrk=127, o1=0, w2=0, semi=64, pwm=0, vel=30, lrate=40, lpit=0, lcut=0, vol=127),   # Helium (Sub)
+    dict(name='ARGON', cat='BASS', e=[0, 0, 0, 127, 45, 20, 0, 0], env=[1, 50, 127, 20], fenv=11, mono=1, fx=(0, 0, 0, 0), pat=2, model=1, ftype=0, mono1=1, glide=0, fa=0, fd=40, fs=30, fr=20, ktrk=127, o1=30, w2=0, semi=64, pwm=0, vel=40, lrate=40, lpit=0, lcut=0, vol=120),   # Argon (Sub)
+    dict(name='KRYPTON', cat='BASS', e=[1, 0, 0, 127, 40, 25, 0, 0], env=[0, 75, 40, 40], fenv=46, mono=1, fx=(0, 0, 0, 0), pat=2, model=1, ftype=0, mono1=1, glide=0, fa=0, fd=22, fs=0, fr=20, ktrk=127, o1=40, w2=0, semi=64, pwm=0, vel=60, lrate=40, lpit=0, lcut=0, vol=125),   # Krypton (Sub)
+    dict(name='LITHIUM', cat='BASS', e=[0, 0, 0, 127, 44, 30, 0, 10], env=[5, 60, 127, 30], fenv=0, mono=1, fx=(0, 0, 0, 0), pat=2, model=1, ftype=3, mono1=0, glide=30, fa=0, fd=0, fs=127, fr=0, ktrk=127, o1=0, w2=0, semi=64, pwm=0, vel=30, lrate=30, lpit=40, lcut=0, vol=125),   # Lithium (Sub)
+    dict(name='XENON', cat='ATMOS', e=[1, 8, 110, 0, 70, 25, 20, 0], env=[75, 90, 127, 85], fenv=16, mono=0, fx=(0, 40, 30, 70), pat=5, model=1, ftype=3, mono1=0, glide=0, fa=80, fd=90, fs=60, fr=85, ktrk=40, o1=127, w2=127, semi=64, pwm=80, vel=20, lrate=25, lpit=4, lcut=10, vol=110),   # Xenon (Atmos)
+    dict(name='NITROGEN', cat='ATMOS', e=[0, 0, 0, 0, 75, 108, 0, 127], env=[85, 90, 127, 90], fenv=0, mono=0, fx=(0, 40, 30, 70), pat=5, model=1, ftype=1, mono1=0, glide=0, fa=0, fd=0, fs=127, fr=0, ktrk=0, o1=0, w2=0, semi=64, pwm=0, vel=0, lrate=18, lpit=0, lcut=70, vol=127),   # Nitrogen (Atmos)
+    dict(name='IRIDIUM', cat='ATMOS', e=[0, 16, 127, 30, 60, 40, 0, 10], env=[80, 90, 127, 90], fenv=21, mono=0, fx=(0, 40, 30, 70), pat=5, model=1, ftype=0, mono1=0, glide=0, fa=90, fd=95, fs=40, fr=90, ktrk=40, o1=127, w2=0, semi=64, pwm=0, vel=20, lrate=15, lpit=3, lcut=30, vol=105),   # Iridium (Atmos)
+    dict(name='POLONIUM', cat='ATMOS', e=[0, 4, 120, 80, 40, 60, 30, 15], env=[70, 100, 127, 95], fenv=6, mono=0, fx=(0, 40, 30, 70), pat=5, model=1, ftype=0, mono1=0, glide=0, fa=60, fd=100, fs=100, fr=90, ktrk=20, o1=127, w2=127, semi=32, pwm=60, vel=0, lrate=10, lpit=2, lcut=40, vol=115),   # Polonium (Atmos)
+    dict(name='HAFNIUM', cat='ATMOS', e=[0, 6, 100, 0, 90, 80, 0, 20], env=[85, 95, 127, 95], fenv=8, mono=0, fx=(0, 40, 30, 70), pat=5, model=1, ftype=1, mono1=0, glide=0, fa=80, fd=90, fs=80, fr=90, ktrk=60, o1=127, w2=0, semi=114, pwm=0, vel=20, lrate=30, lpit=6, lcut=25, vol=115),   # Hafnium (Atmos)
+    dict(name='SILICON', cat='KEYS', e=[0, 6, 80, 30, 60, 30, 30, 0], env=[0, 55, 30, 40], fenv=26, mono=0, fx=(0, 15, 25, 35), pat=6, model=1, ftype=3, mono1=0, glide=0, fa=0, fd=40, fs=20, fr=40, ktrk=80, o1=127, w2=127, semi=64, pwm=0, vel=60, lrate=40, lpit=0, lcut=0, vol=110),   # Silicon (Keys)
+    dict(name='COPPER', cat='KEYS', e=[1, 0, 100, 90, 95, 0, 0, 0], env=[5, 0, 127, 15], fenv=0, mono=0, fx=(0, 15, 25, 35), pat=6, model=1, ftype=3, mono1=0, glide=0, fa=0, fd=0, fs=127, fr=0, ktrk=60, o1=127, w2=127, semi=96, pwm=0, vel=20, lrate=60, lpit=3, lcut=0, vol=95),   # Copper (Keys)
+    dict(name='PALLADIUM', cat='KEYS', e=[1, 0, 0, 40, 62, 15, 30, 0], env=[3, 60, 70, 48], fenv=18, mono=0, fx=(0, 15, 25, 35), pat=6, model=1, ftype=0, mono1=0, glide=0, fa=0, fd=55, fs=40, fr=45, ktrk=80, o1=127, w2=0, semi=64, pwm=50, vel=70, lrate=30, lpit=0, lcut=0, vol=115),   # Palladium (Keys)
+    dict(name='STRONTIUM', cat='KEYS', e=[1, 2, 100, 0, 70, 60, 90, 0], env=[0, 55, 0, 55], fenv=28, mono=0, fx=(0, 15, 25, 35), pat=6, model=1, ftype=3, mono1=0, glide=0, fa=0, fd=45, fs=10, fr=50, ktrk=90, o1=127, w2=127, semi=83, pwm=0, vel=60, lrate=50, lpit=0, lcut=0, vol=115),   # Strontium (Keys)
+    dict(name='NEON', cat='LEAD', e=[0, 10, 127, 40, 88, 35, 0, 0], env=[2, 50, 127, 35], fenv=14, mono=1, fx=(0, 5, 35, 25), pat=4, model=1, ftype=3, mono1=0, glide=15, fa=0, fd=50, fs=80, fr=40, ktrk=60, o1=127, w2=0, semi=64, pwm=0, vel=50, lrate=60, lpit=10, lcut=0, vol=100),   # Neon (Lead)
+    dict(name='MAGNESIUM', cat='LEAD', e=[1, 0, 0, 50, 80, 30, 20, 0], env=[2, 50, 127, 35], fenv=16, mono=1, fx=(0, 5, 35, 25), pat=4, model=1, ftype=0, mono1=1, glide=0, fa=0, fd=50, fs=70, fr=40, ktrk=60, o1=127, w2=0, semi=64, pwm=0, vel=50, lrate=62, lpit=16, lcut=0, vol=110),   # Magnesium (Lead)
+    dict(name='FLUORINE', cat='LEAD', e=[0, 0, 0, 0, 55, 115, 0, 0], env=[0, 40, 127, 15], fenv=36, mono=1, fx=(0, 5, 35, 25), pat=4, model=1, ftype=0, mono1=0, glide=20, fa=0, fd=32, fs=10, fr=25, ktrk=60, o1=127, w2=0, semi=64, pwm=0, vel=90, lrate=40, lpit=0, lcut=0, vol=100),   # Fluorine (Lead)
+    dict(name='CAESIUM', cat='LEAD', e=[1, 14, 120, 60, 85, 30, 40, 0], env=[5, 50, 127, 40], fenv=8, mono=1, fx=(0, 5, 35, 25), pat=4, model=1, ftype=3, mono1=1, glide=40, fa=0, fd=50, fs=90, fr=40, ktrk=50, o1=127, w2=0, semi=32, pwm=90, vel=40, lrate=55, lpit=14, lcut=0, vol=95),   # Caesium (Lead)
+    dict(name='TUNGSTEN', cat='LEAD', e=[0, 4, 90, 0, 75, 100, 50, 0], env=[2, 50, 127, 35], fenv=21, mono=1, fx=(0, 5, 35, 25), pat=4, model=1, ftype=1, mono1=0, glide=10, fa=0, fd=45, fs=50, fr=40, ktrk=80, o1=127, w2=127, semi=96, pwm=30, vel=60, lrate=50, lpit=8, lcut=0, vol=115),   # Tungsten (Lead)
+    dict(name='SULPHUR', cat='ATMOS', e=[0, 0, 0, 0, 30, 90, 0, 127], env=[60, 60, 127, 40], fenv=61, mono=0, fx=(0, 40, 30, 70), pat=5, model=1, ftype=1, mono1=0, glide=0, fa=98, fd=0, fs=127, fr=40, ktrk=0, o1=0, w2=0, semi=64, pwm=0, vel=0, lrate=70, lpit=0, lcut=15, vol=115),   # Sulphur (Noise)
+    dict(name='CARBON', cat='KEYS', e=[0, 4, 127, 30, 65, 45, 0, 0], env=[0, 42, 0, 38], fenv=31, mono=0, fx=(0, 15, 25, 35), pat=6, model=1, ftype=0, mono1=0, glide=0, fa=0, fd=35, fs=0, fr=35, ktrk=60, o1=127, w2=0, semi=83, pwm=0, vel=70, lrate=40, lpit=0, lcut=0, vol=105),   # Carbon (Synth)
+    dict(name='TITANIUM', cat='KEYS', e=[0, 10, 127, 50, 72, 55, 40, 0], env=[0, 46, 0, 42], fenv=28, mono=0, fx=(0, 15, 25, 35), pat=6, model=1, ftype=3, mono1=0, glide=0, fa=0, fd=38, fs=15, fr=38, ktrk=60, o1=127, w2=127, semi=96, pwm=0, vel=70, lrate=40, lpit=0, lcut=0, vol=100),   # Titanium (Synth)
+    dict(name='VANADIUM', cat='KEYS', e=[1, 8, 90, 30, 58, 60, 64, 0], env=[0, 34, 0, 30], fenv=34, mono=0, fx=(0, 15, 25, 35), pat=6, model=1, ftype=0, mono1=0, glide=0, fa=0, fd=30, fs=0, fr=28, ktrk=70, o1=127, w2=0, semi=64, pwm=40, vel=80, lrate=30, lpit=0, lcut=0, vol=110),   # Vanadium (Synth)
 ]

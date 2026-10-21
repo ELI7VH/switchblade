@@ -10,6 +10,7 @@
  * Accent = step velocity > 110 (seq.c sets 127). Slide = t->slide_glide (or GLIDE) onto a note that is still sounding: bass303's
  * slideToNote, no retrigger. */
 #include "bass303.c"
+#include "eng_sub.c"                /* NANO's SUB model (2026-10-21): presets 3..32 (NANO_PX), polyphonic, voice.c's envelope */
 
 typedef struct {                 /* the part's engine memory */
     bass303_t b;
@@ -22,6 +23,7 @@ typedef struct {                 /* the part's engine memory */
     uint8_t pend;                /* a note_on has not yet had its modulated pitch applied */
     uint8_t og_drv;              /* the DRV pot og was worked out for */
     float og;                    /* the output gain (ACID_TRIM_DB and the drive's make-up), linear; 0 = not worked out yet */
+    sub_vs_t sv[NVOICE];         /* the SUB model's envelopes and LFO, a slot per voice (eng_sub.c) */
 } acid_t;
 
 /* The level of the machine (Task 7.2a). The voice runs with VOLUME at the top of its pot (bass303.c b3_def: it was 96, the donor's
@@ -51,6 +53,7 @@ static acid_t *acid_of(const track_t *t)
 {
     return (acid_t *)ENG_MEM((uint32_t)(t - trk) % NPART);
 }
+static sub_vs_t *sub_vs(const track_t *t, const voice_t *v) { return &acid_of(t)->sv[(uint32_t)(v - t->v) % NVOICE]; }
 
 /* a pot to the voice, only when it changed (bass303_set recomputes what depends on it) */
 static void acid_pot(bass303_t *b, int i, int v)
@@ -90,7 +93,12 @@ static float acid_hz(const bass303_t *b, int32_t pitch16, int32_t fine)
 
 static void acid_note_on(track_t *t, voice_t *v)
 {
-    acid_t *a = acid_of(t);
+    acid_t *a;
+    if (sub_on(t)) {
+        sub_note_on(t, v);
+        return;
+    }
+    a = acid_of(t);
     bass303_t *b = &a->b;
     int acc = v->vel > 110, sounding;
     if (b->rc1_c == 0.0f) {                              /* the region is zero: a part's first ACID note */
@@ -116,7 +124,8 @@ static int32_t acid_amp(const track_t *t, const voice_t *v)
 {
     acid_t *a = acid_of(t);
     float x;
-    (void)v;
+    if (sub_on(t))
+        return sub_amp(t, v);
     if (a->b.rc1_c == 0.0f)
         return 0;
     x = acid_vca(&a->b);
@@ -129,7 +138,8 @@ static int acid_done(const track_t *t, const voice_t *v)
 {
     const acid_t *a = acid_of(t);
     float x;
-    (void)v;
+    if (sub_on(t))
+        return sub_done(t, v);
     if (a->b.rc1_c == 0.0f)
         return 1;
     x = acid_vca(&a->b) * 32767.0f;
@@ -145,6 +155,10 @@ static void acid_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
     int acc = v->vel > 110, sl;
     int32_t cq, mc;
     uint32_t i;
+    if (sub_on(t)) {
+        sub_render(t, v, out, n, m);
+        return;
+    }
     if (b->rc1_c == 0.0f)
         return;
     if (n > CTL)
@@ -203,9 +217,36 @@ static void acid_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
     a->fresh = 0;
 }
 
+/* the two models run their own envelopes (the 303's VCA, the module's two ADSRs); the 303 one voice, SUB SUB_POLY; SUB's EDIT labels */
+static int acid_ownenv_of(const track_t *t) { (void)t; return 1; }
+static uint8_t acid_poly_of(const track_t *t) { return sub_on(t) ? SUB_POLY : 1u; }
+static const param_desc_t *acid_desc(const track_t *t, uint32_t k) { return sub_on(t) && k < 8u ? &SUB_EDIT[k] : 0; }
+/* a preset just loaded on track t (ui.c apply_preset_to, after the defaults and the preset's own values): its model and filter TYPE (NANO_PX:
+ * 1 SUB, else the 303 (the lane's default 127, which every stored sound from before carries)) */
+_Static_assert(sizeof NANO_PX[0] == NPX_N, "NANO_PX: one column per NPX_* (tools/four_presets.py NANO_KEYS)");
+static void acid_track_loaded(track_t *t)
+{
+    const uint8_t *x;
+    if (t->eng_req % NENGINES != ENGI_ACID || t->preset >= NELEM(NANO_PX))
+        return;
+    x = NANO_PX[t->preset];
+    t->p[P_RSV_LN + 1] = x[NPX_MODEL] ? 1 : 127;
+    if (!x[NPX_MODEL])
+        return;
+    t->p[P_FTYPE] = x[NPX_FTYPE];                    /* SUB: the module's sound (eng_sub.c's parameter table) */
+    if (x[NPX_MONO])
+        t->p[P_VOICE] = V_MONO;                      /* (a mono sound without legato: every note retriggers) */
+    t->p[P_GLIDE] = x[NPX_GLIDE];
+    t->p[P_FM1_ATK] = x[NPX_FA], t->p[P_FM1_DEC] = x[NPX_FD], t->p[P_FM1_SUS] = x[NPX_FS], t->p[P_FM1_REL] = x[NPX_FR];
+    t->p[P_FM1_LEVEL] = x[NPX_KTRK];
+    t->p[P_FM2_ATK] = x[NPX_O1], t->p[P_FM2_DEC] = x[NPX_W2], t->p[P_FM2_SUS] = x[NPX_SEMI], t->p[P_FM2_REL] = x[NPX_PWM];
+    t->p[P_FM2_LEVEL] = x[NPX_VEL];
+    t->p[P_FM3_ATK] = x[NPX_LRATE], t->p[P_FM3_DEC] = x[NPX_LPIT], t->p[P_FM3_SUS] = x[NPX_LCUT], t->p[P_FM3_LEVEL] = x[NPX_VOL];
+}
+
 static const char *const N_ACID_WAVE[] = {"SAW", "SQR"};
 static const engine_t ENG_ACID = {
-    .name = "SB303", .page_title = {"OSC", "FLT"},
+    .name = "NANO", .page_title = {"OSC", "FLT"},
     .edit = {
         {"WAVE", F_ENUM, 0, 1, 0, N_ACID_WAVE, 0}, {"TUNE", F_BIPCT, -64, 63, 0, 0, 0},
         {"DECY", F_PCT, 0, 127, 60, 0, 0},          {"ACC", F_PCT, 0, 127, 80, 0, 0},
@@ -216,4 +257,5 @@ static const engine_t ENG_ACID = {
     .knob = {P_E4, P_E5, P_ED_FLT, P_E2}, .poly = 1, .keep = 0,
     .note_on = acid_note_on, .render = acid_render,
     .mem = ACID_MEM, .ownenv = 1, .amp = acid_amp, .done = acid_done,
+    .desc = acid_desc, .ownenv_of = acid_ownenv_of, .poly_of = acid_poly_of,
 };

@@ -37,10 +37,15 @@ static const char *const BIG_MLABEL[NENGINES] = {"DETUNE", "POSITION", "DECAY", 
 static uint32_t big_sig[2];
 
 static uint32_t big_id(const track_t *t, uint32_t k) { return ENGINES[t->eng_req % NENGINES]->knob[k & 3u]; }
+/* knob[3] spelled out: the machine's, NANO's SUB model its own (E2 is OSC2 there, not the 303's DECAY) */
+static const char *big_mlabel(const track_t *t)
+{
+    return t->eng_req % NENGINES == ENGI_ACID && sub_on(t) ? "OSC 2" : BIG_MLABEL[t->eng_req % NENGINES];
+}
 static const char *big_label(const track_t *t, uint32_t k)
 {
     static const char *const L[3] = {"CUTOFF", "RESONANCE", "ENV"};
-    return k < 3u ? L[k] : BIG_MLABEL[t->eng_req % NENGINES];
+    return k < 3u ? L[k] : big_mlabel(t);
 }
 
 /* s in f, its ink centred across and its capitals' band (cap_y .. + cap_h of the line) up and down on a point: every

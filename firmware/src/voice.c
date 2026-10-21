@@ -76,11 +76,18 @@ static void track_lfo_tick(track_t *t)
     }
 }
 
-/* voices the engine may use (POLY and UNISON): its cap, else all of them */
+/* voices the engine may use (POLY and UNISON): its cap (per track where the engine says so: NANO's models), else all of them */
 static uint32_t trk_nvoice(const track_t *t)
 {
-    uint32_t c = ENGINES[t->engine]->poly;
+    const engine_t *e = ENGINES[t->engine];
+    uint32_t c = e->poly_of ? e->poly_of(t) : e->poly;
     return c && c < NVOICE ? c : NVOICE;
+}
+/* the engine runs its own envelope on this track (ACID's 303; per track where the engine says so: NANO's SUB model does not) */
+static int trk_ownenv(const track_t *t)
+{
+    const engine_t *e = ENGINES[t->engine];
+    return e->ownenv_of ? e->ownenv_of(t) : e->ownenv;
 }
 
 /* the part's voice mode: P_VOICE */
@@ -351,7 +358,7 @@ static void mono_play(track_t *t, uint32_t note, uint32_t vel, int retrig, int g
             v->pitch16 = (int32_t)note * 16;
             v->mvel = t->m_vel;
             v->mrnd = t->m_rnd;
-            if (nv == 1u && (vel > v->vel || ENGINES[t->engine]->ownenv))
+            if (nv == 1u && (vel > v->vel || trk_ownenv(t)))
                 v->vel = (uint8_t)vel;                      /* (an own-envelope engine, ACID: the step's accent, plain as well) */
             glide_set(t, v, glide);
         }
@@ -643,6 +650,7 @@ static int32_t midi_bend_q8[NTRK], midi_bend_target[NTRK];
 static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
 {
     const engine_t *e = ENGINES[t->engine];
+    int own;
     const int16_t *p = t->p;
     uint32_t i;
     int32_t lfo = mulq15(t->lfo_val, t->lfo_fade);
@@ -674,6 +682,7 @@ static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
         }
     track_lfo_tick(t);
     esync_coef(t);                                      /* this block's envelope steps for env_tick (ENV SYNC) */
+    own = trk_ownenv(t);
     for (i = 0; i < NVOICE; i++) {
         voice_t *v = &t->v[i];
         vmod_t m;
@@ -681,7 +690,7 @@ static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
         int ending;
         if (!v->active)
             continue;
-        if (e->ownenv) {                                /* the engine's own envelope: no ADSR gain, it says when the voice ends */
+        if (own) {                                      /* the engine's own envelope: no ADSR gain, it says when the voice ends */
             ending = v->stage == 4u || e->done(t, v);   /* killed, or finished: one last block ramps it to 0 */
             env = ending ? 0 : e->amp(t, v);
             v->env = env << 9;                          /* the real level (Q24, as env_tick's): shed_pick ranks by it */
@@ -696,7 +705,7 @@ static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
             env = env_tick(t, v);
         }
         m.envq15 = env;
-        m.amp1 = e->ownenv ? env : mulq15(env, v->vel * 258);
+        m.amp1 = own ? env : mulq15(env, v->vel * 258);
         if (p[P_LD_AMP])
             m.amp1 = mulq15(m.amp1, 32767 - mulq15(p[P_LPOL] ? lfo : (lfo + 32768) >> 1, p[P_LD_AMP] * 258));
         if (fade)                                       /* linear to 0 over the fade */

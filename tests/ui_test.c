@@ -1105,7 +1105,7 @@ static int test_categories(void)
     }
     bad += check("categories: every factory preset of every engine has one",
                  ok && preset_cat(ENGI_OBX, 0) == CAT_LEAD && preset_cat(ENGI_WAVE, 0) == CAT_ATMOS &&
-                 preset_cat(ENGI_ACID, 2) == CAT_ACID && preset_cat(ENGI_DRIFT, 1) == CAT_BASS &&
+                 preset_cat(ENGI_ACID, 1) == CAT_ACID && preset_cat(ENGI_ACID, 2) == CAT_BASS && preset_cat(ENGI_DRIFT, 1) == CAT_BASS &&
                  preset_cat(0, 99) == cat_of_engine(0));
     go_page(GR_BROWSE);
     select_engine(0);

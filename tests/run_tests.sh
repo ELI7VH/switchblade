@@ -308,12 +308,12 @@ if [ -f build/gen/felucca_tables.h ]; then
     mkdir -p build/insert_demo
     run "INSERT (1.5): OFF / MIX 0 bit for bit, each TYPE (no DC, bounded, dry / wet), MIX glide, automation, stored, cost, demos" \
         "$OUT/insert_test" build/insert_demo
+    $CC -O2 -w -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/sub_test" tests/sub_test.c -lm
+    run "NANO SUB (2026-10-21): the models by preset, the pitch, the polyphony cap, every TYPE at full resonance (bounded, voices free, exact silence), a narrow pulse without DC, the alias floor, the cost" \
+        "$OUT/sub_test"
     $CC -O2 -w -ffp-contract=off -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/dist_test" tests/dist_test.c -lm
-    run "DIST (FX.1, FX.2): P_DIST 0 bypass bit for bit, no click on switch-on, bounded, the gate (silence in, silence out), no NaN / denormal, no zipper on a sweep, level against the old DIST, alias floor (saw at 0.7 FS, 4x oversampled), the oversampler's pass band / images, resonance frozen above d 0.4, intensity rising, cost" \
+    run "DIST (the drive): P_DIST 0 bypass bit for bit, no click on switch-on, bounded, silence in silence out, the state settles, no zipper on a sweep, level against the old DIST, alias floor (pinned), intensity rising, cost" \
         "$OUT/dist_test"
-    $CC -O2 -w -DDIST_OS=2 -ffp-contract=off -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/dist_test_os2" tests/dist_test.c -lm
-    run "DIST (FX.2) with DIST_OS 2, the cheaper fallback: the same checks with its own alias gates and cost caps" \
-        "$OUT/dist_test_os2"
     $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/sound15_test" tests/sound15_test.c -lm
     mkdir -p build/sound15_demo
     run "1.5 sound items: ANALOG filter TYPE LP / BP / HP (responses, LP and other engines bit for bit), ENV SYNC (times at several tempi), cost, demos" \

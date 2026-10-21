@@ -419,12 +419,13 @@ static uint32_t layer_btn(void);
 /* FLT ENV: a WAVE track's (its filter envelope, eng_wave.c); FILTER: an OB-Z or WAVE track's; JUNO: a DRIFT track's */
 static int page_visible(uint32_t i)
 {
-    if (PAGES[i].id[0] == P_FM1_ATK)                  /* FLT ENV: WAVE's filter envelope (its only page of those ids) */
-        return TSEL->eng_req % NENGINES == ENGI_WAVE;
+    if (PAGES[i].id[0] == P_FM1_ATK)                  /* FLT ENV: WAVE's filter envelope, NANO's SUB model's (2026-10-21) */
+        return TSEL->eng_req % NENGINES == ENGI_WAVE || (TSEL->eng_req % NENGINES == ENGI_ACID && sub_on(TSEL));
     if (PAGES[i].id[0] == P_RSV_LN)                   /* JUNO (Task 6.2): DRIFT's chorus */
         return TSEL->eng_req % NENGINES == ENGI_DRIFT;
-    if (PAGES[i].id[0] == P_FTYPE)                    /* FILTER (1.5, #104): OB-Z's, WAVE's */
-        return TSEL->eng_req % NENGINES == ENGI_OBX || TSEL->eng_req % NENGINES == ENGI_WAVE;
+    if (PAGES[i].id[0] == P_FTYPE)                    /* FILTER (1.5, #104): OB-Z's, WAVE's, NANO SUB's (its TYPE: LP24 BP HP LP12) */
+        return TSEL->eng_req % NENGINES == ENGI_OBX || TSEL->eng_req % NENGINES == ENGI_WAVE ||
+               (TSEL->eng_req % NENGINES == ENGI_ACID && sub_on(TSEL));
     return 1;
 }
 
@@ -1161,6 +1162,7 @@ static void apply_preset_to(track_t *t, uint32_t pi)
     }
     void_track_loaded(t);                             /* WAVE: its filter TYPE and LFO routing */
     drift_track_loaded(t);                            /* DRIFT: its chorus */
+    acid_track_loaded(t);                             /* NANO: its model (303 / SUB) and filter TYPE */
     load_end(t);
 }
 

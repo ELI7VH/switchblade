@@ -17,6 +17,7 @@ import sys
 FUNCS = ["obx_render", "obx_render_f", "obx_render_p4", "obx_render_x",   # OB-Z (eng_obx.c): MODE 0's low-pass
                                                     # loop, the MODE morph's, the 4-pole's, WAVE SYNC / SUB's
          "acid_render", "bass303_render",            # ACID (eng_acid.c, bass303.c): the voice wrapper, and the 303's per-sample loop
+         "sub_render",                              # NANO's SUB model (eng_sub.c, 2026-10-21): the module's voice
          "drift_render",                            # DRIFT (eng_drift.c): the Juno voice (its ladder is dsp_va.c's, inlined; FPU opcodes are
                                                     # invisible to this count, so it guards the structure -- the loops and the divides -- only)
          "void_render", "void_block_slow",            # WAVE (eng_wave.c): the four specialised fast loops (LP24 / SVF x DRV), and the one

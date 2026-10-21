@@ -315,7 +315,7 @@ static void test_math(void)
     check("every per-block value restored", t->p[P_DIST] == 64 && t->p[P_CHOR] == 64 && t->p[P_LRATE] == 100 && t->p[P_LD_PIT] == 0);
 
     /* an engine parameter: its descriptor's range */
-    e_trio = eng_by_name("SB303");                 /* (TRIO's PW and INT2 until FM1-Four: ACID's DECY 0..127, TUNE -64..63) */
+    e_trio = eng_by_name("NANO");                 /* (TRIO's PW and INT2 until FM1-Four: ACID's DECY 0..127, TUNE -64..63) */
     k_pw = edit_by_label(e_trio, "DECY", 2);
     fresh(e_trio, 0);
     lfo_at(t, 32767);

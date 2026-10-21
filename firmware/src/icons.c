@@ -214,7 +214,7 @@ static uint32_t mod_dst_icon(const track_t *t, int32_t d)
 static uint32_t engine_icon(const char *name)
 {
     static const icon_map_t M[] = {
-        {"OB-Z", ICON_WAVE}, {"SB303", ICON_WAVE}, {"JUNO", ICON_WAVE},
+        {"OB-Z", ICON_WAVE}, {"NANO", ICON_WAVE}, {"JUNO", ICON_WAVE},
     };
     uint32_t i;
     for (i = 0; i < sizeof M / sizeof M[0]; i++)

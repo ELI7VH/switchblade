@@ -8,7 +8,7 @@ static int fails;
 
 static void test_engine_table(void)
 {
-    static const char *const NAME[4] = {"OB-Z", "WAVE", "SB303", "JUNO"};
+    static const char *const NAME[4] = {"OB-Z", "WAVE", "NANO", "JUNO"};
     uint32_t e;
     CHECK(NENGINES == 4u, "NENGINES %u", (unsigned)NENGINES);
     for (e = 0; e < NENGINES; e++) {
@@ -22,6 +22,16 @@ static void test_engine_table(void)
     CHECK(ENGINES[ENGI_ACID]->knob[3] == P_E2, "ACID K4");
     CHECK(ENGINES[ENGI_DRIFT]->knob[3] == P_E6, "DRIFT K4");
     CHECK(ENGINES[ENGI_ACID]->poly == 1u, "ACID mono");
+    {   /* NANO's SUB model (2026-10-21): the module's own envelopes, SUB_POLY voices; the 303 its own envelope, one */
+        track_t t;
+        memset(&t, 0, sizeof t);
+        t.engine = t.eng_req = ENGI_ACID;
+        t.p[P_RSV_LN + 1] = 127;
+        CHECK(ENGINES[ENGI_ACID]->ownenv_of(&t) == 1 && ENGINES[ENGI_ACID]->poly_of(&t) == 1u, "NANO 303: own envelope, mono");
+        t.p[P_RSV_LN + 1] = 1;
+        CHECK(ENGINES[ENGI_ACID]->ownenv_of(&t) == 1 && ENGINES[ENGI_ACID]->poly_of(&t) == 4u, "NANO SUB: the module's own envelopes, 4 voices");
+        CHECK(NANO_PX[0][0] == 0 && NANO_PX[1][0] == 0 && NANO_PX[2][0] == 1 && NANO_PX[31][0] == 1, "NANO presets 1-2 the 303, 3-32 SUB");
+    }
 }
 
 static void test_presets(void)
@@ -32,7 +42,7 @@ static void test_presets(void)
         for (k = 0; k < ENGINES[e]->npresets; k++) {
             uint32_t c = preset_cat(e, k);
             CHECK(c >= CAT_BASS && c < NCAT, "%s/%u no category", ENGINES[e]->name, (unsigned)k);
-            CHECK((c == CAT_ACID) == (e == ENGI_ACID), "%s/%s: ACID only on ACID",
+            CHECK((c == CAT_ACID) == (e == ENGI_ACID && !NANO_PX[k][0]), "%s/%s: ACID only on NANO's 303 presets",
                   ENGINES[e]->name, ENGINES[e]->presets[k].name);
             CHECK(strlen(ENGINES[e]->presets[k].name) <= 12u, "name too long");
         }

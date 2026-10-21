@@ -445,7 +445,7 @@ EXPORT uint8_t *web_anim_levels(void)
 
 /* for the test and the bench (web/emu/emu_test.mjs), a heavy song straight into the tracks (as hostsim's
  * renders set them): Switch Blade's four machines, one per track: T1 OB-Z, T2 WAVE, T4 JUNO with 4-note
- * chords on all 16 steps, held; T3 SB303 a 16th-note bassline. PLAY is the page's (or the test's) to press */
+ * chords on all 16 steps, held; T3 NANO a 16th-note bassline. PLAY is the page's (or the test's) to press */
 EXPORT void web_test_heavy(void)
 {
     static const uint8_t CH[4][4] = {{48, 55, 60, 64}, {45, 52, 57, 60}, {41, 48, 53, 57}, {43, 50, 55, 59}};

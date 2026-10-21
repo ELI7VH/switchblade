@@ -889,10 +889,10 @@ static void hr_run(const hr_cfg_t *c, unsigned ntr)
 {
     unsigned k, s, b, i;
     hr_x = hr_sum = 0;
-    mix_fresh(ENGI_ACID, 27);
+    mix_fresh(ENGI_ACID, 1);                 /* (BASSLINE: the 303 on SQR; NANO's 3..32 are the SUB model since 2026-10-21) */
     for (k = 0; k < ntr; k++) {
         if (k)
-            host_preset(&trk[k], ENGI_ACID, 27);
+            host_preset(&trk[k], ENGI_ACID, 1);
         T = &trk[k];
         T->p[P_MUTE] = 0;
         T->p[P_PAN] = 0;
@@ -964,12 +964,12 @@ static void test_wet_bus(void)
     int32_t worst = 0, wx = 0, wn = 0x7FFFFFFF, guard_x = (int32_t)((((ACID_GUARD_FS * 32768) >> 2) * 9713) >> 10);
     uint32_t h, p, b, i;
     for (h = 0; h < 5u; h++) {
-        mix_fresh(ENGI_ACID, 27);
+        mix_fresh(ENGI_ACID, 1);                 /* (BASSLINE: the 303 on SQR; NANO's 3..32 are the SUB model since 2026-10-21) */
         song.g[G_RTYPE] = 2, song.g[G_RSIZE] = 127, song.g[G_RDAMP] = 0, song.g[G_DTIME] = 3, song.g[G_DFDBK] = 120;
         song.master_q12 = 4096;
         for (p = 0; p < 4u; p++) {
             if (p)
-                host_preset(&trk[p], ENGI_ACID, 27);
+                host_preset(&trk[p], ENGI_ACID, 1);
             T = &trk[p];
             T->p[P_MUTE] = 0, T->p[P_PAN] = 0, T->p[P_DIST] = 0, T->p[P_LEVEL] = 127;
             T->p[P_CHOR] = T->p[P_DLY] = T->p[P_REV] = 127;
