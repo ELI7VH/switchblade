@@ -739,7 +739,7 @@ static int menu_protocol(void)
         {"MIDI IN", "CH1-4,SEL,CH5-8,CH9-12,CH13-16,TRACK"}, {"TUNE", 0},   /* (1.2: the project's ROUT and TUNE; TUNE a number) */
         {"HOME", "SCOPE,TRACKS,LEVELS"},   /* (1.3's id 23; 1.5: LEVELS. VOID FOUR: gone, one HOME; no item has the id) */
         {"HELP", "OFF,ON"},                                                                          /* (1.5) */
-        {"SELECT", "BPM,PAGE,MODW,VEL"},                                                             /* (1.5.5; 1.5.6 MODW VEL) */
+        {"SELECT", "VOL,PAGE,MODW,VEL"},                                                             /* (1.5.5; 1.5.6 MODW VEL) */
         {"T1 CHANNEL", TCH_NAMES}, {"T2 CHANNEL", TCH_NAMES}, {"T3 CHANNEL", TCH_NAMES}, {"T4 CHANNEL", TCH_NAMES},   /* (1.5.5) */
         {"AUTO SELECT", "OFF,ON"}, {"SCREEN WAKE", "+MIDI,PANEL"},                                   /* (1.5.5) */
         {"T1 OUT", "INT,EXT,BOTH"}, {"T2 OUT", "INT,EXT,BOTH"}, {"T3 OUT", "INT,EXT,BOTH"}, {"T4 OUT", "INT,EXT,BOTH"},

@@ -47,7 +47,7 @@ static const struct { const char *title, *hint; } HELP_PAGE[] = {
     {"DETAIL", "[PRESETS]STEP[K1]CHANCE, 1:4, FILL"},   /* (1.5.5: the conditions past 100 %) */
     {"AUTOMATION", "[K1]ROW[OCT+]DO[EDIT]DELETE"},
     {"MIXER", "[K4]MUTE[ALGO]TRACK[HOME]CLOCK"},
-    {"CLOCK", "[SELECT]TEMPO[GLO]HOLD: TAP"},
+    {"CLOCK", "[K1]TEMPO[GLO]HOLD: TAP"},   /* (2026-10-20: SELECT is the LEVEL) */
 };
 #define H_HOME "[PRESETS]SOUND[HOME]HOLD: MENU"
 /* a layer's (LAYER_*): what its footer row (LAYERS[].foot) does not say */
@@ -65,8 +65,6 @@ static const char *help_page(void)
     if (ui.home)
         return H_HOME;
     t = cur_page()->title;
-    if (sel_mode() != SEL_BPM && str_eq(t, "CLOCK"))   /* (1.5.5: SELECT steps the pages; 1.5.6: or plays) */
-        return "[K1]TEMPO[GLO]HOLD: TAP";
     for (i = 0; i < NELEM(HELP_PAGE); i++)
         if (str_eq(HELP_PAGE[i].title, t))
             return HELP_PAGE[i].hint;

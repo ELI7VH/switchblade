@@ -130,13 +130,16 @@ static int select_page(void)
     ui_power_on();
     memcpy(before, favorites.factory[15], 32);
     ok = menu_get(MI_SELECT) == 0u && str_eq(MI_NAME[MI_SELECT], "SELECT") && MI_TAB[MI_SELECT] == MTAB_CONTROL &&
-         MI_SELECT < MI_VALUES && str_eq(menu_vname(MI_SELECT, 0), "BPM") && str_eq(menu_vname(MI_SELECT, 1), "PAGE") &&
+         MI_SELECT < MI_VALUES && str_eq(menu_vname(MI_SELECT, 0), "VOL") && str_eq(menu_vname(MI_SELECT, 1), "PAGE") &&
          mtab_rows(MTAB_CONTROL) <= MTAB_ROWS;
     go_title("ENV"); frame();
     b0 = song.g[G_BPM];
-    turn(EN_SELECT, 2);
-    ok &= song.g[G_BPM] == b0 + 2 && title_is("ENV");
-    bad += check("SELECT (#188): MENU > CONTROL > SELECT, BPM by default: SELECT sets the tempo as before", ok);
+    {
+        int16_t l0 = TSEL->p[P_LEVEL];
+        turn(EN_SELECT, -2);
+        ok &= TSEL->p[P_LEVEL] == l0 - 2 && song.g[G_BPM] == b0 && title_is("ENV");
+    }
+    bad += check("SELECT (#188): MENU > CONTROL > SELECT, VOL by default (2026-10-20, was BPM): SELECT sets the track's LEVEL", ok);
 
     menu_put(MI_SELECT, 1);
     ok = menu_get(MI_SELECT) == 1u && favorites.factory[15][24] == (uint8_t)(before[24] | 0x10u);
@@ -209,8 +212,8 @@ static int select_page(void)
     go_title("CLOCK"); frame();
     ok = help_page() && str_eq(help_page(), "[K1]TEMPO[GLO]HOLD: TAP") && help_fits(help_page());
     menu_put(MI_SELECT, 0);
-    ok &= str_eq(help_page(), "[SELECT]TEMPO[GLO]HOLD: TAP");
-    bad += check("  HELP: CLOCK's hint says KNOB 1 is the tempo with PAGE", ok);
+    ok &= str_eq(help_page(), "[K1]TEMPO[GLO]HOLD: TAP");
+    bad += check("  HELP: CLOCK's hint says KNOB 1 is the tempo (PAGE, VOL)", ok);
     return bad;
 }
 

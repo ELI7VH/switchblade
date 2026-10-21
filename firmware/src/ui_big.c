@@ -469,8 +469,9 @@ static void head_big(int32_t x, int32_t r)
 
 /* ------------------------------------------------------------------ HOME --- */
 /* Switch Blade's HOME (ui_draw.c draw_columns, ui.home without a layer: big_home): a rack of four units, one per track, each
- * in the style of its machine, over the four knob values. Its knobs are TRACK PRESET VOLUME TEMPO (ui.c HK_*, ui_input.c
- * home_turn); the dedicated encoders stay: ALGORITHM the track, PRESETS the sound.
+ * in the style of its machine, over the four knob values. Its knobs are the EDIT page's four (2026-10-20: CUT RES ENV + the
+ * machine's own, ui.c home_param, ui_input.c home_turn); the dedicated encoders stay: ALGORITHM the track, PRESETS the sound,
+ * SELECT the track's LEVEL.
  *
  *    0  header (draw_head): the track's cushion, the transport and the BPM (an LED), the battery
  *   24  four rack units, 40 px each (a canvas of its own): rack ears with two screws each side, a faceplate in its machine's
@@ -478,9 +479,9 @@ static void head_big(int32_t x, int32_t r)
  *       silver; DRIFT: dark, a red band), the track's number on an LED (large), the machine's badge, the sound's category, its
  *       name (M), its number in the machine's list on an LED, and an activity LED that lights while the track sounds (its
  *       meter, a MIDI IN note); the selected track has a white outline (1.5 px) round its faceplate; a muted track's unit is dim
- *  184  KNOB 1..4 (240 x 28, four 57 x 26 bevelled cells): TRACK PRESET VOLUME TEMPO, the label (S) over the value (M) and its
- *       unit; the knob just turned: its label and value in the accent; TEMPO on an external clock DIM ("EXT": the clock sets
- *       it); VOLUME driven by MOTION: its label in the theme colour
+ *  184  KNOB 1..4 (240 x 28, four 57 x 26 bevelled cells): CUTOFF RES ENV and the machine's own, the label (S) over the value
+ *       (M) and its unit, as EDIT's cards format them (big_format); the knob just turned: its label and value in the accent; a
+ *       control MOTION drives: its label in the theme colour
  *  212  footer (draw_foot, as EDIT's): the selected track's 16 steps, 28 px
  * The unit's colours are its machine's own palette (UI_MACHINE_PALS), not the selected track's. The old level bar of the sound
  * panel and the tabs' meters are gone: the activity LED shows that the track sounds, MIXER shows how loud. LINE (no SURF): the
@@ -603,63 +604,44 @@ static void home_unit(uint32_t c)
     cv_blit(0, (uint32_t)y0);
 }
 
-/* what card k shows: its label, value, unit, the value's colour */
+/* HOME's cell labels: EDIT's (big_label), short enough for a 57 px cell */
+static const char *home_label(const track_t *t, uint32_t k)
+{
+    static const char *const L[3] = {"CUTOFF", "RES", "ENV"};
+    return k < 3u ? L[k] : big_mlabel(t);
+}
+/* what card k shows: its value, unit, the value's colour (the EDIT page's KNOB k, ui.c home_param) */
 static void home_card_of(uint32_t k, char *val, const char **unit, uint16_t *vc)
 {
-    const track_t *t = TSEL;
+    int16_t *vp;
+    const param_desc_t *d = home_param(k, &vp);
     *vc = VAL(k);
     *unit = "";
-    if (k == HK_TRACK) {
-        val[0] = (char)('1' + song.sel);
-        val[1] = 0;
-        *unit = ENGINES[t->eng_req % NENGINES]->name;
-    } else if (k == HK_PRESET) {
-        uint32_t u = user_of(t), total, cur = eng_list_pos(&total);
-        uint32_t n = u < UP_SLOTS ? u + 1u : cur + 1u;
-        uint32_t i = 0;
-        if (u < UP_SLOTS)
-            val[i++] = 'U';
-        val[i++] = (char)('0' + n / 10u % 10u);
-        val[i++] = (char)('0' + n % 10u);
-        val[i] = 0;
-        *unit = u < UP_SLOTS ? "USER" : "/ 32";
-    } else if (k == HK_VOLUME) {
-        int32_t lv = t->p[P_LEVEL];
-        if (lv > 0) {                                   /* whole dB, as MIXER's knob (the panel: param_format's) */
-            int32_t d = LEVEL_DB_X10[lv & 127];
-            fmt_int(val, (d + (d < 0 ? -5 : 5)) / 10);
-            *unit = "dB";
-        } else {
-            str_cpy(val, "OFF", 12);
-        }
-        if (t->p[P_MUTE])
-            *vc = T_DIM;
-    } else {
-        fmt_int(val, song.g[G_BPM]);
-        *unit = "BPM";
-        if (song.g[G_CLOCK]) {                          /* an external clock sets it: read-only */
-            *unit = "EXT";
-            *vc = T_DIM;
-        }
+    if (!d || !vp) {
+        str_cpy(val, "-", 12);
+        return;
     }
+    big_format(d, *vp, val, unit);
 }
 
 /* the four cells (240 x 28) */
 static void home_cards(void)
 {
-    static const char *const L[4] = {"TRACK", "PRESET", "VOLUME", "TEMPO"};
+    const char *L[4];
     char val[4][12];
     const char *unit[4];
     uint16_t vc[4];
-    uint32_t k, sig = ux.gen * 31u + ux.style * 7u, mot = (card_mot_mask[P_LEVEL / 32u] >> (P_LEVEL % 32u)) & 1u;
+    uint32_t k, sig = ux.gen * 31u + ux.style * 7u, mot = 0;
     for (k = 0; k < 4u; k++) {
+        uint32_t id = big_id(TSEL, k);
+        L[k] = home_label(TSEL, k);
         home_card_of(k, val[k], &unit[k], &vc[k]);
-        if (k < 2u)
-            unit[k] = "";                               /* (the rack shows the machine and "/ 32") */
-        sig = str_hash(str_hash(sig * 2654435761u + vc[k] * 131u + (k == ui.hot_col && ui.hot_t) * 7u, val[k]), unit[k]);
+        mot |= (uint32_t)(id < P_COUNT && ((card_mot_mask[id / 32u] >> (id % 32u)) & 1u)) << k;
+        sig = str_hash(str_hash(str_hash(sig * 2654435761u + vc[k] * 131u + (k == ui.hot_col && ui.hot_t) * 7u, val[k]),
+                                unit[k]), L[k]);
     }
     sig += mot * 104729u;
-    card_mot = (uint8_t)(mot << HK_VOLUME);
+    card_mot = (uint8_t)mot;
     if (!ui.force && sig == home_sig[NTRK])
         return;
     home_sig[NTRK] = sig;
@@ -668,7 +650,7 @@ static void home_cards(void)
     for (k = 0; k < 4u; k++) {
         int32_t x = CARD_X(k), uw = unit[k][0] ? text_w(&AF_S, unit[k]) + 3 : 0, vw = ink_w(&AF_M, val[k]);
         int hot = k == ui.hot_col && ui.hot_t;
-        uint16_t lc = hot ? T_ACCENT : k == HK_VOLUME && mot ? T_THEME : T_MID;
+        uint16_t lc = hot ? T_ACCENT : (mot >> k) & 1u ? T_THEME : T_MID;
         if (ux.style) {                                 /* LINE: rules between the cells */
             if (k < 3u)
                 cv_rect(x + CARD_W, 1, 1, HC_H, T_RULE);

@@ -1197,18 +1197,21 @@ static void setup(int s)
     case S_MENU_HOLD: ui.menu = 1; ui.menu_sel = MI_HOLD; settings_hold = 2; break;
     case S_MENU_LEDS: ui.menu = 1; ui.menu_sel = MI_LEDS; settings_leds = LEDS_INV; break;
     case S_MENU_ANIM_IDLE: ui.menu = 1; ui.menu_sel = MI_ANIM; menu_put(MI_ANIM, 2); break;   /* (1.2: ANIM IDLE, #135) */
-    /* 1.2 (#72 / #73): MOMENTARY, LFO held and HOME's VOLUME turned (the header's hint, the hot card); on EDIT 1 */
+    /* 1.2 (#72 / #73): MOMENTARY, LFO held and HOME's KNOB 3 (EDIT's ENV) turned (the header's hint, the hot card); on EDIT 1 */
     case S_MOMENTARY:
     case S_MOMENTARY_EDIT: {
         int16_t *vp;
         song.playing = 0;
         if (s == S_MOMENTARY_EDIT)
             open_family(FAM_EDIT);
-        if (s == S_MOMENTARY) home_param(HK_VOLUME, &vp);
+        if (s == S_MOMENTARY) home_param(2u, &vp);
         else page_desc(cur_page(), 0, &vp);
         mom.n = 1; mom.vp[0] = vp; mom.v[0] = *vp;
-        *vp = (int16_t)(*vp > 64 ? *vp - 40 : *vp + 40);
-        ui.hot_col = s == S_MOMENTARY ? HK_VOLUME : 0; ui.hot_t = 40;
+        if (s == S_MOMENTARY)
+            *vp = (int16_t)(*vp > 0 ? *vp - 30 : *vp + 30);   /* (ENV: -64..63) */
+        else
+            *vp = (int16_t)(*vp > 64 ? *vp - 40 : *vp + 40);
+        ui.hot_col = s == S_MOMENTARY ? 2u : 0; ui.hot_t = 40;
         ui_message("MOMENTARY  [OCT+] KEEP");
         break;
     }
@@ -1622,9 +1625,10 @@ static void sweep_columns(void)
 #define FS_N (1u + ROLL_FRAMES)                   /* frames per filmstrip row */
 #define FS_Z 4u                                   /* zoom */
 #define FS_GAP 2u                                 /* px between frames, before the zoom */
-static void roll_turns(int32_t s)                 /* one UI frame with SELECT and KNOB 4 turned by s */
+static void roll_turns(int32_t s)                 /* one UI frame with KNOB 1 (CLOCK's BPM: SELECT is the LEVEL since
+                                                   * 2026-10-20) and KNOB 4 turned by s */
 {
-    host_enc[panel.enc[EN_SELECT]] += s * panel.dir[EN_SELECT];
+    host_enc[panel.enc[EN_K1]] += s * panel.dir[EN_K1];
     host_enc[panel.enc[EN_K4]] += s * panel.dir[EN_K4];
     host_ticks += 16000u; fm1_ms += 16u;
     ui_input();

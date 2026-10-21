@@ -84,7 +84,7 @@ static uint32_t up_gen;                      /* bumped on every user bank change
 /* MENU > CONTROL > SELECT: 0 BPM, 1 PAGE (1.5.5, #188), 2 MODW, 3 VEL (1.5.6, #84: ui_input.c sel_play), bit 4 and bit 6 of
  * ui_prefs2 (0 in every older setting = BPM; 1.5.5's PAGE keeps its bit; firmware before 1.5.6 reads MODW as BPM and
  * VEL as PAGE (its bit 4), before 1.5.5 both as BPM) */
-enum { SEL_BPM, SEL_PAGE, SEL_MODW, SEL_VEL, SEL_N };
+enum { SEL_VOL, SEL_PAGE, SEL_MODW, SEL_VEL, SEL_N };   /* SEL_VOL: was SEL_BPM (2026-10-20) */
 static uint32_t sel_mode(void) { return ((ui_prefs2 >> 4) & 1u) | ((ui_prefs2 >> 5) & 2u); }
 /* 1.5.6 (#212): MENU > DISPLAY > LEDS INV LO / INV HI: INV with the idle LEDs at the steady mid level (ui_input.c
  * ui_leds) instead of lit. The mode stays INV (settings_leds, panel.c: so firmware before 1.5.6 reads plain INV) and
@@ -1469,17 +1469,18 @@ static uint32_t preset_visible(uint32_t cur, uint32_t total, uint32_t row)
     return first + row < total ? first + row : total;
 }
 
-/* HOME (VOID FOUR, ui_big.c): KNOB 1 TRACK (track_select), 2 PRESET (eng_list_step: the machine's own 32 and its user
- * presets, round), 3 VOLUME (the selected track's LEVEL), 4 TEMPO (the BPM; read-only on an external clock) */
-enum { HK_TRACK, HK_PRESET, HK_VOLUME, HK_TEMPO };
-/* HOME's KNOB k as a parameter (MOMENTARY, MIDI LEARN, the cards): VOLUME the selected track's LEVEL, TEMPO the BPM;
- * TRACK and PRESET none (*vp 0) */
-static const param_desc_t *home_param(uint32_t k, int16_t **vp)
+/* HOME (VOID FOUR, ui_big.c): KNOB 1..4 are the EDIT page's four (2026-10-20): the selected track's machine's knob[], CUT RES
+ * ENV + the machine's own (params.c page_id). The track is ALGORITHM's, the sound the PRESETS knob's, the track's LEVEL
+ * SELECT's (MENU > SELECT VOL, the default), the tempo GLO + SELECT's and CLOCK's */
+static const page_t *edit_page(void)              /* the EDIT page (GR_BIG) */
 {
-    k &= 3u;
-    *vp = k == HK_VOLUME ? &TSEL->p[P_LEVEL] : k == HK_TEMPO ? &song.g[G_BPM] : 0;
-    return k == HK_VOLUME ? track_desc(TSEL, P_LEVEL) : k == HK_TEMPO ? &GP[G_BPM] : 0;
+    uint32_t i;
+    for (i = 0; i < NPAGES && PAGES[i].graph != GR_BIG; i++)
+        ;
+    return &PAGES[i < NPAGES ? i : 0];
 }
+/* HOME's KNOB k as a parameter (the turns, MOMENTARY, MIDI LEARN, the cards): the EDIT page's KNOB k */
+static const param_desc_t *home_param(uint32_t k, int16_t **vp) { return page_desc(edit_page(), k & 3u, vp); }
 
 /* select track i (KNOB 1 on TRACKS, the editor): its sound, pages and pattern from now on */
 static void track_select(uint32_t i)

@@ -1999,11 +1999,11 @@ static int test_roll(void)
     ok = roll_diff(STRIP(3), 0) == 0 && roll_diff(STRIP(3), 1) > 20u && !ui.roll[3].from[0];
     bad += check("roll: a mid-roll frame differs from the static render inside the value strip only", ok);
 
-    /* BPM 120 -> 121 (SELECT): the BPM card rolls (no unit: the label says BPM: set in M, it rolls like any number), the digits 1
+    /* BPM 120 -> 121 (CLOCK's KNOB 1): the BPM card rolls (no unit: the label says BPM: set in M, it rolls like any number), the digits 1
      * and 2 stay; the header's LED readout does not roll: it shows 121 at once, so mid-roll nothing outside the card's strip
      * differs from the static render (UI.4: LEDs switch instantly) */
     ui_power_on(); roll_settle();
-    turn(EN_SELECT, 1);
+    turn(EN_K1, 1);                                /* (CLOCK's KNOB 1: SELECT is the LEVEL since 2026-10-20) */
     ok = song.g[G_BPM] == 121 && !ui.roll[ROLL_BPM].from[0] && str_eq(ui.roll[0].from, "120") && ui.roll[0].dir == 1;
     frame(); frame();
     memcpy(roll_shot, host_screen, sizeof roll_shot);
@@ -2015,7 +2015,7 @@ static int test_roll(void)
         head_geo(&g, "121");
         for (y = 0; y < H_HEAD; y++)
             for (x = g.bx; x < g.bx + g.b[2]; x++)
-                lit += host_screen[y * 240 + x] == swap16(LED_HOT);      /* (the BPM was just turned: the hot colour) */
+                lit += host_screen[y * 240 + x] == swap16(LED_ON);       /* (a knob, not SELECT: the plain colour) */
         ok &= lit == 8u + 23u + 8u;                                      /* 1 = b c (2 x 4), 2 = a g d (3 x 5) + b e (2 x 4), 1 */
         ok &= roll_diff(STRIP(0), 0) == 0 && roll_diff(STRIP(0), 1) > 20u;
     }
@@ -2079,7 +2079,7 @@ static int test_roll(void)
         ok &= !ui.roll[3].from[0] && !ui.roll[ROLL_BPM].from[0];
     }
     ui_power_on(); roll_settle();
-    turn(EN_SELECT, 1);
+    turn(EN_K1, 1);
     ok &= !ui.roll[ROLL_BPM].from[0] && ui.roll[0].from[0] != 0;    /* (the header's LED never rolls; the BPM card does) */
     ui.force = 1; frame();
     ok &= !ui.roll[ROLL_BPM].from[0] && !ui.roll[0].from[0];
@@ -2767,7 +2767,7 @@ static int test_product_ux(void)
         uint32_t id = ENGINES[TSEL->eng_req]->knob[0];
         ui_power_on(); go_home(); frame();
         ok = !card_motion(2) && !card_motion(1);
-        song.rec = 1; seq_start(); go_home(); turn(EN_K3, 1); frame();   /* (VOID FOUR: HOME's VOLUME) */
+        song.rec = 1; seq_start(); go_home(); turn(EN_K3, 1); frame();   /* (VOID FOUR: HOME's KNOB 3, EDIT's ENV) */
         ok &= card_motion(2) && !card_motion(1) && !card_motion(0) && !card_motion(3);
         bad += check("MOTION: a recorded knob marks its HOME card (and no other)", ok && motion_count(TSEL) == 1);
         song.rec = 0; press(B_PLAY); events_block(32); frame();
@@ -2783,10 +2783,10 @@ static int test_product_ux(void)
         ok &= card_motion(2);
         bad += check("MOTION: PLAY ON again shows it; only on the track that has the motion", ok);
         go_page(GR_TRK); frame();
-        ok = card_motion(0) && !card_motion(1) && !card_motion(2);   /* (HOME's VOLUME is MIXER's LEVEL) */
+        ok = !card_motion(0) && !card_motion(1) && !card_motion(2);  /* (HOME's KNOB 3 is ENV: no MIXER card) */
         motion_set_event(TSEL, 3, P_PAN, 20); frame();
-        ok &= card_motion(1) && card_motion(0) && !card_motion(2) && !card_motion(3);
-        bad += check("MOTION: a mix parameter's event marks its MIXER card (LEVEL, PAN)", ok);
+        ok &= card_motion(1) && !card_motion(0) && !card_motion(2) && !card_motion(3);
+        bad += check("MOTION: a mix parameter's event marks its MIXER card (PAN), a sound's none", ok);
         go_auto_top(); press(B_OCTUP); press(B_OCTUP);
         ok = motion_count(TSEL) == 0;
         go_home(); frame();
@@ -3585,65 +3585,58 @@ static int test_edit_controls(void)
     return bad;
 }
 
-/* VOID FOUR (Task 3.3): HOME = the four tracks as tabs, the sound big, KNOB 1..4 TRACK PRESET VOLUME TEMPO */
+/* VOID FOUR (Task 3.3): HOME = the four tracks as a rack, the sound big; KNOB 1..4 the EDIT page's four (2026-10-20, were
+ * TRACK PRESET VOLUME TEMPO): CUTOFF RES ENV + the machine's own; ALGORITHM the track, PRESETS the sound, SELECT the LEVEL */
 static int test_home_big(void)
 {
     int bad = 0, ok;
-    uint8_t p0;
+    uint32_t k;
     int16_t l0, b0;
     ui_power_on(); go_home(); frame();
     memset(big_lbl, 0, sizeof big_lbl);
     ui.force = 1; frame();
-    bad += check("HOME: four cards TRACK PRESET VOLUME TEMPO", str_eq(big_lbl[0], "TRACK") && str_eq(big_lbl[1], "PRESET") &&
-                 str_eq(big_lbl[2], "VOLUME") && str_eq(big_lbl[3], "TEMPO"));
-    turn(EN_K1, 2); frame();
-    bad += check("  K1 selects track 3", song.sel == 2u);
-    p0 = TSEL->preset;
-    turn(EN_K2, 1); frame();
-    bad += check("  K2 next ACID preset", TSEL->preset == (p0 + 1u) % 32u && TSEL->engine == ENGI_ACID &&
-                 TSEL->eng_req == ENGI_ACID);
-    l0 = TSEL->p[P_LEVEL];
-    turn(EN_K3, -3); frame();
-    bad += check("  K3 volume (the track's LEVEL)", TSEL->p[P_LEVEL] < l0);
-    b0 = song.g[G_BPM];
-    turn(EN_K4, 1); frame();
-    bad += check("  K4 tempo", song.g[G_BPM] == b0 + 1);
+    bad += check("HOME: four cards CUTOFF RES ENV and the machine's own", str_eq(big_lbl[0], "CUTOFF") &&
+                 str_eq(big_lbl[1], "RES") && str_eq(big_lbl[2], "ENV") &&
+                 str_eq(big_lbl[3], BIG_MLABEL[TSEL->eng_req % NENGINES]));
+    ok = 1;
+    for (k = 0; k < 4u; k++) {                        /* each the EDIT page's KNOB k: the same parameter, the same turn */
+        uint32_t id = big_id(TSEL, k);
+        int16_t v0 = TSEL->p[id];
+        b0 = song.g[G_BPM];
+        turn(EN_K1 + k, v0 > track_desc(TSEL, id)->min ? -1 : 1); frame();
+        ok &= TSEL->p[id] != v0 && song.sel == 0u && song.g[G_BPM] == b0 && ui.home;
+    }
+    bad += check("  K1..K4 turn the EDIT page's four (the track, the tempo stay)", ok);
+    l0 = TSEL->p[P_LEVEL]; b0 = song.g[G_BPM];
+    turn(EN_SELECT, -3); frame();
+    bad += check("  SELECT: the track's LEVEL (shown in the header), the tempo stays", TSEL->p[P_LEVEL] < l0 &&
+                 song.g[G_BPM] == b0 && !strncmp(ui.msg, "VOLUME ", 7));
     turn(EN_ALGO, 1); frame();
-    bad += check("  ALGORITHM still selects the track", song.sel == 3u);
-    {   /* K2 / PRESETS: this machine's 32 and its user presets only, round */
+    bad += check("  ALGORITHM selects the track", song.sel == 1u);
+    {   /* PRESETS: this machine's 32 and its user presets only, round */
         ui_power_on(); go_home(); frame();
         song.sel = 1; apply_preset(31); frame();
-        turn(EN_K2, 1); frame();
-        ok = TSEL->eng_req == ENGI_WAVE && TSEL->preset == 0u;
-        turn(EN_K2, -1); frame();
-        ok &= TSEL->eng_req == ENGI_WAVE && TSEL->preset == 31u;
         turn(EN_PRESET, 1); frame();
-        ok &= TSEL->eng_req == ENGI_WAVE && TSEL->preset == 0u;
-        bad += check("  K2 and PRESETS step the machine's own 32, round (never another machine)", ok);
+        ok = TSEL->eng_req == ENGI_WAVE && TSEL->preset == 0u;
+        turn(EN_PRESET, -1); frame();
+        ok &= TSEL->eng_req == ENGI_WAVE && TSEL->preset == 31u;
+        bad += check("  PRESETS steps the machine's own 32, round (never another machine)", ok);
     }
-    {   /* the preset panel: the category, "07 / 32", the name (L where it fits) */
+    {   /* the preset panel: the category, "07 / 32", the name (L where it fits); the cards: EDIT's values */
         ui_power_on(); go_home(); song.sel = 0; apply_preset(9); ui.force = 1; frame();
         bad += check("  the panel: category, number 10 / 32, the name", str_eq(home_cat, CAT_NAME[preset_cat(ENGI_OBX, 9)]) &&
                      str_eq(home_num, "10 / 32") && str_eq(home_name, ENGINES[ENGI_OBX]->presets[9].name));
         bad += check("  .. the name in M (the rack unit's face)", home_face == 2);
-        bad += check("  the cards: track 1, preset 10, the LEVEL in dB, the BPM", str_eq(big_val[0], "1") &&
-                     str_eq(big_val[1], "10") && str_eq(big_val[3], "120"));
-        /* the LEVEL card's own text: dB = (LEVEL - 112) / 2, shown whole and rounded away from zero; 0 is OFF */
-        TSEL->p[P_LEVEL] = 100; ui.force = 1; frame();
-        bad += check("  .. the LEVEL card: 100 is -6.0 dB, \"-6\"", str_eq(big_val[2], "-6"));
-        TSEL->p[P_LEVEL] = 99; ui.force = 1; frame();
-        bad += check("  .. LEVEL 99 is -6.5 dB, \"-7\" (away from zero)", str_eq(big_val[2], "-7"));
-        TSEL->p[P_LEVEL] = 113; ui.force = 1; frame();
-        bad += check("  .. LEVEL 113 is +0.5 dB, \"1\"", str_eq(big_val[2], "1"));
-        TSEL->p[P_LEVEL] = 0; ui.force = 1; frame();
-        bad += check("  .. LEVEL 0: the card reads \"OFF\"", str_eq(big_val[2], "OFF"));
-    }
-    {   /* external clock: TEMPO shows, turns do nothing */
-        ui_power_on(); go_home(); frame();
-        song.g[G_CLOCK] = 1; b0 = song.g[G_BPM];
-        turn(EN_K4, 3); frame();
-        bad += check("  external clock: K4 does nothing", song.g[G_BPM] == b0);
-        song.g[G_CLOCK] = 0;
+        ok = 1;
+        for (k = 0; k < 4u; k++) {
+            int16_t *vp;
+            const param_desc_t *d = home_param(k, &vp);
+            const char *unit;
+            char want[12];
+            big_format(d, *vp, want, &unit);
+            ok &= str_eq(big_val[k], want);
+        }
+        bad += check("  the cards show the four values as EDIT formats them", ok);
     }
     {   /* HOME's taps: HOME -> MIXER -> CLOCK -> HOME; held: MENU */
         ui_power_on(); go_home(); frame();
@@ -5402,18 +5395,19 @@ static int test_momentary(void)
     btn_up(B_LFO); frame();
     bad += check("  OCT+ with LFO held keeps them (no octave shift), LFO let go then changes nothing",
                  ok && TSEL->p[id0] != v0 && str_eq(cur_page()->title, "EDIT"));
-    {   /* HOME: VOLUME (the track's LEVEL) momentary; TRACK, PRESET, TEMPO act as ever */
-        int16_t lv = TSEL->p[P_LEVEL];
+    {   /* HOME: its knobs are EDIT's, momentary as there (back on release) */
+        uint32_t ie = big_id(TSEL, 2), ic = big_id(TSEL, 0);
+        int16_t ev, cv;
         go_home(); frames(400);
+        ev = TSEL->p[ie]; cv = TSEL->p[ic];
         btn_down(B_LFO); frame();
-        turn(EN_K3, -6);
-        ok = TSEL->p[P_LEVEL] != lv && mom.n == 1u;
-        turn(EN_K1, 1);
-        ok &= song.sel == 1u && mom.n == 1u;
-        track_select(0); frame();
+        turn(EN_K3, ev > -60 ? -6 : 6);
+        ok = TSEL->p[ie] != ev && mom.n == 1u;
+        turn(EN_K1, cv > 10 ? -3 : 3);
+        ok &= TSEL->p[ic] != cv && mom.n == 2u && song.sel == 0u;
         btn_up(B_LFO); frame();
-        bad += check("  HOME: VOLUME momentary (back on release); TRACK acts as ever", ok && TSEL->p[P_LEVEL] == lv &&
-                     !mom.n && ui.home);
+        bad += check("  HOME: its EDIT knobs momentary (back on release), the track stays", ok && TSEL->p[ie] == ev &&
+                     TSEL->p[ic] == cv && !mom.n && ui.home);
     }
     /* an FX page (a global) and an engine page */
     open_family(FAM_FX); frame();
@@ -5640,7 +5634,7 @@ static int test_screen_off(void)
 
     scr_idle(31u * 60000u);
     n = host_pw_n;
-    home_param(HK_VOLUME, &vp);                       /* (VOID FOUR: HOME's KNOB 3, the track's LEVEL) */
+    home_param(2u, &vp);                              /* (VOID FOUR: HOME's KNOB 3, EDIT's ENV since 2026-10-20) */
     v0 = *vp;
     for (i = 0; i < 20u; i++) turn(EN_K3, -1);       /* a knob turned to wake it, still turning (on past the wake) */
     ok = scr_woke(n) && *vp == v0;
@@ -6277,7 +6271,7 @@ static int test_layer_knob_race(void)
             uint32_t i;
             ui_power_on();
             song.rec = 1; seq_start(); go_home(); frames(64);
-            home_param(HK_VOLUME, &vp);                 /* (VOID FOUR: T1's LEVEL, HOME's VOLUME) */
+            home_param(2u, &vp);                        /* (VOID FOUR: T1's ENV, HOME's KNOB 3) */
             c = *vp;
             btn_down(LB[l]); frames(560);
             for (i = 0; i < 4u; i++) { rc_enc(EN_K1 + k, l ? -1 : 1, 1); frame(); }
@@ -6295,7 +6289,7 @@ static int test_layer_knob_race(void)
     {
         int16_t *vp, c;
         uint32_t i;
-        home_param(HK_VOLUME, &vp);
+        home_param(2u, &vp);
         c = *vp;
         btn_down(B_FX); frames(560);
         for (i = 0; i < 5u; i++) { rc_enc(EN_K1, 1, 1); frame(); }
@@ -6312,7 +6306,7 @@ static int test_layer_knob_race(void)
     go_home(); frames(64);
     {
         int16_t *vp, c;
-        home_param(HK_VOLUME, &vp);
+        home_param(2u, &vp);
         c = *vp;
         rc_enc(EN_K3, 1, 1); frame(); frame();
         ok = *vp == c + 1;
@@ -7638,9 +7632,9 @@ static int test_usb_serial(void)
     return bad;
 }
 
-/* #58 MENU > BPM LOCK: OFF by default (and in every older setting): SELECT sets the tempo on every page. ON: SELECT
- * leaves it on the pages ("BPM LOCKED" once per turn burst); HOME > CLOCK's BPM knob, GLO + SELECT (a combo: the map
- * opens, no GLO page; OCT- puts it back) and GLO's F4 TAP still set it; the menu never takes SELECT as the tempo */
+/* #58 MENU > BPM LOCK: OFF by default (and in every older setting). Since 2026-10-20 SELECT is the track's LEVEL, so it never
+ * sets the tempo, lock or not; HOME > CLOCK's BPM knob, GLO + SELECT (a combo: the map opens, no GLO page; OCT- puts it back)
+ * and GLO's F4 TAP set it; the menu never takes SELECT as the tempo */
 static int test_bpm_lock(void)
 {
     int bad = 0, ok;
@@ -7651,8 +7645,8 @@ static int test_bpm_lock(void)
     frame();
     b0 = song.g[G_BPM];
     turn(EN_SELECT, 2);
-    ok = song.g[G_BPM] == b0 + 2 && !msg_is("BPM LOCKED") && str_eq(menu_flag(MI_BPMLOCK)->name[0], "OFF");
-    bad += check("#58 BPM LOCK OFF (the default): SELECT sets the tempo as before", ok);
+    ok = song.g[G_BPM] == b0 && !msg_is("BPM LOCKED") && str_eq(menu_flag(MI_BPMLOCK)->name[0], "OFF");
+    bad += check("#58 BPM LOCK OFF (the default): SELECT is the track's LEVEL (2026-10-20), no tempo", ok);
 
     hold(B_HOME);
     ui.menu_sel = MI_BPMLOCK;
@@ -7678,36 +7672,18 @@ static int test_bpm_lock(void)
         ui.msg_t = 0; fm1_ms += 1200u;
         b0 = song.g[G_BPM];
         turn(EN_SELECT, 1);
-        ok &= song.g[G_BPM] == b0 && msg_is("BPM LOCKED") && !ui.bpm_t;
-        ui.msg_t = 0;
-        turn(EN_SELECT, -4);                                          /* (the same burst: said once) */
-        ok &= song.g[G_BPM] == b0 && !ui.msg_t;
+        ok &= song.g[G_BPM] == b0 && !msg_is("BPM LOCKED") && !ui.bpm_t;
+        turn(EN_SELECT, -4);
+        ok &= song.g[G_BPM] == b0;
     }
-    fm1_ms += 1200u;
-    turn(EN_SELECT, 1);
-    ok &= msg_is("BPM LOCKED");                                       /* (a new burst: said again) */
-    ok &= text_w(&AF_S, "BPM LOCKED") <= 236 - 106;                   /* (fits the header's message zone) */
-    bad += check("#58 BPM LOCK ON: SELECT leaves the tempo on HOME and the pages, \"BPM LOCKED\" once per turn burst", ok);
+    bad += check("#58 BPM LOCK ON: SELECT (the LEVEL) leaves the tempo on HOME and the pages", ok);
 
-    /* HOME's own TEMPO knob (K4) obeys the lock as SELECT does: the badge is drawn on HOME */
+    /* HOME's KNOB 4 is EDIT's (2026-10-20): no tempo */
     go_home(); frame();
-    ui.msg_t = 0; ui.bpm_t = 0; fm1_ms += 1200u;
     b0 = song.g[G_BPM];
     turn(EN_K4, 3);
-    ok = song.g[G_BPM] == b0 && msg_is("BPM LOCKED") && !ui.bpm_t;
-    ui.msg_t = 0;
-    turn(EN_K4, -2);                                              /* (the same burst: said once) */
-    ok &= song.g[G_BPM] == b0 && !ui.msg_t;
-    fm1_ms += 1200u;
-    turn(EN_K4, 1);
-    ok &= song.g[G_BPM] == b0 && msg_is("BPM LOCKED");            /* (a new burst: said again) */
-    ui_prefs &= ~PREF_BPM_LOCK;                                   /* OFF: it sets the tempo, and lights the header's BPM */
-    ui.msg_t = 0; ui.bpm_t = 0; fm1_ms += 1200u;
-    turn(EN_K4, 2);
-    ok &= song.g[G_BPM] == b0 + 2 && !msg_is("BPM LOCKED") && ui.bpm_t;
-    ui_prefs |= PREF_BPM_LOCK;                                    /* (back ON for the checks below) */
-    song.g[G_BPM] = b0;
-    bad += check("#58 BPM LOCK: HOME's TEMPO knob (K4) leaves the tempo and says \"BPM LOCKED\" once per burst; OFF it sets it", ok);
+    ok = song.g[G_BPM] == b0 && !msg_is("BPM LOCKED");
+    bad += check("#58 BPM LOCK: HOME's KNOB 4 is no tempo (EDIT's fourth control)", ok);
 
     /* ON: HOME > CLOCK's BPM knob (up to 1.1.5 GLO > GLOBAL's) */
     go_home(); press(B_HOME); press(B_HOME); frame();   /* (HOME > MIXER > CLOCK) */
@@ -7757,7 +7733,7 @@ static int test_bpm_lock(void)
         b0 = song.g[G_BPM];
         go_home(); frame();
         turn(EN_SELECT, 1);
-        ok &= song.g[G_BPM] == b0 + 1;
+        ok &= song.g[G_BPM] == b0;                                    /* (SELECT: the LEVEL) */
         bad += check("#58 BPM LOCK saved with the settings; settings from before it: OFF (idempotent)", ok);
     }
     ui_prefs = 0;

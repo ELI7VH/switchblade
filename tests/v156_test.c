@@ -275,7 +275,7 @@ static int select_play(void)
     int16_t b0;
     uint32_t mo, pk;
     ui_power_on();
-    ok = menu_n(MI_SELECT) == 4u && str_eq(menu_vname(MI_SELECT, 0), "BPM") && str_eq(menu_vname(MI_SELECT, 1), "PAGE") &&
+    ok = menu_n(MI_SELECT) == 4u && str_eq(menu_vname(MI_SELECT, 0), "VOL") && str_eq(menu_vname(MI_SELECT, 1), "PAGE") &&
          str_eq(menu_vname(MI_SELECT, 2), "MODW") && str_eq(menu_vname(MI_SELECT, 3), "VEL") && menu_get(MI_SELECT) == 0u;
     menu_put(MI_SELECT, 1);
     ok &= ui_prefs2 == 0x10u && sel_mode() == SEL_PAGE;     /* (PAGE: 1.5.5's bit) */
@@ -292,7 +292,7 @@ static int select_play(void)
         p.favorites.factory[15][24] = 0;
         ok &= settings_import(&p, (int)sizeof p) == 1 && menu_get(MI_SELECT) == 0u;
     }
-    bad += check("SELECT (#84): BPM PAGE MODW VEL; PAGE bit 4 as 1.5.5, MODW / VEL bit 6 too; saved, older settings BPM", ok);
+    bad += check("SELECT (#84): VOL PAGE MODW VEL; PAGE bit 4 as 1.5.5, MODW / VEL bit 6 too; saved, older settings BPM", ok);
 
     menu_put(MI_SELECT, SEL_MODW);
     go_home(); frame();
@@ -346,7 +346,7 @@ static int select_play(void)
     go_title("CLOCK");
     ok = str_eq(help_page(), "[K1]TEMPO[GLO]HOLD: TAP");
     menu_put(MI_SELECT, 0);
-    ok &= str_eq(help_page(), "[SELECT]TEMPO[GLO]HOLD: TAP");
+    ok &= str_eq(help_page(), "[K1]TEMPO[GLO]HOLD: TAP");
     bad += check("  HELP: CLOCK's hint names KNOB 1 the tempo with MODW / VEL too", ok);
     return bad;
 }

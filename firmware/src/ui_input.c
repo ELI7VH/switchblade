@@ -73,9 +73,7 @@ static int mom_turn(uint32_t k, int32_t s)
     int16_t *vp = 0;
     uint32_t i, g;
     const track_t *t = TSEL;
-    if (ui.home) {                                     /* HOME: VOLUME only (TRACK, PRESET pick; TEMPO is no sound) */
-        if (k != HK_VOLUME)
-            return 0;
+    if (ui.home) {                                     /* HOME: the EDIT page's four */
         d = home_param(k, &vp);
     } else if (pg->scope == SC_TRK && !lock_held()) {  /* MIXER (#195): the selected track's LEVEL PAN REV MUTE */
         static const uint8_t MIX_ID[4] = {P_LEVEL, P_PAN, P_REV, P_MUTE};   /* (tracks_edit's knobs) */
@@ -422,49 +420,34 @@ static int32_t accel(uint32_t role, int32_t s, int32_t range)
     return s * (int32_t)m;
 }
 
-static uint32_t lock_ms;                                /* BPM LOCK: the last locked tempo turn (fm1_ms | 1; 0 none) */
-
-/* MENU > BPM LOCK ON (#58): a tempo turn that is refused says so once per turn burst (SELECT's and HOME's TEMPO knob) */
-static void bpm_locked(void)
-{
-    if (!lock_ms || fm1_ms - lock_ms > 1000u)
-        ui_message("BPM LOCKED");
-    lock_ms = fm1_ms | 1u;
-}
-
-/* HOME (VOID FOUR, ui.c HK_*): KNOB 1 the track (a detent each, T1..T4, no wrap: as ALGORITHM), 2 the machine's next /
- * previous sound (its 32 and its user presets, round: eng_list_step; a load sends its Program Change, midi_control.c),
- * 3 the track's LEVEL (recorded as automation, MIDI LEARN; MIDI OUT sends it as any change of the CC map), 4 the BPM at
- * SELECT's acceleration (an external clock sets it: the turn does nothing) */
+/* HOME (VOID FOUR, ui.c home_param): KNOB k turns the EDIT page's KNOB k (the selected track's machine's CUT RES ENV + its
+ * own), as there: recorded as automation, MIDI LEARN picks it, MIDI OUT sends it as any change of the CC map */
 static void home_turn(uint32_t k, int32_t s)
 {
     int16_t *vp;
-    const param_desc_t *d;
-    switch (k & 3u) {
-    case HK_TRACK:
-        track_select((uint32_t)clamp((int32_t)song.sel + s, 0, NTRK - 1));
-        break;
-    case HK_PRESET:
-        eng_list_step(s);
-        break;
-    case HK_VOLUME:
-        d = home_param(k, &vp);
-        *vp = (int16_t)param_turn(d, *vp, accel(EN_K1 + k, s, d->max - d->min));
-        motion_capture(TSEL, P_LEVEL, *vp);
-        ml_knob(TSEL, P_LEVEL);
-        break;
-    default:
-        if (song.g[G_CLOCK])
-            break;
-        if (ui_prefs & PREF_BPM_LOCK) {                 /* MENU > BPM LOCK ON (#58): as SELECT; GLO is held for neither
-                                                         * (a layer's button down: the knobs are not HOME's) */
-            bpm_locked();
-            break;
-        }
-        song.g[G_BPM] = (int16_t)clamp(song.g[G_BPM] + accel(EN_K1 + k, s, 200), GP[G_BPM].min, GP[G_BPM].max);
-        ui.bpm_t = 40;                                  /* the header's BPM lights up with the card */
-        break;
-    }
+    const param_desc_t *d = home_param(k, &vp);
+    if (!d || !vp || d->max == d->min)
+        return;
+    *vp = (int16_t)param_turn(d, *vp, accel(EN_K1 + k, s, d->fmt == F_ENUM ? 0 : d->max - d->min));
+    motion_capture(TSEL, (uint32_t)(vp - TSEL->p), *vp);
+    ml_knob(TSEL, (uint32_t)(vp - TSEL->p));
+}
+
+/* SELECT (MENU > SELECT VOL, the default, 2026-10-20): the selected track's LEVEL, on every page, as MIXER's KNOB 1 (recorded
+ * as automation, MIDI LEARN, MIDI OUT); the value in the header's message line */
+static void sel_volume(int32_t s)
+{
+    track_t *t = TSEL;
+    const param_desc_t *d = track_desc(t, P_LEVEL);
+    const char *unit = "";
+    char m[24] = "VOLUME ", v[12];
+    t->p[P_LEVEL] = (int16_t)param_turn(d, t->p[P_LEVEL], accel(EN_SELECT, s, d->max - d->min));
+    motion_capture(t, P_LEVEL, t->p[P_LEVEL]);
+    ml_knob(t, P_LEVEL);
+    param_format(d, t->p[P_LEVEL], v, &unit);
+    fmt_named = 0;
+    str_cpy(m + 7, v, sizeof m - 7);
+    ui_say(m, unit);
 }
 
 /* MIXER page: KNOB 1 LEVEL, 2 PAN, 3 REV send, 4 MUTE of the selected track (right = ON, left = OFF: the
@@ -1124,10 +1107,8 @@ static void presets_turn(int32_t s)
         nudge_turn(held, s);
         return;
     }
-    if (ui.home) {                                        /* HOME (VOID FOUR): the machine's own sounds, as its KNOB 2 */
-        home_turn(HK_PRESET, s);
-        ui.hot_col = HK_PRESET;
-        ui.hot_t = 40;
+    if (ui.home) {                                        /* HOME (VOID FOUR): the machine's own sounds and its user presets */
+        eng_list_step(s);
     } else if (g == GR_BROWSE) {
         preset_step(s);
     } else if (g == GR_ROLL || g == GR_USER || g == GR_SLOTS || g == GR_PATS || g == GR_SONG || g == GR_EVENTS) {
@@ -1562,7 +1543,7 @@ static void ui_input(void)
         presets_turn(s);
     if (!lay && (s = panel_enc(EN_ALGO)) != 0)     /* ALGORITHM: the selected track, on every page */
         track_select((uint32_t)clamp((int32_t)song.sel + (s > 0 ? 1 : -1), 0, NTRK - 1));
-    if ((s = glo ? sel : panel_enc(EN_SELECT)) != 0) {   /* SELECT knob = global tempo; */
+    if ((s = glo ? sel : panel_enc(EN_SELECT)) != 0) {   /* SELECT knob = the track's LEVEL (GLO + SELECT: the tempo); */
         if (!glo && sel_mode() >= SEL_MODW) {         /* MENU > SELECT MODW / VEL (1.5.6, #84): it plays */
             sel_play(sel_mode(), s);
         } else if (!glo && sel_mode() == SEL_PAGE) {   /* MENU > SELECT PAGE (1.5.5, #188): the pages, a detent
@@ -1571,12 +1552,11 @@ static void ui_input(void)
                                                          * letting go, LFO is held (MOMENTARY) or steps are held */
             for (k = (uint32_t)(s > 0 ? s : -s); k && !lay && !kq && !mom_down() && !lock_held(); k--)
                 page_turn(s);
-        } else if (glo || !(ui_prefs & PREF_BPM_LOCK)) {
+        } else if (glo) {                               /* GLO + SELECT: the tempo (BPM LOCK or not, #58) */
             song.g[G_BPM] = (int16_t)clamp(song.g[G_BPM] + accel(EN_SELECT, s, 200), GP[G_BPM].min, GP[G_BPM].max);
             ui.bpm_t = 40;                              /* the header's BPM lights up; no message over the header */
-        } else {                                        /* MENU > BPM LOCK ON (#58): only with GLO held (and on HOME >
-                                                         * CLOCK, GLO's F4 TAP); a turn burst says so once */
-            bpm_locked();
+        } else if (!lay && !kq && !mom_down() && !lock_held()) {   /* (not into a layer, MOMENTARY or a lock) */
+            sel_volume(s);
         }
     }
     for (k = 0; k < 4u && !kq; k++) {

@@ -162,8 +162,9 @@ static const menu_flag_t *menu_flag(uint32_t row)
 #define LEDS_ROWS (LEDS_COUNT + 2u)
 static const char *const LEDS_ROW_N[LEDS_ROWS] = {"OFF", "DIM LO", "DIM HI", "INV", "INV LO", "INV HI"};
 
-/* MENU > CONTROL > SELECT (ui.c sel_mode): BPM, PAGE (1.5.5, #188), MODW, VEL (1.5.6, #84), append-only */
-static const char *const SELECT_N[SEL_N] = {"BPM", "PAGE", "MODW", "VEL"};
+/* MENU > CONTROL > SELECT (ui.c sel_mode): VOL (2026-10-20: the selected track's LEVEL; was BPM, the tempo: GLO + SELECT),
+ * PAGE (1.5.5, #188), MODW, VEL (1.5.6, #84), append-only */
+static const char *const SELECT_N[SEL_N] = {"VOL", "PAGE", "MODW", "VEL"};
 
 /* a row's value as 0..menu_n(row) - 1 in the order the menu steps it (LEDS: OFF DIM LO DIM HI INV INV LO INV HI) */
 static uint32_t menu_n(uint32_t row)
