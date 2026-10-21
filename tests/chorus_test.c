@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* chorus_test.c: DRIFT's Juno chorus (firmware/src/dsp_chorus.c, the per-part stereo hook in fx.c; Ultramaster KR-106 KR106Chorus.h + BBDFilter.h,
- * GPL-3.0). Task 6.2.
+/* chorus_test.c: DRIFT's Juno chorus (firmware/src/dsp_chorus.c, the per-part stereo hook in fx.c). Task 6.2; 2026-10-21: the Juno-60 chorus of
+ * fm1_juno_chorus.h replaced the KR-106 port, so (a)-(d) measure it against the module's own figures and the donor comparisons are gone.
  *   cc -O2 -w -ffp-contract=off -Ibuild/gen -Ifirmware/src -Itests -o build/host/chorus_test tests/chorus_test.c -lm
  *   build/host/chorus_test [build/chorus_ref]
  * Through the DSP (chorus_block: float in, L / R out, the port's own gains), per mode I / II / I+II:
@@ -43,8 +43,8 @@ static void check(int ok, const char *fmt, ...)
 #define FSD 44100.0
 static const char *refdir = "build/chorus_ref";
 
-/* the donor's constants (KR106Chorus.h): LFO Hz, half-amplitude ms, the two lines' clock trims, the centre */
-static const double LFO_HZ[4] = {0, 0.514, 0.842, 7.85}, DEPTH_MS[4] = {0, 2.13, 1.71, 0.236}, CENTRE_MS = 3.30;
+/* the module's figures (fm1_juno_chorus.h, the Juno-60): LFO Hz, the delay's half-swing and centre in ms */
+static const double LFO_HZ[4] = {0, 0.513, 0.863, 9.75}, DEPTH_MS[4] = {0, 1.845, 1.845, 0.2}, CENTRE_MS4[4] = {0, 3.505, 3.505, 3.5};
 
 /* ------------------------------------------------------------ the donor's files --- */
 static float *load_ref(int c, uint32_t n)            /* n frames of L, R; 0 when the file is not there (no donor built) */
@@ -144,7 +144,7 @@ static double dft_db(const float *x, uint32_t n, double hz)   /* Hann-windowed s
 #define EW0 2205u
 #define EW1 4410u
 #define ERR_TOL_DB (-55.0)         /* the time-domain error of the port against the donor in 50 .. 100 ms, re the donor's rms: see the report */
-static void test_donor(void)
+static void test_module(void)
 {
     int c, have = 1, mode;
     static double dd[2][4096], tt[2][4096];
@@ -156,11 +156,13 @@ static void test_donor(void)
         uint32_t m = delay_track(got, ki->n, dd[0], tt[0]), m1 = delay_track_r(got, ki->n, dd[1], tt[1]), i;
         track_stats(dd[0], tt[0], m, &rate_g, &range_g, &mean_g);
         track_stats(dd[1], tt[1], m1, &rate_g1, &range_g1, &mean_g1);
-        nom_pp0 = 2.0 * DEPTH_MS[mode] * 0.985 * FSD / 1000.0;
-        check(fabs(rate_g / LFO_HZ[mode] - 1.0) < 0.05, "(a) mode %d: LFO %.4f Hz (L), %.4f Hz (R); the donor's constant %.3f Hz (+-5 %%)", mode, rate_g, rate_g1,
+        nom_pp0 = 2.0 * DEPTH_MS[mode] * FSD / 1000.0;
+        check(fabs(rate_g / LFO_HZ[mode] - 1.0) < 0.05, "(a) mode %d: LFO %.4f Hz (L), %.4f Hz (R); the Juno-60's %.3f Hz (+-5 %%)", mode, rate_g, rate_g1,
               LFO_HZ[mode]);
-        check(fabs(range_g / nom_pp0 - 1.0) < 0.10, "(b) mode %d: delay sweep %.2f samples = %.3f ms (L); 2 x %.3f ms x 0.985 = %.3f ms (+-10 %%)", mode, range_g,
+        check(fabs(range_g / nom_pp0 - 1.0) < 0.10, "(b) mode %d: delay sweep %.2f samples = %.3f ms (L); 2 x %.3f ms = %.3f ms (+-10 %%)", mode, range_g,
               range_g * 1000.0 / FSD, DEPTH_MS[mode], nom_pp0 * 1000.0 / FSD);
+        check(fabs(mean_g - CENTRE_MS4[mode] * FSD / 1000.0) < 3.0, "(b) mode %d: the centre %.2f samples, the Juno-60's %.3f ms = %.2f (+-3: the filters' group delay)", mode, mean_g,
+              CENTRE_MS4[mode], CENTRE_MS4[mode] * FSD / 1000.0);
         for (i = 0; i < m && i < m1; i++) {         /* antiphase: the two lines' delays move opposite ways */
             sx += (dd[0][i] - mean_g) * (dd[1][i] - mean_g1);
             cor += (dd[0][i] - mean_g) * (dd[0][i] - mean_g);
@@ -168,15 +170,6 @@ static void test_donor(void)
         }
         check(sx / sqrt(cor * sy + 1e-30) < -0.99, "(c) mode %d: the two delays in antiphase, correlation %.4f; centres %.2f / %.2f samples", mode,
               sx / sqrt(cor * sy + 1e-30), mean_g, mean_g1);
-        if (ref) {
-            uint32_t mr = delay_track(ref, ki->n, dd[0], tt[0]);
-            track_stats(dd[0], tt[0], mr, &rate_r, &range_r, &mean_r);
-            check(fabs(rate_g / rate_r - 1.0) < 0.05 && fabs(range_g / range_r - 1.0) < 0.10 && fabs(mean_g - mean_r) < 1.5,
-                  "(a)(b) mode %d against the donor's own pulses: rate %.4f vs %.4f Hz (+-5 %%), sweep %.2f vs %.2f samples (+-10 %%), centre %.2f vs %.2f", mode,
-                  rate_g, rate_r, range_g, range_r, mean_g, mean_r);
-        } else {
-            have = 0;
-        }
         free(got), free(ref);
         /* (d) the sidebands of a 1 kHz sine, left channel */
         {
@@ -186,39 +179,9 @@ static void test_donor(void)
             s1_g = dft_db(g + 2u * n0, nn, 1000.0 + fl) - car_g;
             s2_g = dft_db(g + 2u * n0, nn, 1000.0 + 2.0 * fl) - car_g;
             check(s1_g > -35.0 && s1_g < 20.0, "(d) mode %d: a 1 kHz sine has sidebands at +%.3f Hz: %.1f dBc, at +%.3f Hz: %.1f dBc", mode, fl, s1_g, 2.0 * fl, s2_g);
-            if (r) {
-                double car_r = dft_db(r + 2u * n0, nn, 1000.0);
-                s1_r = dft_db(r + 2u * n0, nn, 1000.0 + fl) - car_r;
-                s2_r = dft_db(r + 2u * n0, nn, 1000.0 + 2.0 * fl) - car_r;
-                check(fabs(s1_g - s1_r) < 1.5 && (s2_r < -45.0 || fabs(s2_g - s2_r) < 1.5), "(d) mode %d against the donor: %.1f / %.1f dBc vs %.1f / %.1f dBc (1.5 dB)", mode,
-                      s1_g, s2_g, s1_r, s2_r);
-            }
             free(g), free(r);
         }
     }
-    /* (e) the whole waveform, every case but the impulse trains' tails, from 250 ms */
-    for (c = 0; c < CHORUS_REF_NCFG; c++) {
-        const chorus_ref_cfg_t *k = &CHORUS_REF_CFG[c];
-        float *g, *r = load_ref(c, k->n);
-        double e[2] = {0, 0}, s[2] = {0, 0}, db[2];
-        uint32_t i, ch;
-        if (!r)
-            continue;
-        g = run_case(k, 32);
-        for (i = EW0; i < EW1; i++)
-            for (ch = 0; ch < 2u; ch++) {
-                double rr = (double)r[2u * i + ch] * (double)CHORUS_TRIM, dlt = (double)g[2u * i + ch] - rr;
-                e[ch] += dlt * dlt;
-                s[ch] += rr * rr;
-            }
-        for (ch = 0; ch < 2u; ch++)
-            db[ch] = 10.0 * log10(e[ch] / (s[ch] + 1e-30) + 1e-30);
-        check(db[0] < ERR_TOL_DB && db[1] < ERR_TOL_DB, "(e) case %02d (mode %d, kind %d, f0 %.0f): error vs the donor x CHORUS_TRIM %.1f dB (L) %.1f dB (R) re its rms (limit %.0f dB)", c, k->mode,
-              k->kind, k->f0, db[0], db[1], ERR_TOL_DB);
-        free(g), free(r);
-    }
-    if (!have)
-        printf("chorus: NOT CHECKED against the donor: %s/NN.f32 are not there (tests/chorus_ref.cpp needs ../ultramaster_kr106-main or KR106_DIR)\n", refdir);
 }
 
 
@@ -454,7 +417,7 @@ static mixr_t mix_run(uint32_t e, uint32_t pi, int chor, uint32_t note, uint32_t
 /* the hashes of DRIFT's output with CHOR OFF (1.5 s, one note, the preset's own sends): the OFF path must not move (the golden file pins the
  * same on all 32 presets). Recorded from the tree before Task 6.2 (8ed17cc7.. 86d05a87.. b2a34c3a..); re-recorded in Task 6.3, which changed
  * the voice itself on purpose (the ladder's small-signal path and k-cache, the blep's reciprocal: the same filter to 1e-5, not the same bits) */
-static const uint64_t PIN_OFF[3] = {0x0c352095350b31b3ull, 0xed726d2e46a9a57dull, 0x0d9f33a3f575bda5ull};   /* [2] (HOOVER, 21) re-pinned in FX.1 (its DIST is the Scream-style one; was 0xc5f249a37e6af565) and in FX.2 (the oversampled loop; was 0x8b2c3ebc642e43f1); 0 and 22 have no DIST: unchanged */
+static const uint64_t PIN_OFF[3] = {0x0c352095350b31b3ull, 0xed726d2e46a9a57dull, 0x66e9f6a049d7d777ull};   /* [2] (HOOVER, 21) re-pinned in FX.1 (its DIST is the Scream-style one; was 0xc5f249a37e6af565), in FX.2 (the oversampled loop; was 0x8b2c3ebc642e43f1) and 2026-10-21 (the drive DIST; was 0x0d9f33a3f575bda5); 0 and 22 have no DIST: unchanged */
 static const uint8_t PIN_PRESET[3] = {0, 22, 21};
 static void test_mix_off(void)
 {
@@ -575,10 +538,10 @@ static void test_stereo_limits(void)
 static void test_param(void)
 {
     const param_desc_t *d = &TP[P_RSV_LN];
-    /* the level trim, from the donor's two gains alone (kDry 0.863, kWet 1.257 of KR106Chorus.h), not from the macro it is compared with: 1 / sqrt(0.863^2 + 1.257^2) */
-    check(fabs((double)CHORUS_TRIM - 1.0 / sqrt(0.863 * 0.863 + 1.257 * 1.257)) < 1e-3 && LEVEL_Q12[127] == 9713,
-          "(m) CHORUS_TRIM %.4f is 1 / sqrt(kDry^2 + kWet^2) = %.4f from the donor's gains (+-1e-3); LEVEL_Q12[127] = %d is the 9713 the guard's arithmetic uses", (double)CHORUS_TRIM,
-          1.0 / sqrt(0.863 * 0.863 + 1.257 * 1.257), (int)LEVEL_Q12[127]);
+    /* the mix: the module's -3 dB dry and wet */
+    check(CHORUS_TRIM == 1.0f && abs(CH_DRY - 2896) <= 1 && CH_WET == CH_DRY && LEVEL_Q12[127] == 9713,
+          "(m) the module's -3 dB dry and wet as they are (%d, %d in Q12 = 0.7071; CHORUS_TRIM %.1f); LEVEL_Q12[127] = %d is the 9713 the guard's arithmetic uses", CH_DRY, CH_WET,
+          (double)CHORUS_TRIM, (int)LEVEL_Q12[127]);
     check(!strcmp(d->label, "CHOR") && d->fmt == F_ENUM && d->min == 0 && d->max == 3 && d->def == 0 && d->names && !strcmp(d->names[0], "OFF") && !strcmp(d->names[1], "I") &&
               !strcmp(d->names[2], "II") && !strcmp(d->names[3], "I+II"),
           "(m) P_RSV_LN is CHOR: an enum OFF / I / II / I+II, default OFF");
@@ -596,9 +559,9 @@ static void test_tail_dsp(void)
     static chorus_t C, F;
     int mode, ok = 1, ok_off = 1, ok_stop = 1, ok_clean = 1;
     uint32_t last_worst = 0, ndmax, k, i;
-    /* the longest delay in samples: (3.30 ms x 1.015 + the deepest half-amplitude 2.13 ms x 1.015) x 44.1, +2 for the Hermite's taps beyond it, +1 for the write offset */
-    double dmax = (CENTRE_MS * 1.015 + DEPTH_MS[1] * 1.015) * 44.1;
-    ndmax = (uint32_t)ceil(dmax) + 2u + 1u;
+    /* the longest delay in samples: (the centre 3.505 ms + the half-swing 1.845 ms) x 44.1, +1 for the linear read's second tap, +1 for the write offset */
+    double dmax = (CENTRE_MS4[1] + DEPTH_MS[1]) * 44.1;
+    ndmax = (uint32_t)ceil(dmax) + 1u + 1u;
     for (mode = 1; mode <= 3; mode++) {
         uint32_t last = 0;
         memset(&C, 0, sizeof C);
@@ -628,7 +591,7 @@ static void test_tail_dsp(void)
             chorus_part(&F, mode, bf + k, zf + k, k + CTL <= 2016 ? CTL : 2016 - k);
         ok_clean &= !memcmp(b, bf, 2016 * sizeof(int32_t)) && !memcmp(z, zf, 2016 * sizeof(int32_t));
     }
-    printf("chorus: the tail: the last audible sample %u after the input stops (worst of the 3 modes); the longest delay %.2f samples -> %u with the Hermite and write offset; CHORUS_TAIL %u\n",
+    printf("chorus: the tail: the last audible sample %u after the input stops (worst of the 3 modes); the longest delay %.2f samples -> %u with the second tap and write offset; CHORUS_TAIL %u\n",
            last_worst, dmax, ndmax, (unsigned)CHORUS_TAIL);
     check(CHORUS_TAIL >= ndmax && CHORUS_TAIL >= last_worst && CHORUS_TAIL <= last_worst + 40u && CHORUS_TAIL % CHORUS_SUB == 0u,
           "(n) CHORUS_TAIL %u covers the measured tail %u (and the longest delay %u) and is not longer than 40 samples more (a whole number of sub-blocks)", (unsigned)CHORUS_TAIL, last_worst, ndmax);
@@ -768,7 +731,7 @@ static uint64_t instr_now(void)
 /* The pin: chorus_part per sample per part (the int32 block in, mid / side out), the whole stage, in regress.c's units (kernel-counted instructions
  * on the Mac, cc -O2); +10 % of the measured worst of the three modes. Another compiler or -O level moves it: re-measure and say why, never to hide a
  * regression. The device's cost is what Task 8.1's PERF run measures. */
-#define CHORUS_COST_MAX 200.0   /* the measured worst (I+II, 182) + 10 %, -O2, cc on the Mac */
+#define CHORUS_COST_MAX 111.0   /* the measured worst (I, 101: the Juno-60 module, 2026-10-21; the KR-106 port was 182) + 10 %, -O2, cc on the Mac */
 static void test_cost(void)
 {
     enum { NB = 4096 };
@@ -806,7 +769,7 @@ static void test_cost(void)
         worst = cost[mode] > worst ? cost[mode] : worst;
     }
     printf("chorus: cost per part per sample (chorus_part, int32 in / mid + side out): I %.0f, II %.0f, I+II %.0f instructions (-O2, regress.c's units)\n", cost[1], cost[2], cost[3]);
-    check(worst >= 100.0 && worst <= CHORUS_COST_MAX, "cost: the worst mode %.0f <= the pin %.0f (+10 %% of the measured worst, -O2)", worst, CHORUS_COST_MAX);
+    check(worst >= 50.0 && worst <= CHORUS_COST_MAX, "cost: the worst mode %.0f <= the pin %.0f (+10 %% of the measured worst, -O2)", worst, CHORUS_COST_MAX);
 }
 
 int main(int argc, char **argv)
@@ -817,8 +780,7 @@ int main(int argc, char **argv)
     test_param();
     test_dsp();
     test_part();
-    test_donor();
-    test_spectrum();
+    test_module();
     test_mix_off();
     test_mix_on();
     test_mix_pan();

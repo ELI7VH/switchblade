@@ -262,7 +262,11 @@ def check(img, syms, dis, rt):
         errors.append(f"_start is not at {APP_XIP:#x}")
     if img[:4] != bytes.fromhex("04818000"):
         errors.append(f"image starts with {img[:4].hex()}, not the entry stub")
-    rt_calls = [ln for ln in rt.splitlines() if re.search(r"\bcall\b", ln)]
+    # (objdump does not know the FPU's 4-byte opcodes: it prints their first half, 3f e5 / 3f f5, as an unknown instruction and
+    # decodes the second half on its own, which can read as a "call"; such a half is no call, a call after anything else is)
+    rt_lines = rt.splitlines()
+    rt_calls = [ln for k, ln in enumerate(rt_lines) if re.search(r"\bcall\b", ln) and
+                not (k and re.search(r":\s+3f [ef]5\s+<unknown instruction>", rt_lines[k - 1]))]
     if rt_calls:                    # RAM code runs with the flash off: no calls into XIP
         errors.append(f".ram_text contains calls: {rt_calls[:3]}")
     else:

@@ -365,19 +365,9 @@ if [ -f build/gen/felucca_tables.h ]; then
     $CC -O2 -w -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/drift_test" tests/drift_test.c -lm
     run "DRIFT: the filter against the donor's kr106::VCF (40 cases), the halfband, 24 dB/oct, DRV's THD, self-oscillation, DRFT, VAR, the MIX spectrum, the HPF (and its flat fallback), the corners, the donor's DCO (bandlimiting, spectrum, waveform, PW, PWM), KTR, the DC blockers, the voice start, the cost pin and the dearest legal mix" \
         "$OUT/drift_test" build/drift_ref
-    # CHORUS (Task 6.2): the donor's kr106::Chorus (tests/chorus_ref.cpp, KR106Chorus.h with its noise off) against dsp_chorus.c, the hook and the mix
-    mkdir -p build/chorus_ref
-    rm -f build/chorus_ref/*.f32
-    if [ -f "$KR/Source/DSP/KR106Chorus.h" ]; then
-        if ${CXX:-c++} -std=c++17 -O2 -ffp-contract=off -w -I"$KR/Source/DSP" -Itests -o "$OUT/chorus_ref" tests/chorus_ref.cpp; then
-            "$OUT/chorus_ref" build/chorus_ref >/dev/null || fail=1
-        else
-            echo "CHORUS: tests/chorus_ref.cpp does not build against the donor in $KR: FAIL"
-            fail=1
-        fi
-    fi
+    # CHORUS (2026-10-21): the Juno-60 chorus of fm1_juno_chorus.h (dsp_chorus.c) against its own figures, the hook and the mix (the KR-106 donor comparison is gone with the KR-106 port)
     $CC -O2 -w -ffp-contract=off -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/chorus_test" tests/chorus_test.c -lm
-    run "CHORUS: the Juno chorus against the donor's kr106::Chorus (rate, sweep, antiphase, sidebands, 15 renders), the fades, the part block and its guard, OFF bit for bit, stereo / PAN / SPREAD, the headroom, the cost pin" \
+    run "CHORUS: the Juno-60 chorus against its figures (rate, sweep, antiphase, sidebands), the fades, the part block and its guard, OFF bit for bit, stereo / PAN / SPREAD, the headroom, the cost pin" \
         "$OUT/chorus_test" build/chorus_ref
     rm -f build/chorus_ref/*.f32
     $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/slicer_test" tests/slicer_test.c -lm
