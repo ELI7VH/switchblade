@@ -234,6 +234,7 @@ static void test_px(void)
         for (s = 0; s < 4u; s++)
             miss += t->p[P_M1SRC + 3u * s] != x->mx[s][0] || t->p[P_M1DST + 3u * s] != x->mx[s][1] ||
                     t->p[P_M1AMT + 3u * s] != x->mx[s][2];
+        miss += t->p[P_LD_FLT] != x->ldflt || t->p[P_LSYNC] != x->lsync;
         if (miss) {
             short_n++;
             printf("void: WAVE_PX not applied: %-12s TYPE %d (want %u), SPRD %d (want %u), FLT ENV LVL %d (want %u), "

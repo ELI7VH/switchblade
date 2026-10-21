@@ -4,14 +4,14 @@
 # env = ATK DEC SUS REL; fenv = ENV -> FILTER (-64..63); fx = DIST CHORUS DELAY REVERB sends
 PRESETS = [
     # --- LEAD ---
-    dict(name="SAW LEAD", cat="LEAD", e=[0, 12, 64, 64, 90, 30, 0, 0], env=[4, 70, 100, 50], fenv=20, mono=1, fx=(0, 10, 45, 30), pat=4),
-    dict(name="SQR LEAD", cat="LEAD", e=[1, 0, 0, 64, 80, 50, 0, 0], env=[0, 60, 90, 30], fenv=30, mono=1, fx=(5, 0, 35, 20), pat=4),
-    dict(name="ACID LEAD", cat="LEAD", e=[0, 0, 0, 64, 50, 100, 0, 0], env=[0, 55, 20, 30], fenv=48, mono=1, fx=(20, 0, 45, 15), pat=1),
-    dict(name="RAVE", cat="LEAD", e=[4, 30, 64, 64, 85, 20, 0, 0], env=[20, 80, 110, 60], fenv=10, mono=1, fx=(30, 40, 30, 30), pat=9),
-    dict(name="SUB LEAD", cat="LEAD", e=[3, 0, 0, 64, 90, 0, 0, 0], env=[0, 60, 100, 25], fenv=0, mono=1, fx=(0, 0, 25, 20), pat=4),
-    dict(name="SYNC LEAD", cat="LEAD", e=[5, 40, 100, 64, 95, 25, 0, 0], env=[2, 70, 100, 40], fenv=36, mono=1, fx=(8, 0, 40, 25), pat=4),
-    dict(name="PWM LEAD", cat="LEAD", e=[4, 16, 70, 64, 88, 30, 0, 0], env=[6, 70, 100, 45], fenv=18, mono=1, fx=(0, 25, 40, 30), pat=4),
-    dict(name="FAT LEAD", cat="LEAD", e=[0, 34, 100, 64, 76, 40, 0, 0], env=[3, 70, 105, 50], fenv=26, mono=1, fx=(12, 20, 45, 35), pat=4),
+    dict(name="SAW LEAD", cat="LEAD", e=[0, 12, 64, 64, 90, 30, 0, 0], env=[4, 70, 100, 50], fenv=20, mono=0, fx=(0, 10, 45, 30), pat=4),
+    dict(name="SQR LEAD", cat="LEAD", e=[1, 0, 0, 64, 80, 50, 0, 0], env=[0, 60, 90, 30], fenv=30, mono=0, fx=(5, 0, 35, 20), pat=4),
+    dict(name="ACID LEAD", cat="LEAD", e=[0, 0, 0, 64, 50, 100, 0, 0], env=[0, 55, 20, 30], fenv=48, mono=0, fx=(20, 0, 45, 15), pat=1),
+    dict(name="RAVE", cat="LEAD", e=[4, 30, 64, 64, 85, 20, 0, 0], env=[20, 80, 110, 60], fenv=10, mono=0, fx=(30, 40, 30, 30), pat=9),
+    dict(name="SUB LEAD", cat="LEAD", e=[3, 0, 0, 64, 90, 0, 0, 0], env=[0, 60, 100, 25], fenv=0, mono=0, fx=(0, 0, 25, 20), pat=4),
+    dict(name="SYNC LEAD", cat="LEAD", e=[5, 40, 100, 64, 95, 25, 0, 0], env=[2, 70, 100, 40], fenv=36, mono=0, fx=(8, 0, 40, 25), pat=4),
+    dict(name="PWM LEAD", cat="LEAD", e=[4, 16, 70, 64, 88, 30, 0, 0], env=[6, 70, 100, 45], fenv=18, mono=0, fx=(0, 25, 40, 30), pat=4),
+    dict(name="FAT LEAD", cat="LEAD", e=[0, 34, 100, 64, 76, 40, 0, 0], env=[3, 70, 105, 50], fenv=26, mono=0, fx=(12, 20, 45, 35), pat=4),
     # --- BRASS ---
     dict(name="BRASS", cat="BRASS", e=[0, 10, 64, 64, 45, 20, 0, 0], env=[35, 70, 90, 45], fenv=40, mono=0, fx=(0, 20, 20, 40), pat=6),
     dict(name="ROYAL HORNS", cat="BRASS", e=[0, 12, 64, 64, 78, 34, 0, 0], env=[18, 70, 96, 50], fenv=28, mono=0, fx=(0, 24, 20, 40), pat=6),

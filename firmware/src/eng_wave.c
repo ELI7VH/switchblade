@@ -658,6 +658,8 @@ static void void_track_loaded(track_t *t)
     t->p[P_FM1_DEC] = x->fe[2];
     t->p[P_FM1_SUS] = x->fe[3];
     t->p[P_FM1_REL] = x->fe[4];
+    t->p[P_LD_FLT] = x->ldflt;
+    t->p[P_LSYNC] = x->lsync;
     for (k = 0; k < 4u; k++) {                         /* (mod.c's NMSLOT slots) */
         t->p[P_M1SRC + 3u * k] = x->mx[k][0];
         t->p[P_M1DST + 3u * k] = x->mx[k][1];

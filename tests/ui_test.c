@@ -697,7 +697,7 @@ static int test_midi(void)
                      !midi_sel_on[1][64] && !midi_in_overflow && mi_r == mi_w && song.playing);
         midi_in_event(0x643D9009u);
         events_block(CTL);
-        bad += check("MIDI accepts a fresh note after overflow recovery", midi_sel_on[0][61] == 1u && trk[0].v[0].gate);
+        bad += check("MIDI accepts a fresh note after overflow recovery", midi_sel_on[0][61] == 1u && gated_notes(&trk[0]));
     }
     {   /* 1.2: MENU > MIDI > MIDI IN (up to 1.1.5 GLO > SYSTEM K3 ROUT): the project's G_ROUTE, its names ROUT's */
         uint32_t k;

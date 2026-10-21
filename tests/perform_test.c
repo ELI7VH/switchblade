@@ -574,6 +574,8 @@ static int test_misc(void)
         trk[1].p[P_SLEN] = 1; trk[3].p[P_SLEN] = 1;
         trk[1].step[0].n = 0; trk[3].step[0].n = 0;          /* only track 1 plays, dry */
         trk[0].p[P_CHOR] = trk[0].p[P_DLY] = trk[0].p[P_REV] = 0;
+        trk[0].p[P_VOICE] = V_LEGATO;                       /* the lead as this was written for (OB-Z leads are POLY
+                                                              * since 2026-10-20: a held chord's longer tail after the mute) */
         transport_req = 1;
         for (f = 0; f < 2u * FS; f += CTL) {
             uint32_t i;

@@ -33,7 +33,10 @@ RANGES = {                                                       # edit[0..7] mi
     "ACID": [(0, 1), (-64, 63)] + [PCT] * 6,
     "DRIFT": [PCT] * 8,
 }
-WAVE_PX = dict(ftype=(0, 6), voice=(0, 3), detune=(0, 128), spread=PCT, glide=PCT)
+WAVE_PX = dict(ftype=(0, 6), voice=(0, 3), detune=(0, 128), spread=PCT, glide=PCT, ldflt=(-64, 63), lsync=(0, 10))
+NANO_MODEL = (0, 1)                                              # NANO's model: 0 the 303, 1 SUB (eng_sub.c); the ACID category is the 303's
+NANO_FTYPE = (0, 3)                                              # SUB's filter TYPE (P_FTYPE): 0 LP24 1 BP 2 HP 3 LP12
+NANO_KEYS = ["model", "ftype", "mono1", "glide", "fa", "fd", "fs", "fr", "ktrk", "o1", "w2", "semi", "pwm", "vel", "lrate", "lpit", "lcut", "vol"]   # eng_sub.c NPX_*
 DRIFT_CHOR = (0, 3)                                              # DRIFT's chor: the Juno chorus, 0 OFF, 1 I, 2 II, 3 I+II (absent = 0)
 
 
@@ -72,6 +75,8 @@ def route_holds(p, term):
     if src == "FENV":
         return dst == "CUT" and p["fe"][0] > 0 and p["fenv"] != 0
     if src == "ENV" and dst == "CUT" and p["fe"][0] == 0 and p["fenv"] != 0:
+        return True
+    if src == "LFO" and dst == "CUT" and p.get("ldflt", 0) != 0:    # the LFO's own depth on the filter (LFO DEST FLT)
         return True
     if src not in MX_SRC or dst not in MX_DST:
         return False
@@ -201,11 +206,11 @@ def main():
         H.append("};")
     H += [f"static const void_px_t WAVE_PX[] = {{",
           "    /* ftype, voice (3: UNISON), detune + 1, spread, glide, lfo {set, RATE, WAVE, TRIG, FADE}, fe {LVL, A, D, S, R}, "
-          "mx {SRC, DST, AMT} x 4 */"]
+          "mx {SRC, DST, AMT} x 4, LFO DEST FLT, LFO SYNC */"]
     for p in sets["WAVE"]:
         mx = ", ".join("{" + ", ".join(map(str, r)) + "}" for r in p["mx"])
         H.append(f'    {{{p["ftype"]}, {p["voice"]}, {p["detune"]}, {p["spread"]}, {p["glide"]}, '
-                 f'{{{", ".join(map(str, p["lfo"]))}}}, {{{", ".join(map(str, p["fe"]))}}}, {{{mx}}}}},   /* {p["name"]} */')
+                 f'{{{", ".join(map(str, p["lfo"]))}}}, {{{", ".join(map(str, p["fe"]))}}}, {{{mx}}}, {p["ldflt"]}, {p["lsync"]}}},   /* {p["name"]} */')
     H.append("};")
     H += ["static const uint8_t DRIFT_PX[] = {"]
     H += [f'    {p.get("chor", 0)},   /* {p["name"]} */' for p in sets["DRIFT"]]

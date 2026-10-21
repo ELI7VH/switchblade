@@ -97,6 +97,7 @@ static void test_ownenv(void)
     ENGINES[ENGI_ACID] = &stub;
     host_tracks_init();
     host_preset(t, ENGI_OBX, 5);
+    t->p[P_VOICE] = V_LEGATO;                          /* one voice, v[0] (OB-Z leads are POLY since 2026-10-20) */
     t->engine = t->eng_req = ENGI_ACID;
     t->p[P_ATK] = 0;
     t->p[P_REL] = 0;                                    /* the fastest release: the ADSR would end it in a few blocks */
@@ -150,6 +151,7 @@ static void own_setup(track_t *t, engine_t *stub)
     ENGINES[ENGI_ACID] = stub;
     host_tracks_init();
     host_preset(t, ENGI_OBX, 5);
+    t->p[P_VOICE] = V_LEGATO;                          /* one voice, v[0] (OB-Z leads are POLY since 2026-10-20) */
     t->engine = t->eng_req = ENGI_ACID;
     t->p[P_ATK] = 0;
     t->p[P_REL] = 0;
@@ -218,6 +220,7 @@ static void test_ownenv_shed(void)
 
     own_setup(t, &stub);
     host_preset(t1, ENGI_OBX, 5);
+    t1->p[P_VOICE] = V_LEGATO;                         /* its note on v[0] (OB-Z leads are POLY since 2026-10-20) */
     t1->engine = t1->eng_req = ENGI_OBX;
     t1->p[P_ATK] = 0;
     t1->p[P_SUS] = 32767;

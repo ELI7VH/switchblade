@@ -154,6 +154,8 @@ typedef struct {                 /* WAVE's extras of a factory preset (WAVE_PX, 
     uint8_t lfo[5];              /* 1: the LFO's RATE, WAVE, TRIG, FADE below (0: the defaults) */
     uint8_t fe[5];               /* FLT ENV: P_FM1_LEVEL (0 off, 1..127 on: its velocity sensitivity), A D S R */
     int8_t mx[4][3];             /* the matrix: SRC, DST, AMT per slot */
+    int8_t ldflt;                /* P_LD_FLT: the LFO's own depth on the filter (LFO DEST FLT, -64..63) */
+    uint8_t lsync;               /* P_LSYNC: LFO SYNC (0 OFF, else a note value of the tempo, params.c N_LSYNC) */
 } void_px_t;
 #define FX(d, c, dl, r) .fx = {(d) + 1, (c) + 1, (dl) + 1, (r) + 1}
 #define PAT(n) .pat = (n)
