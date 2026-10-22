@@ -293,9 +293,13 @@ static float ring[RING * 2];
 static uint32_t ring_w, ring_r, web_samples_due;
 
 /* one millisecond of the device: the clock, the audio halves due by now, the main loop */
+static void demo_tick(void);
+static struct { uint8_t on; uint32_t t0, i; } demo;
 static void web_ms(void)
 {
     fm1_ms++;
+    if (demo.on && (int32_t)(fm1_ms - demo.t0) >= 0)
+        demo_tick();                                      /* the page's demo song (web_demo) */
     web_ticks += 1000u * FM1_TICKS_PER_US;
     web_samples_due += FS;
     while (web_samples_due >= 1000u * HALF_FRAMES) {      /* an I2S half: the audio ISR renders it */
@@ -472,6 +476,69 @@ EXPORT void web_test_heavy(void)
     }
     ui.force = 1;
 }
+
+/* The page's demo song (2026-10-21): web/emu/demo_song.h (tools/make_demo.py from a MIDI file), under a minute, one part per track,
+ * played straight into the tracks from the millisecond tick: T1 OB-Z the bass, T2 WAVE the strings, T3 NANO the synth, T4 JUNO the
+ * keys. Starting it loads those sounds, clears the tracks' steps (the sequencer adds nothing if PLAY is pressed) and sets the tempo;
+ * web_demo(0), or the end of the song, lets every note go. */
+#include "demo_song.h"
+static uint32_t demo_preset(uint32_t e, const char *name)          /* a preset of machine e by name, else its first */
+{
+    uint32_t k;
+    for (k = 0; k < ENGINES[e]->npresets; k++)
+        if (str_eq(ENGINES[e]->presets[k].name, name))
+            return k;
+    return 0;
+}
+static void demo_all_off(void)
+{
+    uint32_t p;
+    for (p = 0; p < NTRK; p++)
+        trk_all_off(&trk[p]);
+}
+static void demo_tick(void)
+{
+    uint32_t ms = fm1_ms - demo.t0;
+    while (demo.i < NELEM(DEMO_EV) && DEMO_EV[demo.i].ms <= ms) {
+        track_t *t = &trk[DEMO_EV[demo.i].trk % NTRK];
+        if (DEMO_EV[demo.i].vel)
+            trk_note_on(t, DEMO_EV[demo.i].note, DEMO_EV[demo.i].vel);
+        else
+            trk_note_off(t, DEMO_EV[demo.i].note);
+        demo.i++;
+    }
+    if (demo.i >= NELEM(DEMO_EV)) {                                /* the song is over */
+        demo_all_off();
+        demo.on = 0;
+    }
+}
+EXPORT void web_demo(uint32_t on)
+{
+    static const struct { uint8_t e; const char *name; uint8_t voice; } P[4] = {
+        {ENGI_OBX, "PLUCK", V_MONO}, {ENGI_WAVE, "SERPENT", V_POLY}, {ENGI_ACID, "CAESIUM", 0xFF}, {ENGI_DRIFT, "DRIFT LEAD", V_POLY}};
+    uint32_t p, i;
+    demo_all_off();
+    demo.on = 0;
+    if (!on)
+        return;
+    for (p = 0; p < NTRK; p++) {
+        track_t *t = &trk[p];
+        host_preset(t, P[p].e, demo_preset(P[p].e, P[p].name));
+        if (P[p].voice != 0xFF)
+            t->p[P_VOICE] = P[p].voice;                            /* (NANO's CAESIUM keeps its own voicing) */
+        for (i = 0; i < NSTEP; i++) {
+            uint8_t none[1] = {0};
+            put_step(t, i, 0, none, ST_REST, 0);
+        }
+    }
+    song.g[G_BPM] = DEMO_BPM;
+    song.sel = 3;                                                  /* (the synth's track on screen) */
+    ui.force = 1;
+    demo.t0 = fm1_ms + 50u;                                        /* (the sounds settle first) */
+    demo.i = 0;
+    demo.on = 1;
+}
+EXPORT uint32_t web_demo_playing(void) { return demo.on; }
 
 EXPORT uint32_t web_test_user_preset(uint32_t i) { return (uint32_t)up_used(i); }
 

@@ -93,7 +93,7 @@ if (typeof registerProcessor === "function") {
       else if (m.type === "master") ex.web_master(m.value | 0);
       else if (m.type === "midi") ex.web_midi(m.data[0] | 0, m.data[1] | 0, m.data[2] | 0);
       else if (m.type === "visible") this.period = m.on ? 1 / 30 : 1 / 4;
-      else if (m.type === "demo") ex.web_test_heavy();   /* the page's demo song: one machine per track (felucca_web.c) */
+      else if (m.type === "demo") ex.web_demo(m.on ? 1 : 0);   /* the page's demo song (felucca_web.c web_demo, demo_song.h) */
     }
 
     publish() {
@@ -125,7 +125,12 @@ if (typeof registerProcessor === "function") {
         this.sentWrites = writes;
         msg.sectors = storeSectors(new Uint8Array(mem, ex.web_nor(), ex.web_nor_size()));
       }
-      if (msg.leds || msg.fb || msg.sectors || msg.load !== undefined) this.port.postMessage(msg, transfer);
+      const demo = ex.web_demo_playing ? ex.web_demo_playing() : 0;   // the page's demo song: on, then over
+      if (demo !== this.sentDemo) {
+        this.sentDemo = demo;
+        msg.demo = demo;
+      }
+      if (msg.leds || msg.fb || msg.sectors || msg.load !== undefined || msg.demo !== undefined) this.port.postMessage(msg, transfer);
     }
 
     // A click's down and up can arrive within one render quantum, but the FM-1's contacts never close for less than
