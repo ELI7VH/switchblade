@@ -20,6 +20,7 @@ By default, track N uses channel N:
 
 MENU > MIDI > MIDI IN chooses the block of channels: CH1-4 (the default), CH5-8, CH9-12 or CH13-16.
 It can also be set to SEL, where every channel plays the selected track, or to TRACK, where you pick a channel for each track in MENU > MIDI > T1..T4 CHANNEL.
+WaveLoop build: with CH1-4, CH5-8 or CH9-12, channel 16 plays and edits the selected track, so a keyboard on channel 16 follows the track you pick on the FM-1. Notes held when the selection moves end on the track they started on.
 MIDI OUT uses the same channel that the track listens on.
 With SEL, or with a track set to OMNI or OFF, the track sends on its own channel from CH1-4 (T1 on 1, T2 on 2, and so on).
 
@@ -59,12 +60,17 @@ Switching a track to EXT or BOTH sends nothing until you change something.
 | VOLUME (track level) | 7 |
 | CUT (EDIT knob 1) | 74 |
 | RES (EDIT knob 2) | 71 |
-| ENV, the filter envelope amount (FLT, EDIT knob 3) | 79 |
-| MACHINE control (EDIT knob 4) | 70 |
+| ENV, the filter envelope amount (FLT, EDIT knob 3) | 16 |
+| MACHINE control (EDIT knob 4) | 17 |
 | GLIDE | 5 |
 | PAN | 10 |
+| LFO RATE | 76 |
+| LFO > FILTER (LFO DEST FLT) | 77 |
+| LFO > AMP, tremolo (LFO DEST AMP) | 78 |
+| LFO WAVE | 70 |
 | ATTACK | 73 |
 | DECAY | 75 |
+| SUSTAIN | 79 |
 | RELEASE | 72 |
 | REVERB send | 91 |
 | CHORUS send | 93 |
@@ -75,11 +81,16 @@ DRIFT's Juno chorus (CHOR: OFF, I, II, I+II; EDIT > JUNO) has no CC: 91, 93 and 
 
 EDIT knob 4 is each machine's own control: DTN (detune) on OB-Z, POS (wavetable position) on WAVE, DECY (decay) on ACID and DRV (drive) on DRIFT.
 
+WaveLoop build: the map follows an M-Audio Oxygen Pro 61 (README, "WaveLoop build"). Up to Switch Blade 9d07527, ENV was CC79 and the MACHINE control CC70; they moved to CC16 and CC17 to free 79 and 70 for SUSTAIN and LFO WAVE.
+NANO's 303 runs its own envelope: there DECAY (CC75) sets its DECY, and ATTACK, SUSTAIN and RELEASE do nothing.
+CC112, CC114 and CC115 are the Oxygen's encoder (README) and are never mapped or learned.
+
 CC values 0..127 span the parameter's whole range. For a bipolar value such as PAN, 64 is the middle.
 Program Change 0..31 picks the track machine's preset with that number, in the order the PRESETS list shows them.
 A program number past the last preset is ignored.
 
 Other controllers received: CC1 (mod wheel), CC11 (expression), CC64 (sustain), pitch bend with RPN 0 bend range, channel aftertouch, and CC120, CC121 and CC123 (sound off, reset controllers, notes off).
+WaveLoop build: the mod wheel is a vibrato on every machine (about 5.4 Hz, up to half a semitone at the top), on top of any MOD slot with the MODW source.
 With MENU > CONTROL > SELECT set to MODW, turning SELECT on a track set to EXT or BOTH sends CC1 on that track's channel.
 
 ## Clock
