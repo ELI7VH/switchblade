@@ -12,6 +12,7 @@
 #include "arp_vectors.h"
 #include "arp_zoom_vectors.h"
 #include "arp_shift_vectors.h"
+#include "arp_window_vectors.h"
 
 static uint32_t xs;
 static uint32_t xs_next(void)
@@ -28,9 +29,8 @@ static void check(const char *what, int ok)
     fails += !ok;
 }
 
-static int play_vec(uint32_t k, int verbose)
+static int play_case(const arp_vec_t *v, uint32_t k, int verbose)
 {
-    const arp_vec_t *v = &ARP_VEC[k];
     arp_pat_t p;
     uint8_t held[16], pitch[ARP_ROWS], len[ARP_ROWS];
     uint32_t n, tick, e = 0, i, j;
@@ -57,6 +57,7 @@ static int play_vec(uint32_t k, int verbose)
         printf("arp:   case %u: C played %u notes, JS %u\n", (unsigned)k, (unsigned)e, (unsigned)v->nev);
     return e == v->nev;
 }
+static int play_vec(uint32_t k, int verbose) { return play_case(&ARP_VEC[k], k, verbose); }
 
 /* ZOOM case k through ash_subdivide: the toy's pattern, STEPS and RATE, or its refusal (and nothing changed). The toy's
  * 1/64 (RATE 1/32 x2) is not a RATE here: AZ_FAST */
@@ -128,6 +129,38 @@ int main(void)
     snprintf(line, sizeof line, "JS parity: %u cases, %u notes, every one as sequence.mjs plays it", (unsigned)ARP_NVEC,
              (unsigned)events);
     check(line, !bad);
+    {   /* WYNDO / SHYFT (and UP DOWN PEND) as SHAYPE's Windows core plays them (tests/arp_window_vectors.h) */
+        uint32_t wbad = 0, wev = 0, nd[6] = {0};
+        for (k = 0; k < ARP_NWVEC; k++) {
+            wev += ARP_WVEC[k].nev;
+            nd[ARP_WVEC[k].dir]++;
+            if (!play_case(&ARP_WVEC[k], k, wbad < 5u))
+                wbad++;
+        }
+        snprintf(line, sizeof line, "Windows parity: %u cases (WYNDO %u, SHYFT %u), %u notes as shaype_core.c",
+                 (unsigned)ARP_NWVEC, (unsigned)nd[AD_WYNDO], (unsigned)nd[AD_SHYFT], (unsigned)wev);
+        check(line, !wbad && nd[AD_WYNDO] && nd[AD_SHYFT]);
+    }
+    {   /* the README's: F A C E under a 3-row group, WYNDO: F A C, then A C E, again; SHYFT over a 3-row group with 4
+         * held: stays put (F A C); a 4-row group with 2 held, SHYFT: rows 0-1, 1-2, 2-3 as F A, then F A, then F A */
+        static const uint8_t FACE[4] = {53, 57, 60, 64}, W[9] = {53, 57, 60, 57, 60, 64, 53, 57, 60};
+        static const uint8_t FA[2] = {53, 57}, S[12] = {53, 57, 0, 0, 0, 53, 57, 0, 0, 0, 53, 57};
+        arp_pat_t p = {3, 0, {ARP_NOTE(0, 0, 1), ARP_NOTE(1, 1, 1), ARP_NOTE(2, 2, 1)}};
+        uint8_t pitch[ARP_ROWS], len[ARP_ROWS], got[12];
+        uint32_t t, ok = 1;
+        int32_t o = 0;
+        for (t = 0; t < 9u; t++)
+            ok &= ash_tick(&p, 3, t, FACE, 4, AD_WYNDO, AB_WRAP, xs_next, &o, pitch, len) == 1u && (got[t] = pitch[0]) == W[t];
+        for (t = 0; t < 6u; t++)
+            ok &= ash_tick(&p, 3, t, FACE, 4, AD_SHYFT, AB_WRAP, xs_next, &o, pitch, len) == 1u && pitch[0] == W[t % 3u];
+        p.n = 4;
+        p.note[3] = ARP_NOTE(3, 3, 1);
+        for (t = 0; t < 12u; t++) {
+            got[t] = ash_tick(&p, 4, t, FA, 2, AD_SHYFT, AB_WRAP, xs_next, &o, pitch, len) ? pitch[0] : 0u;
+            ok &= got[t] == S[t];
+        }
+        check("WYNDO: F A C E under 3 rows plays F A C, A C E; SHYFT climbs a 4-row group over 2 held", ok);
+    }
 
     {   /* sequence.test.mjs: requested chord shapes move through C E G B D */
         static const uint8_t C[5] = {60, 64, 67, 71, 74};

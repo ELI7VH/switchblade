@@ -13,7 +13,8 @@ static const char *const N_LPOL[] = {"BI", "UNI"};
  * name is the lowest, the ones under it up octaves; PAT: the factory pattern last loaded (turning loads one), USER once
  * the pattern is edited */
 static const char *const N_ARATE[] = {"1/2", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32"};
-static const char *const N_ADIR[] = {"UP", "DOWN", "PEND", "RAND"};
+static const char *const N_ADIR[] = {"UP", "DOWN", "PEND", "RAND", "WYNDO", "SHYFT"};   /* AD_* (stored: append-only);
+                                                                      * RAND is off the knob (DIR_ORDER), a stored one plays */
 static const char *const N_ABOUND[] = {"WRAP", "OCT"};
 static const char *const N_AROOT[] = {"OFF", "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
 static const char *const N_APAT[] = {"USER", "SHAYPE", "UP 4", "UPDOWN", "STABS", "OCT RUN", "PEDAL", "DRONE"};
@@ -105,7 +106,7 @@ static const param_desc_t TP[P_COUNT] = {
     [P_LD_AMP] = PD("AMP", F_PCT, 0, 127, 0),
     [P_AMODE] = PE("ARP", N_ONOFF, 0),             /* (a project of before: its MODE, any but OFF, is ON) */
     [P_ARATE] = PE("RATE", N_ARATE, 3),           /* 1/8, the toy's */
-    [P_AOCT] = PE("DIR", N_ADIR, 0),
+    [P_AOCT] = PE("DIR", N_ADIR, 4),             /* WYNDO (arp_shape.c AD_WYNDO; Elijah, 2026-10-25: "wyndo is default"; stored DIRs load as they are) */
     [P_AGATE] = {"GATE", F_INT, 10, 100, 75, 0, "%"},
     [P_ASWING] = PD("SWG", F_PCT, 0, 100, 0),
     [P_APROB] = PD("STEPS", F_STEPS, 1, 64, 4),
@@ -274,25 +275,52 @@ static const uint8_t DIV_ORDER[10] = {9, 8, 7, 6, 0, 1, 4, 2, 5, 3};   /* 4BAR 2
 static const uint8_t SLDIV_ORDER[6] = {0, 3, 1, 4, 2, 5};              /* 1/8 8T 1/16 16T 1/32 32T */
 static const uint8_t DTIME_ORDER[13] = {9, 8, 7, 6, 12, 0, 10, 1, 11, 4, 2, 5, 3};   /* 4BAR 2BAR 1/1 1/2 1/4D 1/4 1/8D
                                                                                       * 1/8 1/16D 8T 1/16 16T 1/32 */
-static const uint8_t *enum_order(const param_desc_t *d)
+/* WaveLoop: the ARP's DIR without RAND (Elijah, 2026-10-25: "get rid of random"): UP DOWN PEND WYNDO SHYFT. A stored
+ * RAND (3) stays RAND, shown as it is, until the knob turns: then the one past it that way (PEND or WYNDO) */
+static const uint8_t DIR_ORDER[5] = {0, 1, 2, 4, 5};
+static const uint8_t *enum_order(const param_desc_t *d)   /* the divisions' (every value, by length) */
 {
     return d->names == N_DIV ? DIV_ORDER : d->names == N_SLDIV ? SLDIV_ORDER : d->names == N_DTIME ? DTIME_ORDER : 0;
 }
+static const uint8_t *enum_order_n(const param_desc_t *d, int32_t *n)   /* any order, and how many values it shows */
+{
+    *n = d->names == N_ADIR ? (int32_t)sizeof DIR_ORDER : d->max - d->min + 1;
+    return d->names == N_ADIR ? DIR_ORDER : enum_order(d);
+}
+/* v's position in the shown order, or -1 - (how many shown values are below it) for a value it does not show */
+static int32_t enum_pos(const param_desc_t *d, const uint8_t *o, int32_t n, int32_t v)
+{
+    int32_t r, below = 0;
+    for (r = 0; r < n; r++) {
+        if (o[r] == v - d->min)
+            return r;
+        below += o[r] < v - d->min;
+    }
+    return -1 - below;
+}
 static int32_t enum_rank(const param_desc_t *d, int32_t v)   /* v's place in the shown order (+ min): the gauges */
 {
-    const uint8_t *o = enum_order(d);
-    int32_t r;
-    for (r = 0; o && r < d->max - d->min; r++)
-        if (o[r] == v - d->min)
-            break;
-    return o ? r + d->min : v;
+    int32_t n, r;
+    const uint8_t *o = enum_order_n(d, &n);
+    if (!o)
+        return v;
+    if ((r = enum_pos(d, o, n, v)) < 0)
+        return v;                                     /* (one not shown: where its value is) */
+    return n > 1 ? r * (d->max - d->min) / (n - 1) + d->min : d->min;   /* (fewer shown: spread over the range) */
 }
 /* a knob turned `steps` (signed) from v: clamped, over the shown order */
 static int32_t param_turn(const param_desc_t *d, int32_t v, int32_t steps)
 {
-    const uint8_t *o = enum_order(d);
-    if (o)
-        return o[clamp(enum_rank(d, v) - d->min + steps, 0, d->max - d->min)] + d->min;
+    int32_t n, r;
+    const uint8_t *o = enum_order_n(d, &n);
+    if (o) {
+        if ((r = enum_pos(d, o, n, v)) < 0) {         /* (one not shown: the next shown that way) */
+            if (!steps)
+                return v;
+            r = -1 - r - (steps > 0);
+        }
+        return o[clamp(r + steps, 0, n - 1)] + d->min;
+    }
     if (d->names == ESYNC_NAMES) {                    /* ENV SYNC: a note value a step (the first value showing it) */
         int32_t k = clamp((int32_t)esync_idx(v) + steps, 0, ESYNC_N - 1);
         return (k * 128 + ESYNC_N - 1) / ESYNC_N;

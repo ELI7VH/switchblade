@@ -91,6 +91,14 @@ static void arp_factory(track_t *t, uint32_t v)
     ui.force = 1;
     ui_say("PATTERN ", f->name);
 }
+/* DIR turned (edit_param): what it does, in the top bar (RAND: a stored one only, the knob passes it) */
+static void arp_dir_say(uint32_t v)
+{
+    static const char *const SAY[6] = {"UP: A ROW UP A PASS", "DOWN: A ROW DOWN", "PEND: UP, THEN DOWN",
+                                       "RAND: A RANDOM ROW", "WYNDO: SHAPE CLIMBS", "SHYFT: WINDOW CLIMBS"};
+    if (v < 6u)
+        ui_message(SAY[v]);
+}
 /* STEPS turned (edit_param): the toy's rule for a shorter grid, notes past the end go, notes over it are cut */
 static void arp_steps_set(track_t *t)
 {

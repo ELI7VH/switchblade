@@ -428,8 +428,9 @@ static __attribute__((noinline)) void arp_block(track_t *t, uint32_t n)
     t->arp_miss = (uint8_t)!fed;
     if (fed)
         arp_fire(t, period, 1);
-    else if (++t->arp_idx % arp_steps(t) == 0u)
-        t->arp_ofs = 0;
+    else if (++t->arp_idx % arp_steps(t) == 0u)   /* (no chord: passOffset's 0; WYNDO / SHYFT stand on the foot) */
+        t->arp_ofs = (int8_t)ash_offset(&arp_pat[trk_index(t)], arp_steps(t), t->arp_idx / arp_steps(t), 0u,
+                                        (uint32_t)t->p[P_AOCT], rng);
 }
 
 /* n: samples the arp advances by (the external clock's while it runs, 0 stopped); gate_n: samples its gate counts

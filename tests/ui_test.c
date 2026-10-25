@@ -7219,6 +7219,28 @@ static int test_div_order(void)
         ok &= b < a && !enum_order(&TP[P_ARATE]);
     }
     bad += check("#48 DIV / RATE / TIME / SLICER RATE step longest -> shortest, every value once, the ends hold", ok);
+    {   /* WaveLoop: the ARP's DIR goes UP DOWN PEND WYNDO SHYFT (RAND off the knob); a stored RAND shows RAND and turns to
+         * the one past it that way; the gauge reaches the ends */
+        const param_desc_t *d = &TP[P_AOCT];
+        char val[16];
+        const char *unit;
+        int32_t v = AD_UP, r, seen = 0;
+        for (r = 0; r < 6; r++) {
+            seen |= 1 << v;
+            v = param_turn(d, v, 1);
+        }
+        ok = seen == 0x37 && v == AD_SHYFT && param_turn(d, AD_WYNDO, -1) == AD_PEND && param_turn(d, AD_UP, -1) == AD_UP;
+        ok &= param_turn(d, AD_RAND, 1) == AD_WYNDO && param_turn(d, AD_RAND, -1) == AD_PEND &&
+              param_turn(d, AD_RAND, 0) == AD_RAND && param_turn(d, AD_RAND, 2) == AD_SHYFT;
+        param_format(d, AD_RAND, val, &unit);
+        ok &= str_eq(val, "RAND");
+        param_format(d, AD_WYNDO, val, &unit);
+        ok &= str_eq(val, "WYNDO");
+        param_format(d, AD_SHYFT, val, &unit);
+        ok &= str_eq(val, "SHYFT") && enum_rank(d, AD_UP) == d->min && enum_rank(d, AD_SHYFT) == d->max &&
+              param_fit(d, AD_SHYFT) == AD_SHYFT && param_fit(d, AD_RAND) == AD_RAND && d->def == AD_WYNDO;
+        bad += check("ARP DIR: WYNDO by default; UP DOWN PEND WYNDO SHYFT, RAND off the knob (a stored one plays, turns to PEND / WYNDO)", ok);
+    }
     ok = 1;                                         /* the real knob on the pages that show them, the gauge follows */
     for (id = 0; id < NPAGES; id++)
         for (c = 0; c < 4u; c++) {

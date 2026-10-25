@@ -187,6 +187,12 @@ int main(void)
         bad += check("an older project (no ARP pattern): SHAYPE on every track; ON, 1/16, GATE 50 %, HOLD, SWING kept; UP WRAP",
                      ok && c.t[0].p[P_AMODE] == 1 && c.t[0].p[P_ARATE] == 5 && c.t[0].p[P_AGATE] == 50 && c.t[0].p[P_AOCT] == AD_UP &&
                      c.t[0].p[P_AORDER] == AB_WRAP && c.t[0].p[P_AHOLD] == 1 && c.t[0].p[P_ASWING] == 30 && c.t[1].p[P_ARATE] == 0);
+        o = a;                                          /* SHAYPE's WYNDO / SHYFT (DIR 4, 5) and an old RAND (3) kept */
+        o.t[0].p[P_AOCT] = AD_WYNDO; o.t[1].p[P_AOCT] = AD_SHYFT; o.t[2].p[P_AOCT] = AD_RAND;
+        o.sum = proj_sum(&o);
+        ok = proj_pack(&st2, &o) && proj_import(&c, &st2, sizeof st2);
+        bad += check("ARP DIR WYNDO, SHYFT and a stored RAND save and load as they are",
+                     ok && c.t[0].p[P_AOCT] == AD_WYNDO && c.t[1].p[P_AOCT] == AD_SHYFT && c.t[2].p[P_AOCT] == AD_RAND);
         st2 = st; st2.raw[PROJ_ARP_OFF + 2] = ARP_NMAX + 1u; reseal(&st2);
         ok = proj_import(&c, &st2, sizeof st2) && c.t[0].arp.n == 8u && c.t[0].p[P_AOCT] == a.t[0].p[P_AOCT];
         bad += check("  a damaged pattern (63 notes): SHAYPE, its settings left as they are", ok);

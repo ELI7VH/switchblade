@@ -48,8 +48,8 @@ EDIT's knob 3 (ENV) and knob 4 (the machine's own control) moved from CC79 / CC7
 ### The ARP is SHAYPE
 
 The arpeggiator is WaveLoop's Shape Arp. A pattern is notes on a grid: steps across, rows up. A row is a place in the
-chord you hold, counted from its lowest note. Each pass through the steps moves every row one place (DIR), so the shape
-climbs, falls, swings or jumps through the chord. Hold a chord (keys, the Oxygen, MIDI IN) and the track plays the pattern
+chord you hold, counted from its lowest note. Each pass through the steps moves the rows (DIR), so the shape climbs,
+falls or swings through the chord, or a window moves through it (WYNDO, SHYFT). Hold a chord (keys, the Oxygen, MIDI IN) and the track plays the pattern
 over it, on its own clock or the external one, as the old ARP did. Each track has its own pattern.
 
 **The sequencer plays through the ARP.** With ARP on, the track's sequence does not sound its notes itself: each chord it
@@ -92,10 +92,23 @@ The ARP button opens three pages, all showing the grid: 16 steps at a time aroun
 
 | Page | Knob 1 | Knob 2 | Knob 3 | Knob 4 |
 | --- | --- | --- | --- | --- |
-| ARP | ARP (on / off) | STEPS (1-64) | RATE (1/2 to 1/32, triplets included) | DIR (UP, DOWN, PEND, RAND) |
+| ARP | ARP (on / off) | STEPS (1-64) | RATE (1/2 to 1/32, triplets included) | DIR (UP, DOWN, PEND, WYNDO, SHYFT) |
 | ARP 2 | BOUND (WRAP, OCT) | GATE (10-100 %) | HOLD | ROOT (OFF, C to B) |
 | ARP 3 | PAT (factory pattern) | SWING | OCT (-3 to +3) | |
 
+- **DIR:** how each pass moves the pattern through the chord; turning it, the screen says what it does. A new track
+  or project starts on WYNDO; a saved one keeps the DIR it was saved with.
+  - **UP** / **DOWN:** every row one note up (down) a pass. **PEND:** up, then back down.
+  - **WYNDO:** the pattern's group of notes (its lowest row to its highest) slides up through the held notes, one note a
+    pass, until its top reaches the highest, then starts again. Hold F A C E under a 3-row group: F A C, then A C E. A
+    group as tall as the chord stays put.
+  - **SHYFT:** the chord stays put; a window as many rows high as notes are held stands on the group's lowest row and
+    climbs it a row a pass. Only the rows inside it sound (its lowest row on your lowest note). A group no taller than
+    the chord stays put.
+  - RAND is gone from the knob. A project or pattern saved with RAND still plays RAND and shows it until you turn DIR.
+  - WYNDO and SHYFT are SHAYPE's (the Windows app's core, `windows/shaype/shaype_core.c` in the WaveLoop repo):
+    `tests/arp_shape_test.c` holds them, and UP / DOWN / PEND, to `tests/arp_window_vectors.h`, which
+    `tools/arp_windows_vectors.c` writes by running that core (its header says how).
 - **BOUND:** when a row goes past the top of the chord, WRAP starts again from its lowest note. OCT carries on an
   octave up (or down).
 - **GATE:** each note sounds for its length times the step times GATE.

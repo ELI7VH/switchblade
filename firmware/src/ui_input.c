@@ -887,6 +887,8 @@ static void edit_param(uint32_t slot, int32_t steps)
     } else if (vp == &TSEL->p[P_APROB] && v != *vp) {  /* .. STEPS: the pattern cut to it (the toy's rule) */
         *vp = (int16_t)v;
         arp_steps_set(TSEL);
+    } else if (vp == &TSEL->p[P_AOCT] && v != *vp) {   /* .. DIR: what it does, in the top bar */
+        arp_dir_say((uint32_t)v);
     }
     *vp = (int16_t)v;
     if (pg->scope != SC_GLOBAL) {

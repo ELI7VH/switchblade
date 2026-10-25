@@ -317,7 +317,7 @@ typedef struct track {
     uint32_t arp_pos;            /* samples into the current arp step */
     uint32_t arp_idx;            /* the step it plays, counted from the chord's first note (tick: step, pass) */
     uint8_t arp_n;               /* notes it sounds now (arp_snd), 0 = none */
-    int8_t arp_ofs;              /* the pass's offset (arp_shape.c ash_pass_offset) */
+    int8_t arp_ofs;              /* the pass's offset (arp_shape.c ash_offset) */
     uint8_t seq_arp;             /* WaveLoop: seq_notes are the chord the ARP plays (seq.c seq_step), not sounding notes */
     uint8_t seq_avel;            /* .. that chord's velocity (the step's), what the arp plays it at */
     uint8_t arp_miss;            /* the transport's arp step started with no chord: one that comes in its first half plays
