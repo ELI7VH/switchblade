@@ -7241,6 +7241,20 @@ static int test_div_order(void)
               param_fit(d, AD_SHYFT) == AD_SHYFT && param_fit(d, AD_RAND) == AD_RAND && d->def == AD_WYNDO;
         bad += check("ARP DIR: WYNDO by default; UP DOWN PEND WYNDO SHYFT, RAND off the knob (a stored one plays, turns to PEND / WYNDO)", ok);
     }
+    {   /* WaveLoop: KEY ATTACH on ARP 3's knob 4: NOW NOTE CYCLE, NOTE by default, kept by sound loads (param_kept) */
+        const param_desc_t *d = &TP[P_AATT];
+        char val[16];
+        const char *unit;
+        uint32_t pg;
+        for (pg = 0; pg < NPAGES && !str_eq(PAGES[pg].title, "ARP 3"); pg++)
+            ;
+        ok = pg < NPAGES && PAGES[pg].id[3] == P_AATT && d->def == AA_NOTE && param_kept(P_AATT) &&
+             param_turn(d, AA_NOW, 1) == AA_NOTE && param_turn(d, AA_NOTE, 1) == AA_CYCLE && param_turn(d, AA_CYCLE, 1) == AA_CYCLE &&
+             param_fit(d, 127) == AA_NOTE;
+        param_format(d, AA_CYCLE, val, &unit);
+        ok &= str_eq(val, "CYCLE") && str_eq(d->label, "ATTACH");
+        bad += check("ARP 3 knob 4: KEY ATTACH NOW / NOTE / CYCLE, NOTE by default, a track setting (sound loads keep it)", ok);
+    }
     ok = 1;                                         /* the real knob on the pages that show them, the gauge follows */
     for (id = 0; id < NPAGES; id++)
         for (c = 0; c < 4u; c++) {

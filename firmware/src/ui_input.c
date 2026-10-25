@@ -889,6 +889,8 @@ static void edit_param(uint32_t slot, int32_t steps)
         arp_steps_set(TSEL);
     } else if (vp == &TSEL->p[P_AOCT] && v != *vp) {   /* .. DIR: what it does, in the top bar */
         arp_dir_say((uint32_t)v);
+    } else if (vp == &TSEL->p[P_AATT] && v != *vp) {   /* .. ATTACH: when a key reaches the arp, in the top bar */
+        arp_attach_say((uint32_t)v);
     }
     *vp = (int16_t)v;
     if (pg->scope != SC_GLOBAL) {

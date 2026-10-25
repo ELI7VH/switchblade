@@ -4,8 +4,10 @@
  * the same cases through firmware/src/arp_shape.c and wants exactly the same notes. WYNDO and SHYFT are SHAYPE's (the
  * web toy has not got them yet), so the Windows core is their source of truth. WYNDO and SHYFT play every shape of
  * tests/arp_vectors.h (the JS core's cases) and SHAYPE's own and random ones below; UP / DOWN / PEND the latter (on the
- * JS shapes the JS vectors hold already). Every case of tests/arp_vectors.h but RAND is replayed through the Windows core
- * here and compared: a difference is reported on stderr (and the exit status is 1), never written over.
+ * JS shapes the JS vectors hold already), PEND every shape: SHAYPE's PEND climbs to the top and back in octaves and never
+ * wraps (sh_build_table, waveloop a205e3a6), so the JS core's PEND WRAP cases are superseded by these (arp_shape_test.c
+ * leaves them out). Every other case of tests/arp_vectors.h but RAND is replayed through the Windows core here and
+ * compared: a difference is reported on stderr (and the exit status is 1), never written over.
  *   W=~/repos/waveloop; D=$(mktemp -d)
  *   for f in shaype_core.c shaype_core.h; do git -C $W show origin/main:windows/shaype/$f > $D/$f; done
  *   cc -O1 -w -Ifirmware/src -Itests -I$D -o $D/awv tools/arp_windows_vectors.c -lm
@@ -86,7 +88,7 @@ int main(int argc, char **argv)
 {
     static const char *const DN[] = {"UP", "DOWN", "PEND", "RAND", "WYNDO", "SHYFT"};
     static const uint8_t DIRS[] = {AD_WYNDO, AD_SHYFT, AD_UP, AD_DOWN, AD_PEND};
-    uint32_t k, d, i, e, cycle, njs, jsn = 0, jsdiff = 0, ncase = 0, nev = 0, perdir[6] = {0};
+    uint32_t k, d, i, e, cycle, njs, jsn = 0, jsdiff = 0, jspend = 0, jspendd = 0, ncase = 0, nev = 0, perdir[6] = {0};
     static char cases[1 << 22];
     size_t cl = 0;
 
@@ -95,8 +97,14 @@ int main(int argc, char **argv)
         const arp_vec_t *v = &ARP_VEC[k];
         if (v->dir == AD_RAND)
             continue;
-        jsn++;
         e = play(v->pat, v->npat, v->steps, v->chord, v->nchord, v->root, v->dir, v->bound, v->passes, &cycle);
+        if (v->dir == AD_PEND && v->bound == AB_WRAP) {   /* (superseded: SHAYPE's PEND never wraps) */
+            jspend++;
+            jspendd += e != v->nev || memcmp(ev, v->ev, 6u * e);
+            shape_add(v->steps, v->bound, v->root, v->chord, v->nchord, v->pat, v->npat);
+            continue;
+        }
+        jsn++;
         if (e != v->nev || memcmp(ev, v->ev, 6u * e)) {
             jsdiff++;
             fprintf(stderr, "JS case %u (%s %s, %u steps): Windows plays %u notes, JS %u\n", (unsigned)k, DN[v->dir],
@@ -104,8 +112,9 @@ int main(int argc, char **argv)
         }
         shape_add(v->steps, v->bound, v->root, v->chord, v->nchord, v->pat, v->npat);
     }
-    fprintf(stderr, "JS vs Windows: %u cases (UP DOWN PEND), %u differ\n", (unsigned)jsn, (unsigned)jsdiff);
-    njs = nshapes;   /* (UP DOWN PEND are written only for the shapes below: on these the JS vectors hold already) */
+    fprintf(stderr, "JS vs Windows: %u cases (UP DOWN PEND OCT), %u differ; PEND WRAP superseded: %u cases, %u differ\n",
+            (unsigned)jsn, (unsigned)jsdiff, (unsigned)jspend, (unsigned)jspendd);
+    njs = nshapes;   /* (UP DOWN are written only for the shapes below: on these the JS vectors hold already) */
 
     {   /* SHAYPE's own: F A C E under a 3-row group (README: F A C, then A C E); as tall as the chord (stays put); a group
          * standing on row 2; a tall group over a small chord (SHYFT climbs); one note held; every row */
@@ -151,7 +160,7 @@ int main(int argc, char **argv)
         for (k = 0; k < nshapes; k++) {
             const shape_t *s = &shapes[k];
             uint32_t passes;
-            if (DIRS[d] != AD_WYNDO && DIRS[d] != AD_SHYFT && k < njs)
+            if (DIRS[d] != AD_WYNDO && DIRS[d] != AD_SHYFT && DIRS[d] != AD_PEND && k < njs)
                 continue;
             play(s->pat, s->npat, s->steps, s->chord, s->nchord, s->root, DIRS[d], s->bound, 1, &cycle);
             passes = 2u * cycle + 1u;

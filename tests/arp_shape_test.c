@@ -119,15 +119,19 @@ static int same(const uint8_t *a, uint32_t n, const uint8_t *b, uint32_t m) { re
 
 int main(void)
 {
-    uint32_t k, bad = 0, events = 0;
-    char line[96];
+    uint32_t k, bad = 0, events = 0, pend = 0;
+    char line[128];
     for (k = 0; k < ARP_NVEC; k++) {
+        if (ARP_VEC[k].dir == AD_PEND && ARP_VEC[k].bound == AB_WRAP) {   /* superseded: SHAYPE's PEND never wraps, the */
+            pend++;                                                         /* Windows vectors hold these shapes */
+            continue;
+        }
         events += ARP_VEC[k].nev;
         if (!play_vec(k, bad < 5u))
             bad++;
     }
-    snprintf(line, sizeof line, "JS parity: %u cases, %u notes, every one as sequence.mjs plays it", (unsigned)ARP_NVEC,
-             (unsigned)events);
+    snprintf(line, sizeof line, "JS parity: %u cases, %u notes as sequence.mjs plays them (%u PEND WRAP: Windows core's)",
+             (unsigned)(ARP_NVEC - pend), (unsigned)events, (unsigned)pend);
     check(line, !bad);
     {   /* WYNDO / SHYFT (and UP DOWN PEND) as SHAYPE's Windows core plays them (tests/arp_window_vectors.h) */
         uint32_t wbad = 0, wev = 0, nd[6] = {0};
@@ -137,9 +141,9 @@ int main(void)
             if (!play_case(&ARP_WVEC[k], k, wbad < 5u))
                 wbad++;
         }
-        snprintf(line, sizeof line, "Windows parity: %u cases (WYNDO %u, SHYFT %u), %u notes as shaype_core.c",
-                 (unsigned)ARP_NWVEC, (unsigned)nd[AD_WYNDO], (unsigned)nd[AD_SHYFT], (unsigned)wev);
-        check(line, !wbad && nd[AD_WYNDO] && nd[AD_SHYFT]);
+        snprintf(line, sizeof line, "Windows parity: %u cases (WYNDO %u, SHYFT %u, PEND %u), %u notes as shaype_core.c",
+                 (unsigned)ARP_NWVEC, (unsigned)nd[AD_WYNDO], (unsigned)nd[AD_SHYFT], (unsigned)nd[AD_PEND], (unsigned)wev);
+        check(line, !wbad && nd[AD_WYNDO] && nd[AD_SHYFT] && nd[AD_PEND]);
     }
     {   /* the README's: F A C E under a 3-row group, WYNDO: F A C, then A C E, again; SHYFT over a 3-row group with 4
          * held: stays put (F A C); a 4-row group with 2 held, SHYFT: rows 0-1, 1-2, 2-3 as F A, then F A, then F A */

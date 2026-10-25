@@ -38,7 +38,8 @@
 #                   by tools/arp_vectors.mjs running the toy's sequence.mjs (patterns, chords, roots, directions, boundaries,
 #                   passes), played tick by tick as seq.c arp_fire plays them: every note, step and length the same.
 #                   WYNDO and SHYFT (and UP DOWN PEND) against SHAYPE's Windows core: tests/arp_window_vectors.h, written
-#                   by tools/arp_windows_vectors.c running windows/shaype/shaype_core.c.
+#                   by tools/arp_windows_vectors.c running windows/shaype/shaype_core.c (PEND never wraps there: the JS
+#                   PEND WRAP cases are left out, the Windows ones hold those shapes).
 #                   ZOOM (ash_subdivide) against the toy's subdivide: tests/arp_zoom_vectors.h (--zoom), refusals too.
 #                   SHIFT (ash_shift) against the toy's shift: tests/arp_shift_vectors.h (--shift), its order too;
 #                   MIRROR and MUTATE's helpers.
@@ -48,7 +49,9 @@
 #                   step recording on the routed track, and a 40 s soak where nothing may hang. Releases: the chord let go
 #                   in every block of a step and at the edges of its gate (MOUT INT / EXT / BOTH, HOLD, MIDI / keys, the
 #                   external clock stopped, CC123, a key of a pitch the arp sounds): the arp's notes end with it, one
-#                   note-off each; a 40 s soak of chords let go anywhere in a step.
+#                   note-off each; a 40 s soak of chords let go anywhere in a step. KEY ATTACH NOW / NOTE / CYCLE (MIDI,
+#                   the keys, the sequencer's chords): a chord changed mid-pass and every key let go, each step's notes as
+#                   the mode gives them, every note-on one note-off.
 # CHORD (tests/chord_test.c): the chord keys (src/chord.c): diatonic triads / sevenths of several scales and roots,
 #                   the fixed shapes and voicings (at most 4 notes), names, MONO plays the root, a release ends
 #                   exactly what its key / MIDI note started, recording, the ARP, MIDI IN.

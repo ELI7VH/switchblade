@@ -35,7 +35,13 @@ typedef struct {
  *   SHYFT  the chord stays put; a window as high as the held notes stands on the group's foot and climbs it a row a
  *          pass: only the rows inside it sound, row r at place r - foot - p; passes h > n ? h - n + 1 : 1 */
 enum { AD_UP, AD_DOWN, AD_PEND, AD_RAND, AD_WYNDO, AD_SHYFT };
-enum { AB_WRAP, AB_OCT };                    /* P_AORDER: BOUND */
+enum { AB_WRAP, AB_OCT };                    /* P_AORDER: BOUND (PEND plays OCT whatever it says: ash_bound) */
+/* P_AATT: KEY ATTACH, when a key pressed or let go (MIDI, the sequencer's chord) reaches the arp (SHAYPE's
+ * windows/shaype/shaype_engine.h SH_ATTACH_*): NOW at once, the step just struck struck again with the new chord, every
+ * key let go ends the notes; NOTE at the next step, the note sounding plays to its end; CYCLE at the top of the next
+ * pass, the pass playing keeps the chord it began with. NOTE and CYCLE: every key let go, the last notes ring (CYCLE
+ * finishing its pass first) */
+enum { AA_NOW, AA_NOTE, AA_CYCLE };
 #define AB_CLIP 2u                           /* ash_events: a place outside the held notes (0 .. n - 1) is silent (SHYFT) */
 /* RATE (P_ARATE), sequence.mjs RATES slow to fast, in steps per two beats: 1/2 1/4 1/4T 1/8 1/8T 1/16 1/16T 1/32 */
 static const uint8_t ARP_RATE2[8] = {1, 2, 3, 4, 6, 8, 12, 16};
@@ -184,15 +190,25 @@ static int32_t ash_offset(const arp_pat_t *p, uint32_t steps, uint32_t pass, uin
     return dir == AD_WYNDO ? (int32_t)q - (int32_t)foot : -(int32_t)(foot + q);
 }
 
-/* one step of the hosts' loop (main.js schedule; seq.c arp_fire): step tick % steps of pass tick / steps over the held
- * chord (ash_voicing), the pass's offset worked out on its first step; the notes it starts (ash_events) */
+/* the BOUND a DIR plays with (ash_events): PEND climbs to the top and back in octaves, never wraps (SHAYPE's Windows
+ * core, sh_build_table: waveloop a205e3a6); SHYFT's window clips */
+static uint32_t ash_bound(uint32_t dir, uint32_t bound)
+{
+    if (dir == AD_PEND)
+        return AB_OCT;
+    return bound | (dir == AD_SHYFT ? AB_CLIP : 0u);
+}
+
+/* one step of the hosts' loop (main.js schedule): step tick % steps of pass tick / steps over the held chord
+ * (ash_voicing), the pass's offset worked out on its first step; the notes it starts (ash_events). (seq.c arp_fire works
+ * the offset out on every step, over the chord KEY ATTACH gives it: the same while the chord stays) */
 static uint32_t ash_tick(const arp_pat_t *p, uint32_t steps, uint32_t tick, const uint8_t *held, uint32_t n, uint32_t dir,
                          uint32_t bound, uint32_t (*rnd)(void), int32_t *offset, uint8_t *pitch, uint8_t *len)
 {
     uint32_t s = tick % steps;
     if (!s)
         *offset = ash_offset(p, steps, tick / steps, n, dir, rnd);
-    return ash_events(p, s, held, n, *offset, bound | (dir == AD_SHYFT ? AB_CLIP : 0u), pitch, len);
+    return ash_events(p, s, held, n, *offset, ash_bound(dir, bound), pitch, len);
 }
 
 /* the note of row r sounding on step s (it starts there or before and lasts over it): its index, -1 none */

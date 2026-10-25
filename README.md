@@ -56,16 +56,18 @@ over it, on its own clock or the external one, as the old ARP did. Each track ha
 plays becomes the chord the ARP plays, as if you held those keys for as long as the step's notes last (GATE, and TIEs or
 a step's LEN for longer chords). Sequence chords, one per step or tied over several, and SHAYPE plays them. Keys and MIDI
 notes you hold join the sequenced chord, and HOLD keeps them as usual. When a chord ends and nothing is held, the ARP
-stops; nothing is left sounding. With ARP off the sequence plays as before. Nothing new is stored: ARP on is the switch,
+stops (ATTACH, below, says whether its last notes ring), and STOP ends its notes. With ARP off the sequence plays as before. Nothing new is stored: ARP on is the switch,
 and the chords are the pattern's steps, saved with the project as ever.
 
 While the transport plays (the FM-1's clock or an external one), the ARP steps on the song's grid from PLAY: chord or
 none, its step is where the song is, so it stays in time with the sequence. A new chord starts on the next ARP step, or
-at once if it comes in the first half of a step that started with nothing to play. A chord that changes mid-pass changes
-the notes at the next step; the pass's DIR offset changes at the next pass. Stopped, a chord from nothing starts the
-pattern at its first step, as before. This is the toy's offline form `shapeChords` live: `tests/arp_seq_test.c` plays
-chords through the sequencer and wants exactly the notes `shapeChords` gives for them (`tests/arp_chords_vectors.h`,
-`node tools/arp_vectors.mjs --chords <sequence.mjs>`).
+at once if it comes in the first half of a step that started with nothing to play. A chord that changes while the ARP
+plays reaches it when ATTACH says (below). Stopped, a chord from nothing starts the pattern at its first step, as
+before. This is the toy's offline form `shapeChords` live: `tests/arp_seq_test.c` plays chords through the sequencer
+and wants exactly the notes `shapeChords` gives for them (`tests/arp_chords_vectors.h`,
+`node tools/arp_vectors.mjs --chords <sequence.mjs>`), with ATTACH NOW and NOTE, up to where KEY ATTACH parts from it:
+a chord following another straight on, mid-pass, with a different number of notes takes its own DIR offset from the step
+it lands on, as SHAYPE's Windows engine does (`shapeChords` keeps the pass's).
 
 **Recording with the ARP on records the chords you play**, not the ARP's notes, so the take plays back through the ARP.
 
@@ -94,11 +96,12 @@ The ARP button opens three pages, all showing the grid: 16 steps at a time aroun
 | --- | --- | --- | --- | --- |
 | ARP | ARP (on / off) | STEPS (1-64) | RATE (1/2 to 1/32, triplets included) | DIR (UP, DOWN, PEND, WYNDO, SHYFT) |
 | ARP 2 | BOUND (WRAP, OCT) | GATE (10-100 %) | HOLD | ROOT (OFF, C to B) |
-| ARP 3 | PAT (factory pattern) | SWING | OCT (-3 to +3) | |
+| ARP 3 | PAT (factory pattern) | SWING | OCT (-3 to +3) | ATTACH (NOW, NOTE, CYCLE) |
 
 - **DIR:** how each pass moves the pattern through the chord; turning it, the screen says what it does. A new track
   or project starts on WYNDO; a saved one keeps the DIR it was saved with.
-  - **UP** / **DOWN:** every row one note up (down) a pass. **PEND:** up, then back down.
+  - **UP** / **DOWN:** every row one note up (down) a pass. **PEND:** up to the top, then back down, in octaves: PEND
+    never wraps, whatever BOUND says (as SHAYPE on Windows).
   - **WYNDO:** the pattern's group of notes (its lowest row to its highest) slides up through the held notes, one note a
     pass, until its top reaches the highest, then starts again. Hold F A C E under a 3-row group: F A C, then A C E. A
     group as tall as the chord stays put.
@@ -108,15 +111,25 @@ The ARP button opens three pages, all showing the grid: 16 steps at a time aroun
   - RAND is gone from the knob. A project or pattern saved with RAND still plays RAND and shows it until you turn DIR.
   - WYNDO and SHYFT are SHAYPE's (the Windows app's core, `windows/shaype/shaype_core.c` in the WaveLoop repo):
     `tests/arp_shape_test.c` holds them, and UP / DOWN / PEND, to `tests/arp_window_vectors.h`, which
-    `tools/arp_windows_vectors.c` writes by running that core (its header says how).
+    `tools/arp_windows_vectors.c` writes by running that core (its header says how). The JS core's PEND WRAP cases in
+    `tests/arp_vectors.h` wrap, so they are left out: the Windows core's PEND vectors cover those shapes.
 - **BOUND:** when a row goes past the top of the chord, WRAP starts again from its lowest note. OCT carries on an
   octave up (or down).
 - **GATE:** each note sounds for its length times the step times GATE.
-- **HOLD:** the chord stays after you let go. The next chord you press replaces it.
+- **HOLD:** the chord stays after you let go. The next chord you press replaces it, when ATTACH says.
 - **ROOT:** the held note with that name becomes the lowest note. The notes below it move up an octave.
 - **PAT** loads a pattern as you turn to it, with its STEPS and BOUND: SHAYPE (the default), UP 4, UPDOWN, STABS, OCT RUN,
   PEDAL, DRONE. Editing the pattern makes it USER.
 - **STEPS** made shorter removes the notes past the new end.
+- **ATTACH** (KEY ATTACH) is when a key you press or let go reaches the ARP. Keys, MIDI notes and the sequencer's chords
+  all follow it.
+  - **NOW:** at once. The step just struck plays again with the new chord (early in the step; later, the next step
+    plays it). Let go of every key and the notes end.
+  - **NOTE:** at the next step. The note sounding plays to its end. Let go of every key and the last notes ring out.
+  - **CYCLE:** at the top of the next pass. The pass playing keeps the chord it started with, even if you let go of
+    every key: it finishes the pass, then stops, and the last notes ring out.
+  - The FM-1 starts on **NOTE** (Elijah's choice for these builds), new tracks and projects, and projects saved before
+    ATTACH existed. SHAYPE on Windows starts on NOW. STOP ends the sequenced chord's notes whatever ATTACH is.
 - **OCT** moves everything the ARP plays up or down by octaves (a note pushed past the top or bottom of MIDI is not
   played). OP3 + OCT+ / OCT- sets it too.
 **The OP keys are SHIFT on the ARP pages.** The FM-1 prints OP1 to OP6 on its black keys from F#3 to F#4. On the ARP

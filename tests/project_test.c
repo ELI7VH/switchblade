@@ -193,6 +193,21 @@ int main(void)
         ok = proj_pack(&st2, &o) && proj_import(&c, &st2, sizeof st2);
         bad += check("ARP DIR WYNDO, SHYFT and a stored RAND save and load as they are",
                      ok && c.t[0].p[P_AOCT] == AD_WYNDO && c.t[1].p[P_AOCT] == AD_SHYFT && c.t[2].p[P_AOCT] == AD_RAND);
+        o = a;                                          /* KEY ATTACH: NOW / CYCLE kept; a project saved before it (the
+                                                         * reserved id's 127) NOTE; one from before SHAYPE NOTE */
+        o.t[0].p[P_AATT] = AA_NOW; o.t[1].p[P_AATT] = AA_CYCLE; o.t[2].p[P_AATT] = 127; o.t[3].p[P_AATT] = AA_NOTE;
+        o.sum = proj_sum(&o);
+        ok = proj_pack(&st2, &o) && proj_import(&c, &st2, sizeof st2);
+        ok &= c.t[0].p[P_AATT] == AA_NOW && c.t[1].p[P_AATT] == AA_CYCLE &&
+              param_fit(&TP[P_AATT], c.t[2].p[P_AATT]) == AA_NOTE &&   /* (as it loads: param_fit) */
+              c.t[3].p[P_AATT] == AA_NOTE;
+        o.t[0].p[P_AATT] = 127; o.t[0].p[P_AMODE] = 3;
+        o.sum = proj_sum(&o);
+        ok &= proj_pack(&st2, &o);
+        memset(st2.raw + PROJ_ARP_OFF, 0, NTRK * PROJ_FM6_PACKED);
+        reseal(&st2);
+        ok &= proj_import(&c, &st2, sizeof st2) && c.t[0].p[P_AATT] == AA_NOTE;
+        bad += check("ARP ATTACH NOW / CYCLE / NOTE save and load; an older project (127, or from before SHAYPE): NOTE", ok);
         st2 = st; st2.raw[PROJ_ARP_OFF + 2] = ARP_NMAX + 1u; reseal(&st2);
         ok = proj_import(&c, &st2, sizeof st2) && c.t[0].arp.n == 8u && c.t[0].p[P_AOCT] == a.t[0].p[P_AOCT];
         bad += check("  a damaged pattern (63 notes): SHAYPE, its settings left as they are", ok);

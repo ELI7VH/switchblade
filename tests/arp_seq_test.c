@@ -4,6 +4,8 @@
  *   shapeChords parity   chords on the sequencer's steps, played through the arp: every note (its step, pitch, end,
  *                        velocity) as the toy's offline form shapeChords gives it for the same chords
  *                        (tests/arp_chords_vectors.h, tools/arp_vectors.mjs --chords); the arp lets go with the chord
+ *                        (ATTACH NOW and NOTE, up to KEY ATTACH's own: attach_from; PEND WRAP: the Windows core's)
+ *   KEY ATTACH           NOW / NOTE / CYCLE, MIDI, the keys and the sequencer's chords (attach)
  *   edges                ARP off as before; live notes join the sequenced chord; HOLD; the chord's end and STOP leave
  *                        nothing sounding; ARP switched while a chord plays; the external clock's grid
  *   recording            ARP on: the chord played is recorded, not the arp's notes; MIDI live recording on the routed
@@ -73,6 +75,9 @@ static void mi(uint32_t st, uint32_t d1, uint32_t d2)   /* a USB MIDI message in
     midi_enqueue((st >> 4) | st << 8 | d1 << 16 | d2 << 24, 1u);
 }
 
+/* KEY ATTACH the cases set up with (setup): NOW, what the release cases and the soaks were written for (every key let
+ * go ends the notes at once); NOTE (the FM-1's default) and CYCLE have their own cases (attach()) */
+static uint32_t setup_attach = AA_NOW;
 /* track 1 for the arp: the sequencer at 1/16, GATE 127, no swing, QUANTIZE ON; MIDI OUT EXT (what it plays goes out,
  * captured); the arp: pattern k (ARP_FACTORY), its STEPS and BOUND, then the rest */
 static track_t *setup(uint32_t pat, uint32_t dir, uint32_t rate, uint32_t gate, uint32_t len)
@@ -112,6 +117,7 @@ static track_t *setup(uint32_t pat, uint32_t dir, uint32_t rate, uint32_t gate, 
     t->p[P_AHOLD] = 0;
     t->p[P_AROOT] = 0;
     t->p[P_AXOCT] = 0;
+    t->p[P_AATT] = (int16_t)setup_attach;
     events_block(CTL);                               /* (the ISR sees ARP on) */
     cap_reset();
     return t;
@@ -141,11 +147,27 @@ static int by_tick_pitch(const void *a, const void *b)
     const uint32_t *x = a, *y = b;
     return x[0] != y[0] ? (int)x[0] - (int)y[0] : (int)x[1] - (int)y[1];
 }
+/* where KEY ATTACH parts from shapeChords: a chord following another straight on, mid-pass, with another number of notes
+ * (the pass's DIR offset is the new chord's from the step it lands on, as SHAYPE's table: shapeChords keeps the pass's).
+ * The arp step it lands on; ~0u none */
+static uint32_t attach_from(const acv_t *v, uint32_t pseq, uint32_t parp)
+{
+    uint32_t i, j, at, cut = ~0u;
+    for (i = 0; i < v->nchord; i++)
+        for (j = 0; j < v->nchord; j++)
+            if (v->chord[j].start == v->chord[i].stop && v->chord[j].n != v->chord[i].n) {
+                at = (v->chord[j].start * pseq + parp - 1u) / parp;
+                if (at % v->steps && at < cut)
+                    cut = at;
+            }
+    return cut;
+}
+static uint32_t parity_cut, parity_cut_n;
 static int parity_case(uint32_t c, int verbose)
 {
     const acv_t *v = &ACV[c];
     static uint32_t want[CAP_N][4], got[CAP_N][4];
-    uint32_t parp, pseq, i, k, end, n;
+    uint32_t parp, pseq, i, k, end, n, cut, nw, ng;
     track_t *t = setup(factory(ACV_PAT[v->pat]), v->dir, v->rate, v->gate, v->len);
     int ok = 1;
     t->p[P_AORDER] = v->bound;                       /* (the case's, not the pattern's own) */
@@ -160,6 +182,9 @@ static int parity_case(uint32_t c, int verbose)
         blk1();
     transport_req = 2;
     blks(4);
+    cut = attach_from(v, pseq, parp);
+    if (cut != ~0u)
+        parity_cut++;
     for (k = 0; k < v->nev; k++) {                   /* shapeChords's notes: the end its own, or the chord's first */
         const uint16_t *e = v->ev + 4u * k;        /* (the end of the chords one after another from its step: the */
         uint32_t stop = e[2], ce = ~0u, at = ~0u, j;   /* arp lets go when nothing sounds) */
@@ -174,7 +199,8 @@ static int parity_case(uint32_t c, int verbose)
             ce = (uint32_t)((uint64_t)at * pseq * 96u / parp);
         want[k][0] = e[0];
         want[k][1] = e[1];
-        want[k][2] = stop < ce ? stop : ce;
+        want[k][2] = setup_attach == AA_NOW && ce < stop ? ce : stop;   /* (NOTE: the chord gone, the notes ring to
+                                                                         * their own ends) */
         want[k][3] = e[3];
     }
     for (k = 0; k < ncap; k++) {
@@ -189,12 +215,17 @@ static int parity_case(uint32_t c, int verbose)
                    (unsigned)cap[k].off, v->ev[4u * k], v->ev[4u * k + 1u], v->ev[4u * k + 2u]);
     qsort(want, v->nev, sizeof want[0], by_tick_pitch);
     qsort(got, ncap, sizeof got[0], by_tick_pitch);
-    n = ncap;
-    if (n != v->nev) {
+    for (nw = 0; nw < v->nev && want[nw][0] < cut; nw++)   /* (up to KEY ATTACH's own: attach_from) */
+        ;
+    for (ng = 0; ng < ncap && got[ng][0] < cut; ng++)
+        ;
+    parity_cut_n += v->nev - nw;
+    n = ng;
+    if (n != nw) {
         ok = 0;
         if (verbose)
             printf("    case %u (%s): the firmware played %u notes, shapeChords %u\n", (unsigned)c, ACV_PAT[v->pat],
-                   (unsigned)n, (unsigned)v->nev);
+                   (unsigned)n, (unsigned)nw);
     }
     for (k = 0; ok && k < n; k++) {
         int32_t d = (int32_t)got[k][2] - (int32_t)want[k][2];
@@ -211,17 +242,27 @@ static int parity_case(uint32_t c, int verbose)
         ok = 0;
     return ok;
 }
-static void parity(void)
+static void parity(uint32_t mode)
 {
-    uint32_t c, fails = 0, notes = 0;
-    char line[120];
+    uint32_t c, fails = 0, notes = 0, cases = 0, pend = 0;
+    char line[200];
+    setup_attach = mode;
+    parity_cut = parity_cut_n = 0;
     for (c = 0; c < ACV_N; c++) {
+        if (ACV[c].dir == AD_PEND && ACV[c].bound == AB_WRAP) {   /* superseded: SHAYPE's PEND never wraps */
+            pend++;                                                 /* (tests/arp_window_vectors.h holds PEND) */
+            continue;
+        }
+        cases++;
         notes += ACV[c].nev;
         fails += !parity_case(c, fails < 3u);
     }
-    snprintf(line, sizeof line, "SEQ > ARP: %u cases, %u notes as shapeChords plays the same chords (step, pitch, end, vel)",
-             (unsigned)ACV_N, (unsigned)notes);
+    snprintf(line, sizeof line, "SEQ > ARP, ATTACH %s: %u cases, %u notes as shapeChords plays the same chords (%u cases to a "
+             "mid-pass chord of another size, %u notes after: KEY ATTACH's; %u PEND WRAP: the Windows core's)",
+             mode == AA_NOW ? "NOW" : "NOTE", (unsigned)cases, (unsigned)(notes - parity_cut_n), (unsigned)parity_cut,
+             (unsigned)parity_cut_n, (unsigned)pend);
     bad += check(line, !fails);
+    setup_attach = AA_NOW;
 }
 
 /* ---------------------------------------------------------------- edges --- */
@@ -696,8 +737,9 @@ static void releases(void)
     bad += check("ARP release, the external clock stopped: its first step's notes end at the gate or the release, none "
                  "hang", !fails);
 
-    /* the same pitch a key holds and the arp plays: E let go while the arp sounds E (step 2: E + C) ends that E there and
-     * then; C and G held, the arp plays on without E; the gate's end of the cut E sends nothing more (one note-off) */
+    /* the same pitch a key holds and the arp plays: E let go while the arp sounds E (step 2: E + C, past its first half:
+     * NOW strikes a young step again with the chord left) ends that E there and then; C and G held, the arp plays on
+     * without E; the gate's end of the cut E sends nothing more (one note-off) */
     for (m = 0; m < 3u; m++) {
         uint32_t k, e_on = ~0u, e_ok;
         t = setup(0, AD_UP, 3, 75, 16);
@@ -706,7 +748,7 @@ static void releases(void)
         cap_reset();
         for (k = 0; k < 3u; k++)
             mi(0x90, CEG[k], 100);
-        while (nblk * CTL < p + p / 4u)              /* step 2 (E + C) sounding */
+        while (nblk * CTL < p + 3u * p / 5u)         /* step 2 (E + C) sounding */
             blk1();
         ok = track_gates(t, 64) == (MOUTS[m] != MOUT_EXT) && t->arp_n == 2u;
         mi(0x80, 64, 0);
@@ -805,6 +847,170 @@ static void releases(void)
         song.g[G_CLOCK] = 0;
         bad += check(h ? "ARP, external clock: STOP mid-gate with HOLD on: the notes end; let go, HOLD off: nothing hangs"
                        : "ARP, external clock: STOP mid-gate with the chord held: the notes end; let go: nothing hangs", ok);
+    }
+}
+
+/* ------------------------------------------------------------ KEY ATTACH --- */
+/* KEY ATTACH (P_AATT, SHAYPE's windows/shaype/shaype_engine.c SH_ATTACH_*): UP 4 (a row a step) over C E G, DIR UP,
+ * WRAP, 1/16, GATE 90 %, the transport stopped (the arp from the chord's first block). D F A B (none of C E G's pitch
+ * classes, another size: the pass's offset moves with it) comes in at pass 3 step 1 (tick 13), early in the step
+ * (young: 10 %) or late (60 %); every key is let go at tick 21 (pass 5 step 1). Each step's pitch is the core's for
+ * the chord the mode gives that step (att_want); every note-on one note-off, nothing left sounding or held */
+static const uint8_t DFAB[4] = {62, 65, 69, 71};
+enum { AV_MIDI, AV_KEYS };
+static uint32_t att_want(const uint8_t *c, uint32_t n, uint32_t tick, uint8_t *out)
+{
+    uint8_t held[16], len[ARP_ROWS];
+    uint32_t vn = ash_voicing(c, n, -1, held);
+    return ash_events(&arp_pat[0], tick % 4u, held, vn, ash_offset(&arp_pat[0], 4, tick / 4u, vn, AD_UP, rng), AB_WRAP,
+                      out, len);
+}
+static void att_hold(track_t *t, const uint8_t *c, uint32_t n, uint32_t via, int on)
+{
+    uint32_t i;
+    for (i = 0; i < n; i++)
+        if (via == AV_KEYS)
+            fm1_in.notes = on ? fm1_in.notes | 1u << key_of(t, c[i]) : fm1_in.notes & ~(1u << key_of(t, c[i]));
+        else
+            mi(on ? 0x90 : 0x80, c[i], on ? 100 : 0);
+}
+static int by_on(const void *a, const void *b)
+{
+    const cap_t *x = a, *y = b;
+    return x->on != y->on ? (x->on < y->on ? -1 : 1) : (int)x->pitch - (int)y->pitch;
+}
+static int att_case(uint32_t mode, uint32_t via, uint32_t late, int verbose)
+{
+    static const char *const MN[3] = {"NOW", "NOTE", "CYCLE"};
+    track_t *t;
+    uint32_t p, i, k, chg, lift, ok = 1, nw = 0, w[64][2], tick, pend = 0, last = 0;
+    uint8_t pitch[ARP_ROWS];
+    const char *why = "";
+    setup_attach = mode;
+    t = setup(factory("UP 4"), AD_UP, 5, 90, 16);
+    setup_attach = AA_NOW;
+    t->p[P_AORDER] = AB_WRAP;
+    p = arp_period(t);
+    chg = 13u * p + (late ? 3u * p / 5u : p / 10u);
+    lift = 21u * p + p / 10u;
+    for (i = 0; i < 3u; i++)
+        if (via == AV_KEYS && key_of(t, CEG[i]) == ~0u)
+            return 0;
+    for (i = 0; i < 4u; i++)
+        if (via == AV_KEYS && key_of(t, DFAB[i]) == ~0u)
+            return 0;
+    att_hold(t, CEG, 3, via, 1);
+    while (nblk * CTL + CTL <= chg)
+        blk1();
+    att_hold(t, CEG, 3, via, 0);
+    att_hold(t, DFAB, 4, via, 1);
+    chg = nblk * CTL;                                /* (the block the change lands in) */
+    while (nblk * CTL + CTL <= lift)
+        blk1();
+    att_hold(t, DFAB, 4, via, 0);
+    lift = nblk * CTL;
+    blks(FS / CTL);
+    /* what each step plays: C E G to tick 13; then D F A B (NOW: at once, the young step struck again; NOTE: from tick
+     * 14; CYCLE: from tick 16, the pass's top); let go at 21: NOW and NOTE stop, CYCLE plays its pass out (22, 23) */
+    for (tick = 0; tick < 24u; tick++) {
+        uint32_t newc = tick > 13u ? mode != AA_CYCLE || tick >= 16u : 0u, j, m;
+        if (tick > 21u && mode != AA_CYCLE)
+            break;
+        m = newc ? att_want(DFAB, 4, tick, pitch) : att_want(CEG, 3, tick, pitch);
+        for (j = 0; j < m; j++, nw++)
+            w[nw][0] = tick, w[nw][1] = pitch[j];
+        if (tick == 13u && mode == AA_NOW && !late)  /* (struck again with D F A B) */
+            for (m = att_want(DFAB, 4, tick, pitch), j = 0; j < m; j++, nw++)
+                w[nw][0] = tick, w[nw][1] = pitch[j];
+    }
+    qsort(cap, ncap, sizeof cap[0], by_on);
+    if (ncap != nw)
+        ok = 0, why = "a different number of notes";
+    for (k = 0; ok && k < ncap; k++) {
+        tick = (cap[k].on + CTL) / p;
+        if (tick != w[k][0] || cap[k].pitch != w[k][1])
+            ok = 0, why = "a step played another pitch";
+        if (tick == 13u && cap[k].on < chg) {        /* the step the chord changed in: its first note */
+            uint32_t cut = mode == AA_NOW && (!late || cap[k].pitch % 12u == 0u || cap[k].pitch % 12u == 4u ||
+                                              cap[k].pitch % 12u == 7u);   /* (NOW, late: a key let go ends its pitch) */
+            if (cut ? cap[k].off != chg : cap[k].off <= chg)
+                ok = 0, why = cut ? "NOW: the struck note did not end at the change" : "the sounding note did not play on";
+        }
+        if (cap[k].on >= chg && cap[k].on < 14u * p - CTL && !(mode == AA_NOW && !late))
+            ok = 0, why = "a note struck between the change and the next step";
+        if (cap[k].on <= lift)
+            pend = k;
+        last = cap[k].on > last ? cap[k].on : last;
+    }
+    if (ok && ncap) {                                /* the step sounding when every key was let go */
+        uint32_t off = cap[pend].off;
+        if (mode == AA_NOW ? off != lift : off <= lift)
+            ok = 0, why = mode == AA_NOW ? "NOW: let go, the note did not end at once" : "let go, the last note did not ring";
+    }
+    if (ok && (cap_hanging() || cap_open_offs || mout_holding() || t->arp_n || track_gates(t, 128)))
+        ok = 0, why = "a note left hanging, or a note-off for nothing";
+    if (!ok && verbose)
+        printf("    ATTACH %s, %s, change %s: %s (%u notes, want %u; hanging %u, offs for nothing %u, arp_n %u)\n", MN[mode],
+               via == AV_KEYS ? "keys" : "MIDI", late ? "late" : "young", why, (unsigned)ncap, (unsigned)nw,
+               (unsigned)cap_hanging(), (unsigned)cap_open_offs, (unsigned)t->arp_n);
+    fm1_in.notes = 0;
+    return ok;
+}
+/* the sequencer's chords, CYCLE: C E G on steps 0..12, D F A B 13..21, then rests, the transport playing (arp and
+ * sequencer both 1/16): the pass playing keeps C E G to tick 15, D F A B from 16; the chord over at 22, mid-pass, the
+ * pass plays out (22, 23) and the arp stops, every note one note-off */
+static int att_seq(int verbose)
+{
+    track_t *t;
+    uint32_t p, k, tick, nw = 0, w[64][2], ok = 1, t0;
+    uint8_t pitch[ARP_ROWS];
+    setup_attach = AA_CYCLE;
+    t = setup(factory("UP 4"), AD_UP, 5, 90, 32);
+    setup_attach = AA_NOW;
+    t->p[P_AORDER] = AB_WRAP;
+    chord_steps(t, CEG, 3, 0, 13, 100);
+    chord_steps(t, DFAB, 4, 13, 22, 100);
+    p = arp_period(t);
+    transport_req = 1;
+    while (nblk * CTL < 30u * p)
+        blk1();
+    transport_req = 2;
+    blks(FS / CTL);
+    for (tick = 0; tick < 24u; tick++) {
+        uint32_t j, m = tick >= 16u ? att_want(DFAB, 4, tick, pitch) : att_want(CEG, 3, tick, pitch);
+        for (j = 0; j < m; j++, nw++)
+            w[nw][0] = tick, w[nw][1] = pitch[j];
+    }
+    qsort(cap, ncap, sizeof cap[0], by_on);
+    ok = ncap == nw;
+    t0 = ncap ? cap[0].on : 0u;
+    for (k = 0; ok && k < ncap; k++)
+        ok = (cap[k].on - t0 + CTL) / p == w[k][0] && cap[k].pitch == w[k][1];
+    ok &= !cap_hanging() && !cap_open_offs && !mout_holding() && !t->arp_n;
+    if (!ok && verbose)
+        printf("    ATTACH CYCLE, the sequencer's chords: %u notes, want %u (hanging %u, offs for nothing %u)\n",
+               (unsigned)ncap, (unsigned)nw, (unsigned)cap_hanging(), (unsigned)cap_open_offs);
+    return ok;
+}
+static void attach(void)
+{
+    uint32_t m, v, l, fails = 0, cases = 0;
+    for (m = AA_NOW; m <= AA_CYCLE; m++)
+        for (v = 0; v < 2u; v++)
+            for (l = 0; l < 2u; l++) {
+                fails += !att_case(m, v, l, fails < 4u);
+                cases++;
+            }
+    bad += check("KEY ATTACH NOW / NOTE / CYCLE, MIDI and the keys: D F A B for C E G mid-pass, young and late in the step, "
+                 "then every key let go: each step's notes as the mode gives them, every note-on one note-off", !fails);
+    printf("    (%u KEY ATTACH cases)\n", (unsigned)cases);
+    bad += check("KEY ATTACH CYCLE, the sequencer's chords: the pass keeps its chord, the next takes the new one; the chord "
+                 "over mid-pass, the pass plays out, nothing hangs", att_seq(1));
+    {   /* the default: a new track, and an older project's 127 (projects: tests/project_test.c), are NOTE */
+        track_t *t = setup(0, AD_UP, 3, 75, 16);
+        ui_power_on();
+        bad += check("KEY ATTACH: NOTE by default (ATTACH on ARP 3, knob 4)", TP[P_AATT].def == AA_NOTE &&
+                     trk[0].p[P_AATT] == AA_NOTE && param_fit(&TP[P_AATT], 127) == AA_NOTE && t == &trk[0]);
     }
 }
 
@@ -1004,13 +1210,15 @@ static void soak(void)
 
 int main(void)
 {
-    parity();
+    parity(AA_NOTE);
+    parity(AA_NOW);
     edges();
     ext_clock(0);
     ext_clock(1);
     recording();
     step_rec();
     releases();
+    attach();
     soak_releases();
     soak();
     if (bad) {

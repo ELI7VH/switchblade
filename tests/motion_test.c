@@ -154,6 +154,7 @@ static void arp_chord(track_t *t, const uint8_t *notes, uint32_t n)
 {
     uint32_t i;
     arp_silence(t);
+    arp_forget(t);                                   /* (a chord from nothing: KEY ATTACH holds none) */
     t->nheld = 0; t->arp_phys = 0;
     for (i = 0; i < n; i++)
         arp_add(t, notes[i]);
@@ -209,20 +210,32 @@ static int shape_arp(void)
     ok &= t->arp_n == 0u;
     bad += check("  a note two steps long sounds 1.5 steps at GATE 75 %", ok);
     ash_load(&arp_pat[0], 0);
-    /* let go: the notes end; HOLD: the chord stays, the next press replaces it from step 1 */
+    /* let go: KEY ATTACH NOW, the notes end; NOTE (the default), they ring to their gate and the arp stops. HOLD: the
+     * chord stays, the next press takes over (NOTE: at the next step) */
+    t->p[P_AATT] = AA_NOW;
     arp_chord(t, CEG, 3);
     arp_next(t, got);
     for (i = 0; i < 3u; i++) arp_remove(t, CEG[i]);
     arp_tick(t, CTL);
-    bad += check("  the keys let go: nothing sounds, nothing held", !t->nheld && !t->arp_n);
+    bad += check("  the keys let go, ATTACH NOW: nothing sounds, nothing held", !t->nheld && !t->arp_n);
+    t->p[P_AATT] = AA_NOTE;
+    arp_chord(t, CEG, 3);
+    arp_next(t, got);
+    for (i = 0; i < 3u; i++) arp_remove(t, CEG[i]);
+    arp_tick(t, CTL);
+    ok = !t->nheld && t->arp_n == 2u;
+    for (k = 0; k < 11025u / CTL; k++)
+        arp_tick(t, CTL);
+    bad += check("  .. ATTACH NOTE: the step's notes ring to their gate, then nothing sounds, nothing new",
+                 ok && !t->arp_n && !arp_att[0].n);
     t->p[P_AHOLD] = 1;
     arp_chord(t, CEG, 3);
     for (i = 0; i < 3u; i++) arp_remove(t, CEG[i]);
     ok = t->nheld == 3u && arp_seq(t, (const uint8_t[]){60, 67, 64, 60}, 2, 2);   /* (C E G: row 3 wraps to C) */
     arp_add(t, 62); arp_add(t, 65); arp_add(t, 69);
-    ok &= t->nheld == 3u && arp_seq(t, (const uint8_t[]){62, 69}, 1, 2);
+    ok &= t->nheld == 3u && arp_seq(t, (const uint8_t[]){69, 62}, 1, 2);   /* (the third step over D F A: A, D wrapped) */
     for (i = 0; i < 3u; i++) arp_remove(t, (uint32_t[]){62, 65, 69}[i]);
-    bad += check("  HOLD: the chord stays after the keys; a new one replaces it from the first step", ok && t->nheld == 3u);
+    bad += check("  HOLD: the chord stays after the keys; a new one takes over at the next step (ATTACH NOTE)", ok && t->nheld == 3u);
     t->p[P_AHOLD] = 0;
     t->nheld = 0; arp_tick(t, CTL);
     /* recording (WaveLoop): the chord played is written, not what the arp plays: C E G pressed into step 1, the arp

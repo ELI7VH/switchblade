@@ -71,12 +71,13 @@ enum {                          /* per-track parameters */
     P_E0, P_E1, P_E2, P_E3, P_E4, P_E5, P_E6, P_E7,
     P_COUNT
 };
-/* WaveLoop: three of the retired DRUM lanes' ids hold the ARP's ROOT (OFF, C..B), PAT (the factory pattern last
- * loaded, 0 USER) and OCT (-3..+3: the octaves its notes sound up or down, OP3 on the ARP pages). Every older project
+/* WaveLoop: four of the retired DRUM lanes' ids hold the ARP's ROOT (OFF, C..B), PAT (the factory pattern last
+ * loaded, 0 USER), OCT (-3..+3: the octaves its notes sound up or down, OP3 on the ARP pages) and ATTACH (KEY ATTACH). Every older project
  * and user preset holds 127 there (param_fit reads it as the default) */
 #define P_AROOT (P_RSV_LN + 2)
 #define P_APAT (P_RSV_LN + 3)
 #define P_AXOCT (P_RSV_LN + 4)
+#define P_AATT (P_RSV_LN + 5)   /* WaveLoop: the ARP's KEY ATTACH (arp_shape.c AA_*: NOW NOTE CYCLE; an older project's 127: NOTE) */
 
 enum {                          /* global parameters */
     G_BPM, G_SWING, G_CLOCK, G_TUNE,

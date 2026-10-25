@@ -86,6 +86,7 @@ static void key_events_test(void)
     t->p[P_AMODE] = 1;
     ash_load(&arp_pat[trk_index(t)], 1);    /* (WaveLoop: SHAYPE's UP 4) */
     t->p[P_APROB] = 4; t->p[P_AGATE] = 75;
+    t->p[P_AATT] = AA_NOW;                  /* (KEY ATTACH NOW: the key let go ends the arp's note of its pitch at once) */
     song.rec = 1;
     seq_start();                           /* (WaveLoop: the arp's grid from PLAY) */
     fm1_in.notes = 1u << 8;                /* C# is silent */
@@ -269,6 +270,7 @@ static int arp_is(track_t *t, uint32_t a, uint32_t b)   /* UP over two notes: a 
 static void arp_reset(track_t *t)
 {
     memset(trk, 0, sizeof trk);
+    memset(arp_att, 0, sizeof arp_att);            /* (KEY ATTACH: no chord playing) */
     memset(&song, 0, sizeof song);
     host_tracks_init();
     kb_prev = 0;

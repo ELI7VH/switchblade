@@ -41,7 +41,8 @@ static uint32_t arp_cur(void) { return ui.arp.cur % arp_steps(TSEL); }   /* (STE
 static int32_t arp_playing(void)
 {
     const track_t *t = TSEL;
-    if (!t->p[P_AMODE] || !arp_fed(t) || t->arp_idx == 0xFFFFFFFFu)   /* (keys, MIDI or the sequencer's chord) */
+    if (!t->p[P_AMODE] || (!arp_fed(t) && !arp_att[song.sel % NTRK].n) || t->arp_idx == 0xFFFFFFFFu)   /* (keys, MIDI or the
+                                                     * sequencer's chord, or the one KEY ATTACH still plays) */
         return -1;
     return (int32_t)(t->arp_idx % arp_steps(t));
 }
@@ -97,6 +98,13 @@ static void arp_dir_say(uint32_t v)
     static const char *const SAY[6] = {"UP: A ROW UP A PASS", "DOWN: A ROW DOWN", "PEND: UP, THEN DOWN",
                                        "RAND: A RANDOM ROW", "WYNDO: SHAPE CLIMBS", "SHYFT: WINDOW CLIMBS"};
     if (v < 6u)
+        ui_message(SAY[v]);
+}
+/* ATTACH turned (edit_param): when a key reaches the arp, in the top bar */
+static void arp_attach_say(uint32_t v)
+{
+    static const char *const SAY[3] = {"NOW: KEYS AT ONCE", "NOTE: AT NEXT STEP", "CYCLE: AT NEXT PASS"};
+    if (v < 3u)
         ui_message(SAY[v]);
 }
 /* STEPS turned (edit_param): the toy's rule for a shorter grid, notes past the end go, notes over it are cut */
