@@ -43,7 +43,10 @@
 # SEQ > ARP (tests/arp_seq_test.c, WaveLoop): the sequencer's chords played through the arp against the toy's shapeChords
 #                   (tests/arp_chords_vectors.h, tools/arp_vectors.mjs --chords), its edges (ARP off, live notes, HOLD, the
 #                   chord's end, STOP, ARP switched, the external clock), recording the chords with the ARP on, MIDI live and
-#                   step recording on the routed track, and a 40 s soak where nothing may hang.
+#                   step recording on the routed track, and a 40 s soak where nothing may hang. Releases: the chord let go
+#                   in every block of a step and at the edges of its gate (MOUT INT / EXT / BOTH, HOLD, MIDI / keys, the
+#                   external clock stopped, CC123, a key of a pitch the arp sounds): the arp's notes end with it, one
+#                   note-off each; a 40 s soak of chords let go anywhere in a step.
 # CHORD (tests/chord_test.c): the chord keys (src/chord.c): diatonic triads / sevenths of several scales and roots,
 #                   the fixed shapes and voicings (at most 4 notes), names, MONO plays the root, a release ends
 #                   exactly what its key / MIDI note started, recording, the ARP, MIDI IN.
@@ -264,7 +267,7 @@ if [ -f build/gen/felucca_tables.h ]; then
     $CC -O1 -w -Ibuild/gen -Ifirmware/src -o "$OUT/motion_test" tests/motion_test.c -lm
     run "motion, whole-step chance, FUN7 migration, song restore, the ARP (SHAYPE) on a track: chord, steps, gates, HOLD, ROOT, recording" "$OUT/motion_test"
     $CC -O1 -w -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/arp_seq_test" tests/arp_seq_test.c -lm
-    run "SEQ > ARP: the sequence's chords through SHAYPE as shapeChords plays them, edges, MIDI live / step recording, the soak" "$OUT/arp_seq_test"
+    run "SEQ > ARP: the sequence's chords through SHAYPE as shapeChords plays them, edges, MIDI live / step recording, releases mid-step, the soaks" "$OUT/arp_seq_test"
     $CC -O1 -w -Ibuild/gen -Ifirmware/src -o "$OUT/ratchet_test" tests/ratchet_test.c -lm
     run "RATCH: x1..x4 in a step (notes, chords), gates, chance, swing, projects, user presets, AUTOMATION RATCH rows" "$OUT/ratchet_test"
     $CC -O1 -w -Ibuild/gen -Ifirmware/src -o "$OUT/step15_test" tests/step15_test.c -lm

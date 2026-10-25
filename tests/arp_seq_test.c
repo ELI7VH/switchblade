@@ -548,6 +548,354 @@ static void step_rec(void)
     song.rec = 0;
 }
 
+/* ---------------------------------------------------------------- releases --- */
+/* The FM-1 report of 2026-10-25 (firmware f673da0, fm1-builds/shaype-test/run.py): SHAYPE on track 1, STEPS 4, RATE
+ * 1/8 at 120 BPM, UP, WRAP, GATE 75 %, HOLD off, MOUT BOTH, stopped, internal clock; C E G held over USB MIDI from 0 s
+ * and let go at 3.40 s, in the middle of the step that started at 3.25 s (C + E). Its notes must end there, on MIDI OUT
+ * and on the machine's voices, every note-on with exactly one note-off. (On the unit they came back stamped 4.005 s:
+ * run.py reads what came in only after its 0.6 s sleep, so that was the reading's time, not the FM-1's.)
+ * Each case: the chord in (MIDI channel 1, or the FM-1's own keys), let go at rel samples, HOLD on (then off a step
+ * later) or off; then a second of nothing. Checked: the chord gone, nothing the arp played sounds in that same block
+ * (arp_snd empty, no gate, MIDI OUT holding nothing, every captured note-on closed and none closed twice), no note
+ * starts after it, and the voices' notes match MIDI OUT's (BOTH). Fails print why (verbose). */
+static uint32_t rnd(uint32_t n);
+enum { RL_MIDI, RL_KEYS };
+static uint32_t key_of(const track_t *t, uint32_t note)   /* the key that plays note on t now (-1: none) */
+{
+    uint32_t k;
+    for (k = 0; k < 27u; k++)
+        if (kb_map(t, k) == note)
+            return k;
+    return ~0u;
+}
+static uint32_t track_gates(const track_t *t, uint32_t note)   /* t's voices with their gate on (note: any if 128) */
+{
+    uint32_t i, n = 0;
+    for (i = 0; i < NVOICE; i++)
+        n += t->v[i].gate && (note > 127u || t->v[i].note == note);
+    return n;
+}
+static int rel_quiet(const track_t *t)               /* nothing the arp started still sounds or is held out there */
+{
+    return !t->arp_n && !track_gates(t, 128) && !mout_holding() && !cap_hanging() && !cap_open_offs;
+}
+static int rel_case(uint32_t rel, uint32_t mout, uint32_t hold, uint32_t via, uint32_t ext, int verbose)
+{
+    track_t *t = setup(0, AD_UP, 3, 75, 16);         /* SHAYPE, 1/8, UP, GATE 75 % (WRAP, 4 steps: its own) */
+    uint32_t i, n0, keys = 0, ok = 1, both_bad = 0;
+    const char *why = "";
+    t->p[P_MOUT] = (int16_t)mout;
+    t->p[P_AHOLD] = (int16_t)hold;
+    song.g[G_CLOCK] = (int16_t)ext;                  /* (external: never started, the transport stays stopped) */
+    events_block(CTL);
+    cap_reset();
+    for (i = 0; i < 3u; i++)
+        if (via == RL_KEYS)
+            keys |= 1u << key_of(t, CEG[i]);
+        else
+            mi(0x90, CEG[i], 100);
+    fm1_in.notes = keys;
+    while (nblk * CTL < rel) {
+        blk1();
+        if (mout == MOUT_BOTH) {                     /* the machine sounds exactly what MIDI OUT holds */
+            uint32_t k;
+            for (k = 0; k < 3u; k++)
+                both_bad += !track_gates(t, CEG[k]) != !((mout_held[0][CEG[k] >> 3] >> (CEG[k] & 7u)) & 1u);
+        }
+    }
+    if (!ncap && mout != MOUT_INT) {
+        ok = 0;
+        why = "the arp played nothing";
+    }
+    if (via == RL_KEYS)
+        fm1_in.notes = 0;
+    else
+        for (i = 0; i < 3u; i++)
+            mi(0x80, CEG[i], 0);
+    blk1();
+    if (!hold && ok && !rel_quiet(t)) {
+        ok = 0;
+        why = "the chord let go, the arp's notes still sound";
+    }
+    if (hold) {                                      /* latched: it plays on; HOLD off ends it at once */
+        n0 = ncap;
+        blks(2u * arp_period(t) / CTL + 2u);
+        if (ok && (!t->nheld || (mout != MOUT_INT && !ext && ncap == n0))) {   /* (stopped external clock: latched, still) */
+            ok = 0;
+            why = "HOLD: the latched chord did not play on";
+        }
+        t->p[P_AHOLD] = 0;
+        blk1();
+        if (ok && !rel_quiet(t)) {
+            ok = 0;
+            why = "HOLD off, the arp's notes still sound";
+        }
+    }
+    n0 = ncap;
+    blks(FS / CTL);
+    if (ok && (ncap != n0 || !rel_quiet(t) || t->nheld)) {
+        ok = 0;
+        why = "a note after the chord was gone, or one left hanging";
+    }
+    if (ok && both_bad) {
+        ok = 0;
+        why = "BOTH: the voices and MIDI OUT disagree";
+    }
+    if (!ok && verbose)
+        printf("    release at %u samples (%.3f s), MOUT %u, HOLD %u, %s%s: %s (arp_n %u, gates %u, MIDI OUT holding %u, "
+               "hanging %u, offs for nothing %u)\n", (unsigned)rel, rel / (double)FS, (unsigned)mout, (unsigned)hold,
+               via == RL_KEYS ? "keys" : "MIDI", ext ? ", external clock stopped" : "", why, (unsigned)t->arp_n,
+               (unsigned)track_gates(t, 128), (unsigned)mout_holding(), (unsigned)cap_hanging(), (unsigned)cap_open_offs);
+    song.g[G_CLOCK] = 0;
+    fm1_in.notes = 0;
+    return ok;
+}
+static void releases(void)
+{
+    static const uint8_t MOUTS[3] = {MOUT_INT, MOUT_EXT, MOUT_BOTH};
+    track_t *t = setup(0, AD_UP, 3, 75, 16);
+    uint32_t p = arp_period(t), m, h, v, off, fails = 0, cases = 0, ok;
+    /* the unit's own case first: let go at 3.40 s, in step 14 (3.25 s: C + E sounding). Their note-offs at the
+     * release, on MIDI OUT and the voices */
+    {
+        uint32_t rel = (uint32_t)(3.40 * FS), k, ends = 0;
+        ok = rel_case(rel, MOUT_BOTH, 0, RL_MIDI, 0, 1);
+        for (k = 0; k < ncap; k++)
+            if (cap[k].on >= 13u * p - CTL && cap[k].on < 14u * p)
+                ends += (cap[k].pitch == 60 || cap[k].pitch == 64) && cap[k].off / CTL == rel / CTL + (rel % CTL != 0u);
+        bad += check("ARP release (the FM-1's case): C E G let go at 3.40 s, step 14's C + E end in that block on MIDI OUT "
+                     "and the voices, every note-on one note-off", ok && ends == 2u);
+    }
+    /* every block of a step (from its start to the next one's), MOUT BOTH, MIDI, HOLD off: on the step boundary too */
+    for (off = 0; off <= p + CTL; off += CTL) {
+        fails += !rel_case(p + off, MOUT_BOTH, 0, RL_MIDI, 0, fails < 3u);
+        cases++;
+    }
+    /* the rest of the matrix at the edges of a step and its gate: INT / EXT / BOTH, HOLD on / off, MIDI / keys */
+    for (m = 0; m < 3u; m++)
+        for (h = 0; h < 2u; h++)
+            for (v = 0; v < 2u; v++) {
+                uint32_t g = p * 3u / 4u, at[8] = {0, CTL, g - CTL, g, g + CTL, p / 2u, p - CTL, p}, j;
+                for (j = 0; j < 8u; j++) {
+                    fails += !rel_case(5u * p + at[j], MOUTS[m], h, v, 0, fails < 3u);
+                    cases++;
+                }
+            }
+    bad += check("ARP release mid-step: every block of a step and the edges of its gate, MOUT INT / EXT / BOTH, HOLD on / "
+                 "off, MIDI / the keys: the arp's notes end with the chord, no hang, no double note-off", !fails);
+    printf("    (%u release cases)\n", (unsigned)cases);
+
+    /* the external clock selected, stopped: the chord plays its first step, the gate still ends in real time; let go
+     * mid-gate and after it */
+    fails = 0;
+    for (m = 0; m < 3u; m++)
+        for (h = 0; h < 2u; h++) {
+            fails += !rel_case(p / 4u, MOUTS[m], h, RL_MIDI, 1, fails < 3u);
+            fails += !rel_case(2u * p + p / 3u, MOUTS[m], h, RL_MIDI, 1, fails < 3u);
+        }
+    bad += check("ARP release, the external clock stopped: its first step's notes end at the gate or the release, none "
+                 "hang", !fails);
+
+    /* the same pitch a key holds and the arp plays: E let go while the arp sounds E (step 2: E + C) ends that E there and
+     * then; C and G held, the arp plays on without E; the gate's end of the cut E sends nothing more (one note-off) */
+    for (m = 0; m < 3u; m++) {
+        uint32_t k, e_on = ~0u, e_ok;
+        t = setup(0, AD_UP, 3, 75, 16);
+        t->p[P_MOUT] = MOUTS[m];
+        events_block(CTL);
+        cap_reset();
+        for (k = 0; k < 3u; k++)
+            mi(0x90, CEG[k], 100);
+        while (nblk * CTL < p + p / 4u)              /* step 2 (E + C) sounding */
+            blk1();
+        ok = track_gates(t, 64) == (MOUTS[m] != MOUT_EXT) && t->arp_n == 2u;
+        mi(0x80, 64, 0);
+        blk1();
+        ok &= !track_gates(t, 64) && !((mout_held[0][64 >> 3] >> (64 & 7)) & 1u);
+        ok &= MOUTS[m] == MOUT_EXT || track_gates(t, 60) == 1u;   /* (C plays on to its gate) */
+        for (k = 0; k < ncap; k++)
+            if (cap[k].pitch == 64)
+                e_on = k;
+        e_ok = MOUTS[m] == MOUT_INT || (e_on != ~0u && cap[e_on].off == (nblk - 1u) * CTL);
+        {
+            uint32_t n0 = ncap;
+            blks(6u * p / CTL);                      /* six more steps over C G */
+            for (k = n0; k < ncap; k++)
+                ok &= cap[k].pitch != 64;
+            ok &= MOUTS[m] == MOUT_INT || ncap > n0;
+        }
+        mi(0x80, 60, 0);
+        mi(0x80, 67, 0);
+        blk1();
+        ok &= rel_quiet(t);
+        blks(FS / CTL);
+        ok &= rel_quiet(t) && e_ok;
+        if (!ok)
+            printf("    same pitch, MOUT %u: E gates %u, arp_n %u, MIDI OUT holding %u, hanging %u, offs for nothing %u\n",
+                   (unsigned)MOUTS[m], (unsigned)track_gates(t, 64), (unsigned)t->arp_n, (unsigned)mout_holding(),
+                   (unsigned)cap_hanging(), (unsigned)cap_open_offs);
+        bad += check(MOUTS[m] == MOUT_INT ? "ARP: a key let go while the arp sounds its pitch ends that voice; the rest play "
+                                            "on, nothing hangs (MOUT INT)"
+                     : MOUTS[m] == MOUT_EXT ? "ARP: .. its MIDI OUT note ends there, one note-off; the rest play on (MOUT EXT)"
+                                            : "ARP: .. the voice and the MIDI OUT note together, one note-off (MOUT BOTH)",
+                     ok);
+    }
+
+    fails = 0;
+    /* All Notes Off (CC123) on channel 1 mid-gate, the chord still held (and latched with HOLD): the arp lets go at once,
+     * MIDI OUT and the voices; the note-offs after it send nothing more */
+    for (m = 0; m < 3u; m++)
+        for (h = 0; h < 2u; h++) {
+            t = setup(0, AD_UP, 3, 75, 16);
+            t->p[P_MOUT] = MOUTS[m];
+            t->p[P_AHOLD] = (int16_t)h;
+            events_block(CTL);
+            cap_reset();
+            mi(0x90, 60, 100); mi(0x90, 64, 100); mi(0x90, 67, 100);
+            while (nblk * CTL < 2u * p + p / 3u)
+                blk1();
+            ok = t->arp_n != 0u;
+            mi(0xB0, 123, 0);
+            blk1();
+            ok &= rel_quiet(t) && !t->nheld;
+            mi(0x80, 60, 0); mi(0x80, 64, 0); mi(0x80, 67, 0);
+            blks(FS / CTL);
+            ok &= rel_quiet(t);
+            t->p[P_AHOLD] = 0;
+            blks(2);
+            fails += !ok;
+            if (!ok)
+                printf("    CC123, MOUT %u, HOLD %u: arp_n %u, gates %u, MIDI OUT holding %u, offs for nothing %u\n",
+                       (unsigned)MOUTS[m], (unsigned)h, (unsigned)t->arp_n, (unsigned)track_gates(t, 128),
+                       (unsigned)mout_holding(), (unsigned)cap_open_offs);
+        }
+    bad += check("ARP: All Notes Off (CC123) mid-gate, the chord held or latched: the arp's notes end at once (MIDI OUT, "
+                 "voices), MOUT INT / EXT / BOTH", !fails);
+
+    /* the external clock running, stopped (0xFC) mid-gate with the chord held, then let go; with HOLD too */
+    for (h = 0; h < 2u; h++) {
+        uint32_t i, at = 10u;
+        t = setup(0, AD_UP, 5, 75, 64);
+        t->p[P_MOUT] = MOUT_BOTH;
+        t->p[P_AHOLD] = (int16_t)h;
+        song.g[G_CLOCK] = 1;
+        events_block(CTL);
+        cap_reset();
+        fm1_ms = at;
+        mi(0x90, 60, 100); mi(0x90, 64, 100); mi(0x90, 67, 100);
+        mi(0xFA, 0, 0);
+        blk1();
+        for (i = 0; i < 6u * 9u + 2u; i++) {         /* 9 1/16 steps and a bit: the stop lands inside a gate */
+            at += 21u;
+            mi(0xF8, 0, 0);
+            while (fm1_ms < at) {
+                fm1_ms++;
+                blk1();
+            }
+        }
+        ok = t->arp_n != 0u;
+        mi(0xFC, 0, 0);
+        blk1();
+        ok &= rel_quiet(t);
+        mi(0x80, 60, 0); mi(0x80, 64, 0); mi(0x80, 67, 0);
+        blks(4);
+        t->p[P_AHOLD] = 0;
+        blks(FS / CTL);
+        ok &= rel_quiet(t) && !t->nheld;
+        song.g[G_CLOCK] = 0;
+        bad += check(h ? "ARP, external clock: STOP mid-gate with HOLD on: the notes end; let go, HOLD off: nothing hangs"
+                       : "ARP, external clock: STOP mid-gate with the chord held: the notes end; let go: nothing hangs", ok);
+    }
+}
+
+/* the soak, releases only: 40 s of chords (1..4 notes, MIDI channel 1 and the keys) held for random times, so they are
+ * let go anywhere in a step and its gate, RATE / GATE / PAT / DIR, HOLD, MOUT, MONO / LEGATO / POLY and the transport
+ * moved now and then. After every block in which the chord is gone (HOLD off): nothing the arp played sounds on
+ * track 1 (no gate, MIDI OUT holding nothing, arp_snd empty) */
+static void soak_releases(void)
+{
+    static const uint8_t VM[3] = {V_POLY, V_MONO, V_LEGATO};
+    track_t *t = setup(0, AD_UP, 3, 75, 16);
+    uint8_t held[4];
+    uint32_t nh = 0, k, i, viol = 0, rels = 0, until = 0, keys = 0;
+    for (k = 0; k < 40u * FS / CTL; k++) {
+        uint32_t r = rnd(1000);
+        if (!nh && !keys && k >= until) {            /* a new chord, held for 1..1200 ms */
+            uint32_t n = 1u + rnd(4);
+            if (rnd(4) == 0u) {
+                for (i = 0; i < n; i++)
+                    keys |= 1u << rnd(16);
+                fm1_in.notes = keys;
+            } else
+                for (i = 0; i < n; i++) {
+                    uint32_t note = 48u + rnd(30), j;
+                    for (j = 0; j < nh && held[j] != note; j++)
+                        ;
+                    if (j == nh) {
+                        held[nh++] = (uint8_t)note;
+                        mi(0x90, note, 1u + rnd(127));
+                    }
+                }
+            until = k + 1u + rnd(1200u * FS / 1000u / CTL);
+        } else if ((nh || keys) && k >= until) {    /* let go: all at once, or one by one over a few blocks */
+            if (keys) {
+                keys = 0;
+                fm1_in.notes = 0;
+            } else if (rnd(2)) {
+                while (nh)
+                    mi(0x80, held[--nh], 0);
+            } else
+                mi(0x80, held[--nh], 0);
+            rels++;
+            until = nh ? k + rnd(3) : k + rnd(400u * FS / 1000u / CTL);
+        }
+        if (r == 0u)
+            t->p[P_ARATE] = (int16_t)rnd(8);
+        else if (r == 1u)
+            t->p[P_AGATE] = (int16_t)(10 + rnd(91));
+        else if (r == 2u) {
+            ash_load(&arp_pat[0], rnd(ARP_NFACTORY));
+            t->p[P_APROB] = (int16_t)(1 + rnd(8));
+            t->p[P_AOCT] = (int16_t)rnd(4);
+        } else if (r == 3u && !rnd(4))
+            t->p[P_AHOLD] ^= 1;
+        else if (r == 4u)
+            t->p[P_MOUT] = (int16_t)rnd(3);
+        else if (r == 5u && !rnd(4))
+            t->p[P_VOICE] = VM[rnd(3)];
+        else if (r == 6u && !rnd(4))
+            transport_req = song.playing ? 2u : 1u;
+        fm1_ms = k * CTL * 1000u / FS;
+        blk1();
+        if (!t->p[P_AHOLD] && !t->nheld && !(t->seq_arp && t->seq_n)) {
+            uint32_t g = track_gates(t, 128);
+            if (t->arp_n || g || mout_holding()) {
+                if (viol < 3u)
+                    printf("    soak block %u: the chord gone, arp_n %u, gates %u, MIDI OUT holding %u (MOUT %d, VOICE %d)\n",
+                           (unsigned)k, (unsigned)t->arp_n, (unsigned)g, (unsigned)mout_holding(), t->p[P_MOUT],
+                           t->p[P_VOICE]);
+                viol++;
+            }
+        }
+        if (ncap > CAP_N - 64u) {
+            uint32_t j = 0;
+            for (i = 0; i < ncap; i++)
+                if (cap[i].off == ~0u)
+                    cap[j++] = cap[i];
+            ncap = j;
+        }
+    }
+    fm1_in.notes = 0;
+    while (nh)
+        mi(0x80, held[--nh], 0);
+    t->p[P_AHOLD] = 0;
+    transport_req = 2;
+    blks(FS / CTL);
+    viol += !rel_quiet(t) || t->nheld;
+    bad += check("soak, releases: 40 s of chords let go anywhere in a step (MIDI, keys, HOLD, MOUT, RATE, GATE, PAT, VOICE, "
+                 "transport): once the chord is gone nothing the arp played sounds or hangs", !viol && rels > 50u);
+}
+
 /* ------------------------------------------------------------------- soak --- */
 static uint32_t rs = 0x2545F491u;
 static uint32_t rnd(uint32_t n)
@@ -662,6 +1010,8 @@ int main(void)
     ext_clock(1);
     recording();
     step_rec();
+    releases();
+    soak_releases();
     soak();
     if (bad) {
         printf("ARP SEQ TEST FAILED (%d)\n", bad);
