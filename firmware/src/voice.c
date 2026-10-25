@@ -665,6 +665,13 @@ static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
         midi_bend_q8[ti] += d > 0 ? (d < 4 ? d : (d + 3) / 4) : (d > -4 ? d : (d - 3) / 4);
     }
     bend = midi_bend_q8[ti];
+    if (t->mw) {                                        /* WaveLoop: the mod wheel is a vibrato on every machine, on
+                                                         * top of the matrix's MODW: ~5.4 Hz (a 256-step sine, a step a
+                                                         * block), up to +-1/2 semitone at the top, the wheel squared
+                                                         * (fine at the bottom); 0: none, bit for bit as before */
+        t->vib_ph++;
+        bend += (osc_sine((uint32_t)t->vib_ph << 24) * (int32_t)t->mw * (int32_t)t->mw) >> 22;
+    }
     bend16 = bend >= 0 ? bend / 16 : -((-bend + 15) / 16);
     bend_fine = (bend - bend16 * 16) * 2367 / 2560;
     uint32_t nr = 0, fade = t->xf_on && t->xf;

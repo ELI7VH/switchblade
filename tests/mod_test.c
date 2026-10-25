@@ -140,6 +140,8 @@ static uint64_t phrase_child(uint32_t k)
             slot(&trk[0], 2, MS_LFO, MD_E1 + 4, -50);
             slot(&trk[0], 3, MS_ENV, MD_REV, 30);
             trk[0].mw = 100;
+        } else if (k == 3u || k == 4u) {           /* WaveLoop build: the mod wheel alone (no slot), its vibrato */
+            trk[0].mw = k == 3u ? 100u : 30u;
         }
         memcpy(keep, trk[0].p, sizeof keep);
         h = phrase();
@@ -159,9 +161,38 @@ static uint64_t phrase_child(uint32_t k)
 
 static void test_off(void)
 {
-    uint64_t h0 = phrase_child(0), h1 = phrase_child(1), h2 = phrase_child(2);
+    uint64_t h0 = phrase_child(0), h1 = phrase_child(1), h2 = phrase_child(2), h3 = phrase_child(3), h4 = phrase_child(4);
     check("slots that do nothing: bit-identical to the matrix off", h0 && h0 == h1);
     check("an active matrix changes the sound, and leaves no modulated value in p[]", h2 && h2 != h0);
+    check("WaveLoop: the mod wheel alone (no MODW slot) is a vibrato: the sound changes, more wheel another", h3 && h4 &&
+          h3 != h0 && h4 != h0 && h3 != h4);
+}
+/* WaveLoop build: the mod wheel's vibrato (voice.c track_render): its phase runs only while the wheel is up, ~5.4 Hz, at
+ * most +-1/2 semitone (Q8: 128), the wheel squared */
+static void test_wheel_vibrato(void)
+{
+    track_t *t = &trk[0];
+    int32_t lo = 0, hi = 0, x;
+    uint32_t i;
+    fresh(0, 0);
+    t->mw = 0;
+    t->vib_ph = 7;
+    trk_note_on(t, 60, 100);
+    blocks(64);
+    check("WaveLoop vibrato: the wheel at 0, its phase stands still (nothing added)", t->vib_ph == 7);
+    t->mw = 127;
+    blocks(256);
+    check("  the wheel up: a cycle a 256 blocks (~5.4 Hz)", t->vib_ph == 7);
+    for (i = 0; i < 256u; i++) {                    /* the depth, as track_render adds it to the bend */
+        x = (osc_sine(i << 24) * 127 * 127) >> 22;
+        lo = x < lo ? x : lo;
+        hi = x > hi ? x : hi;
+    }
+    check("  the top of the wheel: +-1/2 semitone (Q8 +-126)", hi == 126 && lo == -127);
+    x = (osc_sine(64u << 24) * 32 * 32) >> 22;
+    check("  a quarter of the wheel: a sixteenth of the depth (squared)", x == 7);
+    trk_note_off(t, 60);
+    t->mw = 0;
 }
 
 /* ------------------------------------------------------------------ 2 --- */
@@ -629,6 +660,7 @@ static int demos(const char *dir)
 int main(int argc, char **argv)
 {
     test_off();
+    test_wheel_vibrato();
     test_math();
     test_midi();
     test_cost();
