@@ -876,14 +876,58 @@ static uint32_t oct_leds_seen(int all)            /* over 1 s: the OCT LED bits 
     return all ? every : any;
 }
 
+/* WaveLoop: HOME's OCT- / OCT+ are the set list's (setlist.c; the songs themselves: persistence_test.c, flash there): a tap
+ * steps (here, no flash: "NO SONGS YET"), OCT+ held copies (no flash: the save fails, said), both: the octave back to 0;
+ * never the octave; playing: STOP TO CHANGE SONG; with SCL held OCT- is the layer's (UNDO), as before */
+static int test_home_songs(void)
+{
+    int bad = 0, ok;
+    uint32_t k;
+    ui_power_on();
+    go_home(); frame();
+    song.octave = 1;
+    ui.msg_t = 0;
+    press(B_OCTUP);
+    ok = song.octave == 1 && msg_is("NO SONGS YET");
+    ui.msg_t = 0;
+    press(B_OCTDN);
+    ok &= song.octave == 1 && msg_is("NO SONGS YET");
+    bad += check("HOME (WaveLoop): OCT- / OCT+ tapped step the set list's songs (none yet), the octave stays", ok);
+    ui.msg_t = 0;
+    btn_down(B_OCTUP);
+    for (k = 0; k < 30u; k++)
+        frame();                                          /* (0.48 s: not yet) */
+    ok = !ui.msg_t;
+    for (k = 0; k < 20u; k++)
+        frame();                                          /* (0.8 s: the copy) */
+    ok &= msg_is("SONG SAVE ERROR");
+    ui.msg_t = 0;
+    btn_up(B_OCTUP); frame();
+    ok &= !ui.msg_t && song.octave == 1;
+    bad += check("  OCT+ held 0.7 s: the copy (no flash here: its error said), once; let go: no step", ok);
+    btn_down(B_OCTUP); frame(); btn_down(B_OCTDN); frame(); btn_up(B_OCTUP); frame(); btn_up(B_OCTDN); frame();
+    bad += check("  both together: the octave back to 0, no song", song.octave == 0 && !ui.msg_t);
+    song.playing = 1;
+    press(B_OCTUP);
+    ok = msg_is("STOP TO CHANGE SONG");
+    song.playing = 0;
+    go_title("MIXER");
+    press(B_OCTUP);
+    ok &= song.octave == 1;
+    song.octave = 0;
+    bad += check("  playing: STOP TO CHANGE SONG; MIXER (a tap of HOME away): OCT+ the octave, as on every other page", ok);
+    return bad;
+}
+
 /* the action pages: the knobs pick, OCT+ does it, OCT- cancels / goes HOME; the LEDs; chords */
 static int test_actions(void)
 {
     int bad = 0;
     track_t *t = &trk[0];
     ui_power_on();
+    go_title("MIXER");                                    /* (WaveLoop: HOME's OCT are the set list's; MIXER, a tap away) */
     press(B_OCTUP);
-    bad += check("HOME: OCT+ shifts the octave (lit)", song.octave == 1 && oct_leds() == 2u);
+    bad += check("MIXER: OCT+ shifts the octave (lit)", song.octave == 1 && oct_leds() == 2u);
     go_page(GR_PATS);
     bad += check("PATTERNS: OCT+ breathes (a pattern to load), OCT- lit", oct_leds_seen(0) == (1u | OCT_BREATH) &&
                  oct_leds_seen(1) == (1u | OCT_BREATH));
@@ -908,8 +952,8 @@ static int test_actions(void)
     fm1_in.buttons &= ~(1u << panel.btn[B_OCTDN]);
     frame();
     bad += check("OCT- + OCT+ together: no load, no HOME, no octave change", steps_are(t, 0) && !ui.home && song.octave == 1);
-    go_home();
-    fm1_in.buttons |= 1u << panel.btn[B_OCTUP];   /* pressed on HOME, let go on PATTERNS: no load */
+    go_title("MIXER");
+    fm1_in.buttons |= 1u << panel.btn[B_OCTUP];   /* pressed on MIXER, let go on PATTERNS: no load */
     host_pressed |= 1u << panel.btn[B_OCTUP];
     frame();
     go_page(GR_PATS);
@@ -7157,10 +7201,12 @@ static int test_fx_latch(void)
     press(B_OCTDN);
     ok &= song.octave == 0;
     btn_up(B_FX); frame();
+    go_title("MIXER");                                            /* (WaveLoop: off HOME, whose OCT are the songs') */
     press(B_OCTDN);                                               /* no FX: the octave as always */
     ok &= song.octave == -1 && !ui.layer;
     press(B_OCTUP);
     ok &= song.octave == 0;
+    go_home();
     bad += check("  FX LATCH: FX + OCT- in one frame / held: no octave; OCT- alone: the octave", ok);
     fx_latch = 0;
     frame();
@@ -8964,7 +9010,7 @@ static int test_arp_zoom(void)
     project_load(0);
     bad += check("  a project keeps the zoomed pattern, STEPS and RATE", ok && !memcmp(&arp_pat[0], &z, sizeof z) &&
                  t->p[P_APROB] == 8 && t->p[P_ARATE] == 5);
-    go_home(); frame();
+    go_title("MIXER"); frame();                         /* (WaveLoop: off HOME, whose OCT are the songs') */
     key_down(OP_KEY[0]); frame();
     ok = gates() == 1u;
     press(B_OCTUP); key_up(OP_KEY[0]); frames(200);
@@ -9131,10 +9177,11 @@ static int test_arp_ops(void)
     c = key_leds(&br);
     ok &= !(br & OP_KEYS);
     press(B_OCTUP);
-    ok &= song.octave == oct + 1 && t->p[P_AXOCT] == 0;
+    ok &= song.octave == oct && t->p[P_AXOCT] == 0;     /* (WaveLoop: HOME's OCT+ is the set list's: playing, a message) */
     key_up(OP_KEY[2]); frame();
     song.octave = oct;
-    bad += check("  on HOME they are notes: A#3 sounds and records, no breathing, OCT+ the octave", ok && notes_in(t) > n);
+    bad += check("  on HOME they are notes: A#3 sounds and records, no breathing, OCT+ no shift (the set list's)",
+                 ok && notes_in(t) > n);
     song.rec = 0; song.playing = 0;
     return bad;
 }
@@ -9193,6 +9240,7 @@ int main(void)
     bad += test_midi();
     bad += test_save();
     bad += test_actions();
+    bad += test_home_songs();
     bad += test_tracks();
     bad += test_screen();
     bad += test_favorites();

@@ -22,10 +22,21 @@
  * B 0xE6000, above the OTA staging (0xE0000..0xE4FFF), in the margin the stock firmware's own update stages into (only
  * ever while the stock firmware runs: a later Felucca finds no valid copy and starts as without one). Object types 7
  * and 8 were the retired FM6 patch objects (their sectors 0x9F000 / 0xFE000, the user sample slots 0xA0000..0xDBFFF
- * and the FM6 voice bank 0xE7000 are unused now): the autosave keeps its type 9 */
+ * and the FM6 voice bank 0xE7000 are unused now): the autosave keeps its type 9.
+ * WaveLoop: the set list's twelve songs (setlist.c), a FOR4 project each, A/B at 0xA0000 + 8 KiB k: 0xA0000..0xB7FFF,
+ * 24 sectors of the retired user sample slots (0xB8000..0xDBFFF and 0x9F000 stay unused); object types 32..43, never
+ * a type anything wrote before (a Felucca fork's songs are elsewhere, and the header's type must match) */
 enum { OBJ_SETTINGS, OBJ_PROJECT0, OBJ_UPRESET0 = OBJ_PROJECT0 + 4, OBJ_AUTOSAVE = OBJ_UPRESET0 + 4, OBJ_COUNT };
+#define OBJ_SONG0 32u                          /* WaveLoop: song k of the set list is object OBJ_SONG0 + k */
+#define SL_N 12u                               /* .. the set list's songs */
+#define SL_FLASH 0xA0000u                      /* .. the first song's copy A */
 /* an object there is (not the retired types 7, 8) */
-static int st_obj_bad(uint32_t obj) { return obj >= OBJ_COUNT || (obj > OBJ_UPRESET0 + 1u && obj != OBJ_AUTOSAVE); }
+static int st_obj_bad(uint32_t obj)
+{
+    if (obj >= OBJ_SONG0 && obj < OBJ_SONG0 + SL_N)
+        return 0;
+    return obj >= OBJ_COUNT || (obj > OBJ_UPRESET0 + 1u && obj != OBJ_AUTOSAVE);
+}
 
 typedef struct {
     uint32_t magic;
@@ -57,6 +68,8 @@ static uint32_t st_crc32(const void *p, uint32_t n) { return ~st_crc32_add(0xFFF
 
 static uint32_t st_sector(uint32_t obj, uint32_t copy)  /* flash offset of copy A (0) / B (1) */
 {
+    if (obj >= OBJ_SONG0)                              /* WaveLoop: the set list (st_obj_bad: OBJ_SONG0 .. + SL_N - 1) */
+        return SL_FLASH + (obj - OBJ_SONG0) * 2u * ST_SECTOR + copy * ST_SECTOR;
     if (obj == OBJ_SETTINGS)
         return 0xFC000u + copy * ST_SECTOR;
     if (obj == OBJ_AUTOSAVE)

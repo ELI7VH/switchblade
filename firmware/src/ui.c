@@ -27,6 +27,9 @@ static void up_auto_name(char *b, uint32_t e, uint32_t k);   /* naming (ui_name.
 static void up_ui_named(uint32_t op, uint32_t k, const char *name, uint32_t cat);
 static uint32_t up_cat(uint32_t k);
 static int project_save_as(uint32_t slot, const char *name);
+static void song_step(int dir);                  /* WaveLoop: the set list (setlist.c): HOME's OCT- / OCT+ */
+static void song_dupe(void);
+static void sl_line(char *b, const char **name);
 static int project_name(uint32_t slot, char *b);
 static int project_info(uint32_t slot, char *b, uint16_t *len48, uint32_t *den, uint8_t *n);
 static int project_rename(uint32_t slot, const char *name);

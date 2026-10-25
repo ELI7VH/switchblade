@@ -299,6 +299,97 @@ static int autosave_test(void)
     return bad;
 }
 
+/* ---- WaveLoop: the set list (setlist.c): twelve songs, each a project object (0xA0000 + 8 KiB k); the song playing keeps
+ * itself with the autosave, comes back at power-on, OCT- / OCT+ on HOME step them (song_step), OCT+ held copies one
+ * (song_dupe); the four PROJECT slots untouched ---- */
+static uint32_t sl_bpm_of(uint32_t k)                    /* song k's tempo as stored, 0 = empty */
+{
+    project_store_t raw;
+    project_t q;
+    int n = st_load(OBJ_SONG0 + k, &raw, sizeof raw);
+    return n > 0 && proj_import(&q, &raw, n) ? (uint32_t)q.g[G_BPM] : 0u;
+}
+static int setlist_test(void)
+{
+    int bad = 0, ok;
+    uint32_t k, e0, before_proj, i;
+    reset();
+    as_power_on();
+    ok = !autosave_boot(1) && sl_cur == 0u && !sl_used;
+    as_run(120000u);
+    bad += check("set list: power-on, none: the music is song 1, unsaved; unchanged: nothing written", ok && !sl_used && !as.writes);
+    for (k = 0, ok = 1; k < SL_N; k++)
+        ok &= st_sector(OBJ_SONG0 + k, 0) == 0xA0000u + 8192u * k && st_sector(OBJ_SONG0 + k, 1) == 0xA1000u + 8192u * k &&
+              !st_obj_bad(OBJ_SONG0 + k);
+    ok &= st_obj_bad(OBJ_SONG0 + SL_N) && st_obj_bad(OBJ_SONG0 - 1u) && st_sector(OBJ_SONG0 + SL_N - 1u, 1) + 4096u == 0xB8000u;
+    bad += check("set list: song k at 0xA0000 + 8 KiB k (A), + 4 KiB (B): 0xA0000..0xB7FFF, types 32..43 only", ok);
+    before_proj = 0;
+    for (i = 0x97000u; i < 0x9F000u; i++)
+        before_proj += nor[i] != 0xFFu;
+    song.g[G_BPM] = 101;
+    as_edit(0);
+    as_run(11000u);
+    ok = as.writes == 1u && sl_has(0) && sl_bpm_of(0) == 101u;
+    bad += check("set list: the music changed, stopped and idle: the autosave and song 1 written together", ok);
+    song_dupe();
+    ok = sl_cur == 1u && sl_has(1) && sl_bpm_of(1) == 101u && !proj_name[0];
+    {
+        project_store_t raw;
+        project_t q;
+        int n = st_load(OBJ_AUTOSAVE, &raw, sizeof raw);
+        ok &= n > 0 && proj_import(&q, &raw, n) && q.rsv == 2u;
+    }
+    bad += check("set list: OCT+ held: a copy in the next free song (2), unnamed, the music; the autosave says song 2", ok);
+    song.g[G_BPM] = 140;                                 /* song 2 changed, then OCT-: it is kept, song 1 comes */
+    song_step(-1);
+    ok = sl_cur == 0u && song.g[G_BPM] == 101 && sl_bpm_of(1) == 140u && sl_bpm_of(0) == 101u;
+    bad += check("set list: OCT-: the song left kept (tweaks and all), the previous one is the music", ok);
+    song_step(1);
+    ok = sl_cur == 1u && song.g[G_BPM] == 140;
+    song_step(1);                                         /* round the list: 1 */
+    ok &= sl_cur == 0u && song.g[G_BPM] == 101;
+    bad += check("set list: OCT+: the next song that holds one, round the list", ok);
+    song.playing = 1;
+    song_step(1);
+    ok = sl_cur == 0u && str_eq(ui.msg, "STOP TO CHANGE SONG");
+    song_dupe();
+    ok &= sl_cur == 0u && !sl_has(2);
+    song.playing = 0;
+    bad += check("set list: playing: no step, no copy (STOP TO CHANGE SONG)", ok);
+    song_step(1);                                         /* song 2, then power off and on */
+    as_power_on();
+    ok = autosave_boot(1) == 1 && sl_cur == 1u && song.g[G_BPM] == 140 && sl_used == 3u;
+    bad += check("set list: power-on (RESTORE LAST): the song stepped to comes back, the set list as it was", ok);
+    e0 = erases;
+    song_step(1);
+    song_step(1);
+    ok = sl_cur == 1u && song.g[G_BPM] == 140;
+    bad += check("set list: songs unchanged: a step writes only the autosave (the songs are not written again)",
+                 ok && erases - e0 == 2u);
+    as_power_on();
+    ui_prefs |= PREF_RESTORE_OFF;
+    ok = !autosave_boot(1) && sl_cur == 2u && sl_used == 3u;   /* new music: the first free song */
+    song_step(-1);
+    ok &= sl_cur == 1u && !sl_has(2);
+    ui_prefs &= (uint8_t)~PREF_RESTORE_OFF;
+    bad += check("set list: RESTORE LAST OFF: the power-on music is the first free song; left untouched, never written", ok);
+    for (k = 2; k < SL_N; k++)                           /* fill the set list: copies */
+        song_dupe();
+    ok = sl_used == 0xFFFu && sl_cur == SL_N - 1u;
+    song_dupe();
+    ok &= str_eq(ui.msg, "SET LIST FULL") && sl_cur == SL_N - 1u;
+    bad += check("set list: twelve songs; a copy past them: SET LIST FULL", ok);
+    for (i = 0x97000u, k = 0; i < 0x9F000u; i++)
+        k += nor[i] != 0xFFu;
+    ok = k == before_proj;
+    for (i = 0x9F000u; i < 0xA0000u; i++)
+        ok &= nor[i] == 0xFFu;
+    for (i = 0xB8000u; i < 0xDC000u; i++)
+        ok &= nor[i] == 0xFFu;
+    bad += check("set list: the PROJECT slots untouched; nothing written at 0x9F000 or past 0xB8000 (the retired areas)", ok);
+    return bad;
+}
+
 int main(void)
 {
     int bad = 0, ok;
@@ -594,6 +685,7 @@ int main(void)
     bad += check("PLAY consumed before the settings snapshot defers the write",
                   irq_races == 3u && song.playing && !transport_req && persist_pending && erases == before);
     bad += autosave_test();
+    bad += setlist_test();
     printf("%s\n", bad ? "PERSISTENCE TEST FAILED" : "persistence test passed");
     return bad != 0;
 }

@@ -786,6 +786,11 @@ static void draw_foot(void)
         ml_line(ln);
         sig += str_hash(0x1EA2u, ln);
     }
+    if (ui.home) {                                       /* WaveLoop: HOME's bottom line, the set list (setlist.c) */
+        const char *nm;
+        sl_line(ln, &nm);
+        sig = str_hash(str_hash(sig + 0x5E7u, ln), nm);
+    }
     if (!ui.force && sig == ui.foot_sig)
         return;
     ui.foot_sig = sig;
@@ -809,6 +814,12 @@ static void draw_foot(void)
         } else {
             cv_key_row(8, 232, 2, kh, 2, act_ready() ? 3u : 2u, T_BG);
         }
+    } else if (ui.home && !ui.ml.on) {                   /* WaveLoop: row 1 on HOME, the set list: SONG 3/12 and its name */
+        const char *nm;
+        sl_line(ln, &nm);
+        x = cv_text(8, 2, &AF_S, ln, T_THEME);
+        if (nm[0])
+            cv_free_text(x + 8, 2, &AF_S, nm, T_TEXT, T_BG, 232 - (x + 8));
     } else if (ui.ml.on) {                               /* row 1: MIDI LEARN's line, OCT+ DONE at the right */
         khint_t kh = {KC_OCTUP, "DONE"};
         int32_t kw = kh_w(KC_OCTUP, "DONE");

@@ -61,7 +61,7 @@ track 4 with the 808 kit, so the Oxygen's pads (channel 4) play drums at once. P
 - **Eight drums:** KICK SNARE CLAP HATCL HATOP TOM RIM BELL (a kit may play another piece in a place: CR78's maracas on
   CLAP, congas, claves, a cymbal). A note plays its General MIDI drum: 36 kick, 38 snare, 39 clap, 42 closed hat, 46 open
   hat, the toms, 37 rim, 56 cowbell, cymbals, congas and claves too. On the FM-1's keys the first C is the kick (C KICK,
-  C# RIM, D SNARE, D# CLAP, F# HAT, A# OPEN HAT); OCT- / OCT+ move the map. A closed hat chokes the open one. Each drum
+  C# RIM, D SNARE, D# CLAP, F# HAT, A# OPEN HAT); the octave (OCT- / OCT+ off HOME) moves the map. A closed hat chokes the open one. Each drum
   rings until it is done; letting go of the key does not cut it.
 - **Each drum its own sound.** Hit a drum (a key, a pad, a MIDI note) and it is the picked drum: the knobs, the EDIT
   page (PITCH TONE DECAY SNAP; its header names the drum), MACHINE 1 and 2 (titled with the drum) and the knob card
@@ -77,6 +77,31 @@ track 4 with the 808 kit, so the Oxygen's pads (channel 4) play drums at once. P
 - **Voices:** drums share the eight voices with the synths, a voice per drum sounding. A drum is let go at once, so a
   synth's new note takes a ringing drum's voice before any held note's. A drum voice costs a fraction of a synth voice
   (the audio interrupt's code did not grow: `tests/target_budget.py`).
+
+### The set list: twelve songs
+
+Beside the four PROJECT slots (as they were), the FM-1 keeps a set list of twelve songs. A song is everything a project
+holds: every track's sound and steps, the drums' own values, the song chain, the automation, the name.
+
+- **The music you are playing is always a song**, and it keeps itself: when the autosave writes (stopped, nothing
+  sounding, a change, idle 10 s; MENU > SYSTEM > RESTORE LAST), the song is written too, tweaks and all. At power-on
+  the song you were in comes back. On a fresh FM-1 (or with nothing restored) the music is the first free song, and it
+  is written once you change something.
+- **On HOME, OCT- / OCT+ step to the previous / next song** (the songs that hold one, round the list). Stopped only
+  (playing: STOP TO CHANGE SONG). The song you leave is saved first if it changed, the one you arrive at is the music,
+  and the top bar names it.
+- **Hold OCT+ on HOME** (0.7 s) to copy this song into the next free song; the copy is what you play from then on,
+  unnamed (its number tells it apart; a name you give it saving to a PROJECT slot is the song's too). Twelve songs:
+  SET LIST FULL.
+- **HOME's bottom line** shows SONG 3/12 and the song's name (SONG --/12: the set list is full and this music is new).
+- **The octave moved off HOME:** on every other page OCT- / OCT+ shift the octave as before (MIXER is one tap of HOME
+  away, and the header shows the octave). Both together still put it back to 0, HOME included. On the ARP pages an OP
+  key held makes OCT its shift, as before.
+- Loading a PROJECT slot (SAVE > PROJECT) puts that project into the song you are in; saving one leaves the songs as
+  they are.
+- RESTORE LAST OFF: no song writes itself while idle (stepping away still saves it) and none comes back at power-on.
+- The order is the songs' numbers; rearranging them is for later. The songs live in flash at 0xA0000..0xB7FFF (A/B
+  sectors each, the retired user sample slots); the app's flash writes are now held to the areas it uses.
 
 ### The ARP is SHAYPE
 

@@ -11,6 +11,10 @@
  * Built on the Mac too (tests/project_test.c, -DPROJ_HOST): the part above the #ifndef
  * PROJ_HOST needs core.h, params.c (TP) and engines.c. */
 #define PROJ_MAGIC 0x34524F46u                 /* "FOR4": 112 parameters, 128 motion records, nudges (FM1-Four, the only format) */
+#ifndef SL_N
+#define SL_N 12u                               /* (storage.c: WaveLoop's set list) */
+#endif
+#define PROJ_SONG_AT 67u                       /* WaveLoop: header byte 67, project_t.rsv: the set list's song (setlist.c) */
 #define PROJ_DEF_SOUND 0xFFu                   /* preset byte: the track's power-on sound, no steps */
 #define PROJ_PHYS 2u                           /* project_t.phys: PHYS without DUST and DRUM (see the top) */
 #define PROJ_NAME_LEN 12u                      /* the name: bytes PROJ_NAME_OFF.. (the reserved tail's end) */
@@ -29,7 +33,8 @@ typedef struct {
     uint8_t parts;                             /* NPART; 0: track 4 is the old GM drum part (see the top) */
     uint8_t phys;                              /* PROJ_PHYS: PHYS MODEL values as today; 1: MODEL 4 was DRUM;
                                                 * 0 (a reserved byte before 1.0): MODEL 2 was DUST */
-    uint8_t rsv;
+    uint8_t rsv;                               /* WaveLoop: the set list's song the music was (1..SL_N, setlist.c), 0
+                                                * none: header byte 67, 0 in every project before (and read by none) */
     proj_trk_t t[NTRK];
     chain_config_t chain;
     motion_store_t motion;
@@ -197,6 +202,7 @@ static int proj_pack(project_store_t *out, const project_t *q)
     if (!chain_valid(&q->chain) || !motion_valid(&q->motion) || P_COUNT > 127u) return 0;
     memset(out, 0, sizeof *out); memcpy(b, &magic, 4); memcpy(b + 4, &size, 4);
     memcpy(b + 8, q->g, 2u * PROJ_NG); b[62] = q->sel; b[63] = q->parts; b[64] = q->phys; b[66] = P_COUNT;
+    b[PROJ_SONG_AT] = (uint8_t)(q->rsv <= SL_N ? q->rsv : 0u);
     b[PROJ_CLKOUT_AT] = (uint8_t)(q->g[G_CLKOUT] != 0);
     for (t = 0; t < NTRK; t++) {
         for (i = 0; i < P_COUNT; i++) {
@@ -252,6 +258,7 @@ static int proj_unpack(project_t *q, const uint8_t *b, uint32_t st)
         return 0;
     memset(q, 0, sizeof *q); q->magic = PROJ_MAGIC; q->size = sizeof *q;
     memcpy(q->g, b + 8, 2u * PROJ_NG); q->sel = b[62]; q->parts = b[63]; q->phys = b[64];
+    q->rsv = (uint8_t)(b[PROJ_SONG_AT] <= SL_N ? b[PROJ_SONG_AT] : 0u);   /* (WaveLoop: the set list's song) */
     q->g[G_CLKOUT] = (int16_t)(b[PROJ_CLKOUT_AT] & 1u);
     for (t = 0; t < NTRK; t++) {
         for (i = 0; i < P_COUNT; i++) { if (b[pos] > 191u) return 0; q->t[t].p[i] = (int16_t)b[pos++] - 64; }
@@ -352,6 +359,7 @@ static void proj_fetch(uint32_t slot)
 }
 #endif
 
+static uint8_t sl_cur;                       /* WaveLoop: the set list's song the music is (setlist.c), SL_NONE none */
 static void project_capture(project_t *p)
 {
     uint32_t i;
@@ -359,6 +367,7 @@ static void project_capture(project_t *p)
     memset(p, 0, sizeof *p);
     p->magic = PROJ_MAGIC;
     p->size = sizeof *p;
+    p->rsv = (uint8_t)(sl_cur < SL_N ? sl_cur + 1u : 0u);   /* (WaveLoop: the song it is, for the autosave's power-on) */
     for (i = 0; i < G_COUNT; i++)
         p->g[i] = song.g[i];
     p->sel = song.sel;
@@ -767,6 +776,8 @@ static void settings_save(void)
  * give over 200,000 writes, a write a minute for 8 hours a day for over a year, far more with real pauses.
  * RESTORE LAST OFF writes none (and restores none). Never after a crash, a hang or a failed boot (main.c): the music
  * that was playing then could be what crashed. Checked every AS_POLL_MS; the main loop only (never the audio ISR) */
+static void sl_autosaved(uint32_t sig);      /* (WaveLoop: setlist.c, below) */
+static void sl_boot(uint32_t song, int restored);
 #define AS_POLL_MS 250u
 #define AS_IDLE_MS 10000u
 #define AS_GAP_MS 60000u
@@ -853,6 +864,7 @@ static void autosave_poll(void)
     if (!as.err) {
         as.saved = sig;
         as.writes++;
+        sl_autosaved(sig);                       /* WaveLoop: the song playing keeps itself too (setlist.c) */
     }
 #endif
 }
@@ -863,6 +875,7 @@ static void autosave_poll(void)
 static int autosave_boot(int allowed)
 {
     int rc = 0;
+    uint32_t song = 0;
 #if FELUCCA_FLASH
     if (flash_ok && allowed && !(ui_prefs & PREF_RESTORE_OFF)) {
         int n;
@@ -870,6 +883,7 @@ static int autosave_boot(int allowed)
         n = st_load(OBJ_AUTOSAVE, &proj_wire, sizeof proj_wire);
         if (n > 0 && proj_import(&proj_scratch, &proj_wire, n)) {
             proj_bound(&proj_scratch);
+            song = proj_scratch.rsv;                     /* (WaveLoop: the song it was, 0 none) */
             if (!project_restore_runtime(&proj_scratch)) {
                 ui_message("RESTORED");
                 rc = 1;
@@ -881,8 +895,11 @@ static int autosave_boot(int allowed)
 #endif
     as.saved = as.seen = autosave_sig();
     as.t = fm1_ms;
+    sl_boot(rc ? song : 0u, rc);                         /* WaveLoop: the set list (setlist.c) */
     return rc;
 }
+
+#include "setlist.c"                                   /* WaveLoop: the set list, twelve songs */
 
 #if FELUCCA_FLASH
 _Static_assert(sizeof(project_store_t) <= ST_PAYLOAD_MAX, "project does not fit one flash sector");

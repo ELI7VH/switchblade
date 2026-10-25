@@ -35,8 +35,14 @@ static inline void *fl_far(void *p) { void *volatile q = p; return q; }
 #define T4_CNT          REG32(0x10804u)            /* TIMER4, 24 MHz free-running */
 
 #define FL_XIP(off)     FM1_XIP(off)              /* fm1_xip.h */
-#define FL_DATA_LO      0x00097000u                /* Felucca main store */
+#define FL_DATA_LO      0x00097000u                /* Felucca main store (the region; what is written in it: below) */
 #define FL_DATA_HI      0x000E0000u
+#define FL_PROJ_LO      0x00097000u                /* .. the four PROJECT slots, A/B each (storage.c) */
+#define FL_PROJ_HI      0x0009F000u
+#define FL_SONG_LO      0x000A0000u                /* .. WaveLoop: the set list's twelve songs, A/B each (storage.c OBJ_SONG0), */
+#define FL_SONG_HI      0x000B8000u                /*    in the retired user sample slots */
+#define FL_UPRE_LO      0x000DC000u                /* .. the user preset banks (upreset.c) */
+#define FL_UPRE_HI      0x000E0000u
 #define FL_GLOB_LO      0x000FC000u                /* Felucca superblock / globals */
 #define FL_GLOB_HI      0x000FF000u
 #define FL_OTA_LO       0x000E0000u                /* M-UPGRADE loader staging, ota.c */
@@ -49,8 +55,11 @@ static inline void *fl_far(void *p) { void *volatile q = p; return q; }
  * the 1 MiB part ignores the high address bits, so a wrapped range lands low. */
 #define FL_IN(off, n, lo, hi) ((uint32_t)(off) >= (lo) && (uint32_t)(off) <= (hi) && \
                                (uint32_t)(n) <= (hi) - (uint32_t)(off))
-/* Felucca's own store (projects, user samples; settings; the autosave and the FM6 voice bank: one range) */
-#define FL_STORE_OK(off, n) (FL_IN(off, n, FL_DATA_LO, FL_DATA_HI) || FL_IN(off, n, FL_GLOB_LO, FL_GLOB_HI) || \
+/* Felucca's own store: what the app writes (the projects, WaveLoop's set list, the user presets; the settings; the
+ * autosave and the retired FM6 voice bank: one range). The retired parts of FL_DATA (0x9F000, the user sample slots past
+ * the set list) are no longer writable; the OTA staging is FL_RANGE_OK's alone */
+#define FL_STORE_OK(off, n) (FL_IN(off, n, FL_PROJ_LO, FL_PROJ_HI) || FL_IN(off, n, FL_SONG_LO, FL_SONG_HI) || \
+                             FL_IN(off, n, FL_UPRE_LO, FL_UPRE_HI) || FL_IN(off, n, FL_GLOB_LO, FL_GLOB_HI) || \
                              FL_IN(off, n, FL_AUTO_LO, FL_VBANK_HI))
 /* Where the RAM driver may erase / program. The app build allows only its own
  * data regions; the update loader (firmware/loader) defines its own window. */

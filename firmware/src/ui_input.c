@@ -1010,6 +1010,52 @@ static uint32_t oct_taps(uint32_t pressed, int here)
     return tap;
 }
 
+/* WaveLoop: HOME's OCT- / OCT+ are the set list's (setlist.c), stopped: a tap of OCT- the previous song, of OCT+ the next,
+ * OCT+ held 0.7 s a copy of this song in the next free one; both together: the octave back to 0, as everywhere. On every
+ * other page they shift the octave as they always did (MIXER is a tap of HOME away; the header shows the octave); on the
+ * ARP pages an OP key held makes them its shift (ui_layer.c op_shift), as before. Not with a layer held or open, the
+ * menu, a dialog, NAME, MIDI LEARN or an action page */
+static int home_oct_on(int lay)
+{
+    return ui.home && !lay && !ui.menu && !ui.confirm && !name_on() && !act_cols() && !layer_set_open() && !ui.ml.on;
+}
+static void home_oct(uint32_t pressed, uint32_t now, int here)
+{
+    static uint32_t t0;                                   /* the press: (now | 1), bit 1 done (OCT+ held fired, or both) */
+    static uint8_t which;                                 /* 1 OCT-, 2 OCT+ */
+    uint32_t dn = panel.btn[B_OCTDN], up = panel.btn[B_OCTUP];
+    uint32_t held = ((fm1_in.buttons >> dn) & 1u) | ((fm1_in.buttons >> up) & 1u) << 1;
+    uint32_t pr = ((pressed >> dn) & 1u) | ((pressed >> up) & 1u) << 1;
+    if (pr && !t0) {
+        if (!here)
+            return;                                       /* (a press elsewhere: the octave's, as ever) */
+        t0 = (now | 1u) & ~2u;
+        which = (uint8_t)(pr & 1u ? 1u : 2u);
+    }
+    if (!t0)
+        return;
+    if (held == 3u) {                                     /* both: the octave back to 0, no song */
+        if (!(t0 & 2u))
+            song.octave = 0;
+        t0 |= 2u;
+        return;
+    }
+    if (held & which) {                                   /* still down: OCT+ held long, the copy */
+        if (which == 2u && !(t0 & 2u) && now - (t0 & ~3u) > 700u * 1000u * FM1_TICKS_PER_US) {
+            t0 |= 2u;
+            if (here)
+                song_dupe();
+        }
+        return;
+    }
+    if (!(t0 & 2u) && here && !held)                      /* let go: a tap */
+        song_step(which == 1u ? -1 : 1);
+    if (!held)
+        t0 = 0;
+    else
+        t0 |= 2u;
+}
+
 /* MENU > CONTROL > CHORD ENTRY ADD (1.2, #155: chords with one hand): a key's notes go into the cursor step beside what
  * is there (up to 4), or out of it when its note is there already (a key that adds a chord takes all of it out); MONO
  * keeps one note (another key replaces it). A TIE or REST step becomes a note step; one with no note left a REST, as
@@ -1395,6 +1441,7 @@ static void ui_input(void)
     oct = layer_oct(pressed, oct);                      /* (a SET layer's OCT-: put back) */
     layer_masks();                                      /* seq.c: keys pressed with a layer's button are its own */
     lay = layer_held();
+    home_oct(pressed, now, home_oct_on(lay));           /* WaveLoop: HOME's OCT- / OCT+ step the set list's songs */
     glo = lay && ui.ly == LAYER_GLO;                    /* GLO held: SELECT is the tempo, BPM LOCK or not (#58) */
     if (!layer_allowed()) {
         perf_kill = 1;                                  /* (effects off until their keys are let go) */
@@ -1577,6 +1624,8 @@ static void ui_input(void)
             uint32_t both = (1u << panel.btn[B_OCTDN]) | (1u << panel.btn[B_OCTUP]);
             if (act_cols() || layer_set_open() || ui.ml.on)   /* action pages: enter / back (below); SET layers: OCT-; */
                 break;                                  /* MIDI LEARN: clear / done (below) */
+            if (home_oct_on(lay))                       /* WaveLoop: HOME's are the set list's (home_oct) */
+                break;
             if ((fm1_in.buttons & both) == both)
                 song.octave = 0;
             else
