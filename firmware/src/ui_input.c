@@ -431,6 +431,7 @@ static void home_turn(uint32_t k, int32_t s)
     *vp = (int16_t)param_turn(d, *vp, accel(EN_K1 + k, s, d->fmt == F_ENUM ? 0 : d->max - d->min));
     motion_capture(TSEL, (uint32_t)(vp - TSEL->p), *vp);
     ml_knob(TSEL, (uint32_t)(vp - TSEL->p));
+    kc_knob(TSEL, (uint32_t)(vp - TSEL->p));          /* (WaveLoop: the knob card) */
 }
 
 /* SELECT (MENU > SELECT VOL, the default, 2026-10-20): the selected track's LEVEL, on every page, as MIXER's KNOB 1 (recorded
@@ -444,6 +445,7 @@ static void sel_volume(int32_t s)
     t->p[P_LEVEL] = (int16_t)param_turn(d, t->p[P_LEVEL], accel(EN_SELECT, s, d->max - d->min));
     motion_capture(t, P_LEVEL, t->p[P_LEVEL]);
     ml_knob(t, P_LEVEL);
+    kc_knob(t, P_LEVEL);                                /* (WaveLoop: the knob card) */
     param_format(d, t->p[P_LEVEL], v, &unit);
     fmt_named = 0;
     str_cpy(m + 7, v, sizeof m - 7);
@@ -478,6 +480,7 @@ static void tracks_edit(uint32_t slot, int32_t steps)
     *vp = (int16_t)clamp(*vp + accel(EN_K1 + slot, steps, d->max - d->min), d->min, d->max);
     motion_capture(t, (uint32_t)(vp - t->p), *vp);
     ml_knob(t, (uint32_t)(vp - t->p));
+    kc_knob(t, (uint32_t)(vp - t->p));                  /* (WaveLoop: the knob card) */
 }
 
 /* SEQ > STEP's piano roll: where step recording writes */
@@ -881,6 +884,7 @@ static void edit_param(uint32_t slot, int32_t steps)
     if (pg->scope != SC_GLOBAL) {
         motion_capture(TSEL, (uint32_t)(vp - TSEL->p), *vp);
         ml_knob(TSEL, (uint32_t)(vp - TSEL->p));        /* (MIDI LEARN: picked) */
+        kc_knob(TSEL, (uint32_t)(vp - TSEL->p));        /* (WaveLoop: the knob card) */
     }
 }
 
@@ -1271,6 +1275,48 @@ static void ui_notices(void)
     }
 }
 
+/* WaveLoop build: the Oxygen's encoder (midi_control.c wl_encoder_cc counts it in the audio ISR), done here as the
+ * panel's knobs are. A turn (CC114) walks the selected track's sound through PRESETS' list (LIST: ALL, FAV, a category),
+ * past a machine's last sound into the next machine's first, round; fader button 1 / 2 (CC112) the previous / next
+ * machine on the selected track (its first sound, as PRESETS' KNOB 2); a press (CC115) selects the next track (after
+ * T4: T1). Not while the MENU, a dialog or NAME has the screen: dropped */
+static void wl_encoder(void)
+{
+    int32_t sound, bank, n;
+    uint32_t press, total, cur, e, k;
+    char b[24];
+    fm1_irq_off();
+    sound = (int8_t)wl_enc_sound;
+    bank = (int8_t)wl_enc_bank;
+    press = wl_enc_press;
+    wl_enc_sound = wl_enc_bank = wl_enc_press = 0;
+    fm1_irq_on();
+    if ((!sound && !bank && !press) || ui.menu || ui.confirm || name_on() || ui.uboot)
+        return;
+    if (press)
+        track_select((song.sel + press) % NTRK);
+    if (bank) {
+        e = TSEL->eng_req % NENGINES;
+        for (k = (uint32_t)(bank > 0 ? bank : -bank); k; k--)
+            e = eng_step(e, bank);
+        select_engine(e);                               /* (its first sound; "ENGINE JUNO") */
+    }
+    if (sound) {
+        cur = preset_pos(&total);
+        if (!total) {
+            ui_message(list_mode() == 1u ? "NO FAVORITES" : "NO SOUNDS IN LIST");
+            return;
+        }
+        n = cur < total ? (int32_t)cur + sound : sound > 0 ? sound - 1 : (int32_t)total + sound;   /* (a sound not in the
+                                                         * list: from its start or its end) */
+        n %= (int32_t)total;
+        preset_go((uint32_t)(n < 0 ? n + (int32_t)total : n));
+        str_cpy(b, ENGINES[TSEL->eng_req % NENGINES]->name, sizeof b);
+        str_cpy(b + str_len(b), " ", 2);
+        sound_name(TSEL, b + str_len(b));
+        ui_message(b);
+    }
+}
 static void ui_input(void)
 {
     uint32_t pressed = fm1_input_edges(0), notes = fm1_input_note_edges(), now = fm1_ticks(), id, b, k;
@@ -1280,6 +1326,7 @@ static void ui_input(void)
     int32_t s, sel = 0, ks[4] = {0, 0, 0, 0};
     midi_take();                                        /* (MIDI IN notes: lights, SCREEN WAKE, AUTO SELECT's) */
     midi_pc_poll();                                     /* MIDI Program Change */
+    wl_encoder();                                       /* WaveLoop: the Oxygen's encoder */
     perf_latch_on = fx_latch & 1u;                      /* (MENU > FX LATCH; a settings load sets it too) */
     fx_map_sync();                                      /* (the FX layer's key map: ui_layer.c, a settings load too) */
     fx_usb_fixed = (ui_prefs & PREF_USB_FIXED) != 0u;   /* (MENU > USB LEVEL: fx.c, audio.c) */

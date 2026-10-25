@@ -240,40 +240,40 @@ static int route_test(void)
     int bad = 0; uint32_t ch, src, owned = 0;
     midi_test_reset(); song.sel = 2;
     bad += check("ROUT defaults to CH1-4", song.g[G_ROUTE] == 0);
-    for (src = 1; src <= 2u; src++)
-        for (ch = 4; ch < 16u; ch++) queued(0x90 | ch, 60 + ch, 100, src);
-    for (ch = 4; ch < 16u; ch++) owned |= midi_notes[ch][60 + ch];
-    bad += check("CH1-4: note-ons on channels 5..16 (USB and TRS) play nothing", !any_gate() && !owned && !midi_owners[2] && !midi_hint);
+    for (src = 1; src <= 2u; src++)                  /* (WaveLoop build: 16 follows the selected track, wl_ch16_test) */
+        for (ch = 4; ch < 15u; ch++) queued(0x90 | ch, 60 + ch, 100, src);
+    for (ch = 4; ch < 15u; ch++) owned |= midi_notes[ch][60 + ch];
+    bad += check("CH1-4: note-ons on channels 5..15 (USB and TRS) play nothing", !any_gate() && !owned && !midi_owners[2] && !midi_hint);
     queued(0x91, 62, 100, 1); queued(0x93, 40, 100, 2);
     bad += check("CH1-4: channels 2 and 4 still play parts 2 and 4", gate_note(&trk[1], 62) && midi_notes[1][62] == 2u && midi_notes[3][40] == 4u);
-    queued(0xE4, 127, 127, 1); queued(0xEF, 0, 0, 2); queued(0xE9, 127, 127, 1);
-    bad += check("CH1-4: pitch bend on channels 5, 10, 16 bends no part", !midi_bend_target[0] && !midi_bend_target[1] && !midi_bend_target[2] && !midi_ch[4].bend && !midi_ch[15].bend);
-    queued(0xB4, 1, 99, 1); queued(0xB9, 11, 10, 2); queued(0xDF, 77, 0, 1);
-    bad += check("CH1-4: CC1 / CC11 and aftertouch on channels 5..16 reach no MOD source", !trk[2].mw && !trk[2].ex_off && !trk[2].at && !trk[0].mw && !trk[0].at);
+    queued(0xE4, 127, 127, 1); queued(0xEE, 0, 0, 2); queued(0xE9, 127, 127, 1);
+    bad += check("CH1-4: pitch bend on channels 5, 10, 15 bends no part", !midi_bend_target[0] && !midi_bend_target[1] && !midi_bend_target[2] && !midi_ch[4].bend && !midi_ch[14].bend);
+    queued(0xB4, 1, 99, 1); queued(0xB9, 11, 10, 2); queued(0xDE, 77, 0, 1);
+    bad += check("CH1-4: CC1 / CC11 and aftertouch on channels 5..15 reach no MOD source", !trk[2].mw && !trk[2].ex_off && !trk[2].at && !trk[0].mw && !trk[0].at);
     queued(0xB4, 101, 0, 1); queued(0xB4, 100, 0, 1); queued(0xB4, 6, 24, 1);
     bad += check("CH1-4: RPN on channel 5 changes nothing", midi_ch[4].semis != 24u);
     queued(0xB4, 64, 127, 1); queued(0x81, 62, 0, 1);
     bad += check("CH1-4: a channel 5 sustain pedal does not hold channel 2's note", !gate_note(&trk[1], 62) && !midi_notes[1][62]);
     queued(0x91, 62, 100, 1); queued(0xB1, 1, 50, 1);
-    queued(0xB4, 120, 0, 1); queued(0xB9, 123, 0, 2); queued(0xBF, 121, 0, 1);
-    bad += check("CH1-4: CC120 / CC123 / CC121 on channels 5..16 leave parts 1..4 sounding", gate_note(&trk[1], 62) && gate_note(&trk[3], 40) && midi_owners[1] == 1u && trk[1].mw == 50);
+    queued(0xB4, 120, 0, 1); queued(0xB9, 123, 0, 2); queued(0xBE, 121, 0, 1);
+    bad += check("CH1-4: CC120 / CC123 / CC121 on channels 5..15 leave parts 1..4 sounding", gate_note(&trk[1], 62) && gate_note(&trk[3], 40) && midi_owners[1] == 1u && trk[1].mw == 50);
     queued(0xB1, 123, 0, 1); queued(0x83, 40, 0, 2);
     bad += check("CH1-4: panic on channel 2 still works", !gate_note(&trk[1], 62) && !midi_owners[1] && !midi_owners[3]);
 
     midi_test_reset(); song.sel = 2; song.g[G_ROUTE] = 1;
     set_engine_of(&trk[2], ENGI_OBX); trk[2].engine = trk[2].eng_req;   /* (track 3 polyphonic: ACID is one voice) */
     trk[2].p[P_VOICE] = V_POLY; trk[2].p[P_SUS] = 127; events_block(CTL);
-    queued(0x90, 60, 100, 1); queued(0x94, 62, 100, 2); queued(0x99, 64, 100, 1); queued(0x9F, 65, 100, 2);
-    bad += check("SEL: channels 1, 5, 10, 16 all play the selected track", gate_note(&trk[2], 60) && gate_note(&trk[2], 62) && gate_note(&trk[2], 64) && gate_note(&trk[2], 65) && !gate_note(&trk[0], 60) && midi_owners[2] == 4u);
-    queued(0xEF, 127, 127, 1); queued(0xB9, 1, 66, 2); queued(0xD4, 33, 0, 1);
+    queued(0x90, 60, 100, 1); queued(0x94, 62, 100, 2); queued(0x99, 64, 100, 1); queued(0x9E, 65, 100, 2);
+    bad += check("SEL: channels 1, 5, 10, 15 all play the selected track", gate_note(&trk[2], 60) && gate_note(&trk[2], 62) && gate_note(&trk[2], 64) && gate_note(&trk[2], 65) && !gate_note(&trk[0], 60) && midi_owners[2] == 4u);
+    queued(0xEE, 127, 127, 1); queued(0xB9, 1, 66, 2); queued(0xD4, 33, 0, 1);
     bad += check("SEL: bend, CC1 and aftertouch from channels 5..16 reach the selected track", midi_bend_target[2] == 512 && trk[2].mw == 66 && trk[2].at == 33);
     queued(0xB4, 64, 127, 1); queued(0x84, 62, 0, 2);
     bad += check("SEL: channel 5 pedal holds its note", gate_note(&trk[2], 62) && (midi_notes[4][62] & MIDI_PEDAL_NOTE));
     song.g[G_ROUTE] = 0; events_block(CTL);
-    bad += check("SEL -> CH1-4 releases channels 5..16's notes (pedal-held too), keeps channel 1's",
+    bad += check("SEL -> CH1-4 releases channels 5..15's notes (pedal-held too), keeps channel 1's",
                  !gate_note(&trk[2], 62) && !gate_note(&trk[2], 64) && !gate_note(&trk[2], 65) && gate_note(&trk[2], 60) &&
-                 !midi_notes[4][62] && !midi_notes[9][64] && !midi_notes[15][65] && midi_owners[2] == 1u && !midi_ch[4].pedal);
-    bad += check(".. and resets their bend: each part follows its own channel 1..4", !midi_bend_target[2] && !midi_ch[15].bend);
+                 !midi_notes[4][62] && !midi_notes[9][64] && !midi_notes[14][65] && midi_owners[2] == 1u && !midi_ch[4].pedal);
+    bad += check(".. and resets their bend: each part follows its own channel 1..4", !midi_bend_target[2] && !midi_ch[14].bend);
     queued(0x80, 60, 0, 1);
     bad += check("channel 1's note-off still releases its note after the switch", !any_gate() && !midi_owners[2]);
     return bad;
@@ -298,8 +298,8 @@ static int route_block_test(void)
         for (ch = 0; ch < 16u; ch++) {                     /* a note on every channel: only the block's play */
             uint32_t n = 40u + ch;
             queued(0x90 | ch, n, 100, 1 + (ch & 1u));
-            for (i = 0; i < NTRK; i++)
-                ok &= gate_note(&trk[i], n) == (ch >= b && ch < b + 4u && i == ch - b);
+            for (i = 0; i < NTRK; i++)                     /* (WaveLoop build: 16 outside the block, the selected track) */
+                ok &= gate_note(&trk[i], n) == (ch >= b && ch < b + 4u ? i == ch - b : ch == 15u && i == song.sel);
         }
         queued(0xE0 | (b + 1u), 127, 127, 1); queued(0xE0 | (b ? 0u : 4u), 127, 127, 1);
         ok &= midi_bend_target[1] == 512 && !midi_bend_target[0] && !midi_bend_target[2];
@@ -375,12 +375,14 @@ static int route_track_test(void)
         ok = 1;
         for (ch = 0; ch < 16u; ch++) {
             queued(0x90 | ch, 40u + ch, 100, 1);
+            int32_t want = ch < 4u ? (int32_t)ch : !r && ch == 15u ? (int32_t)song.sel : -1;   /* (WaveLoop build: CH1-4's
+                                                         * 16 the selected track; TRACK's channels are the user's) */
             for (i = 0; i < NTRK; i++)
-                ok &= gate_note(&trk[i], 40u + ch) == (ch < 4u && i == ch);
-            ok &= midi_slot(ch) == (ch < 4u ? (int32_t)ch : -1);
+                ok &= gate_note(&trk[i], 40u + ch) == ((int32_t)i == want);
+            ok &= midi_slot(ch) == want;
         }
-        bad += check(r ? "TRACK, the default channels: channels 1..4 play tracks 1..4, 5..16 nothing (as CH1-4)" :
-                         "CH1-4 (for the comparison): channels 1..4 play tracks 1..4, 5..16 nothing", ok);
+        bad += check(r ? "TRACK, the default channels: channels 1..4 play tracks 1..4, 5..16 nothing" :
+                         "CH1-4 (for the comparison): channels 1..4 play tracks 1..4, 16 the selected one, 5..15 nothing", ok);
     }
     /* drums on 10, bass on 2, OMNI, OFF */
     midi_test_reset(); song.sel = 3; song.g[G_ROUTE] = ROUTE_TRACK;
@@ -591,6 +593,7 @@ static int cc_map_test(void)
 {
     static const struct { uint8_t cc; uint8_t id; } COMMON[] = {
         {5, P_GLIDE}, {7, P_LEVEL}, {72, P_REL}, {73, P_ATK}, {75, P_DEC}, {91, P_REV}, {93, P_CHOR}, {94, P_DLY},
+        {76, P_LRATE}, {78, P_LD_AMP}, {79, P_SUS},       /* (WaveLoop build: the Oxygen's) */
     };
     int bad = 0, ok = 1; uint32_t i, e; int16_t before[P_COUNT];
     midi_test_reset();
@@ -604,7 +607,12 @@ static int cc_map_test(void)
         queued(0xB0, COMMON[i].cc, 37, 1);
         ok &= trk[0].p[COMMON[i].id] == 37;
     }
-    bad += check("CC5 7 72 73 75 91 93 94: GLIDE LEVEL REL ATK DEC REV CHO DLY, 0..127 over their range", ok);
+    bad += check("CC5 7 72 73 75 91 93 94 76 78 79: GLIDE LEVEL REL ATK DEC REV CHO DLY, LFO RATE, LFO > AMP, SUS", ok);
+    queued(0xB0, 77, 0, 1); ok = trk[0].p[P_LD_FLT] == -64;
+    queued(0xB0, 77, 64, 1); ok &= trk[0].p[P_LD_FLT] == 0;
+    queued(0xB0, 70, 127, 1); ok &= trk[0].p[P_LWAVE] == TP[P_LWAVE].max;
+    queued(0xB0, 70, 0, 1); ok &= trk[0].p[P_LWAVE] == 0;
+    bad += check("CC77 LFO > FILTER (64 none), CC70 LFO WAVE (WaveLoop build: the Oxygen's knobs 6, 8)", ok);
     queued(0xB0, 10, 0, 1); ok = trk[0].p[P_PAN] == -64;
     queued(0xB0, 10, 127, 1); ok &= trk[0].p[P_PAN] == 63;
     queued(0xB0, 10, 64, 1); ok &= trk[0].p[P_PAN] == 0;
@@ -624,11 +632,11 @@ static int cc_map_test(void)
             ok &= d->fmt != F_ENUM && d->max - d->min >= 24;
         }
     }
-    bad += check("every engine's CC74 / 71 / 79 / 70 target (EDIT K1..K4) is a continuous value", ok);
+    bad += check("every engine's CC74 / 71 / 16 / 17 target (EDIT K1..K4) is a continuous value", ok);
     memcpy(before, trk[0].p, sizeof before);
     queued(0xB0, 121, 0, 1);
     bad += check("CC121 resets no mapped parameter (RP-015)", !memcmp(before, trk[0].p, sizeof before));
-    queued(0xB0, 20, 99, 1); queued(0xB0, 76, 99, 1); queued(0xB0, 95, 99, 1);
+    queued(0xB0, 20, 99, 1); queued(0xB0, 80, 99, 1); queued(0xB0, 95, 99, 1);
     bad += check("CCs outside the map change nothing", !memcmp(before, trk[0].p, sizeof before));
     memcpy(before, trk[2].p, sizeof before);
     queued(0xB4, 7, 5, 1); queued(0xB9, 74, 5, 2); queued(0xBF, 91, 5, 1);
@@ -655,7 +663,7 @@ static int cc_map_test(void)
     bad += check("not armed: the CC is the new value, no event", trk[0].p[P_E4] == 77 && motion.count == 1u);
     return bad;
 }
-/* Task 2.1: the fixed CC map follows the 4-control contract (engine_t.knob: EDIT K1..K4 = CC74 71 79 70), in = out */
+/* Task 2.1: the fixed CC map follows the 4-control contract (engine_t.knob: EDIT K1..K4 = CC74 71 16 17, WaveLoop build), in = out */
 static int test_cc_contract(void)
 {
     int bad = 0; uint32_t e, k; char b[64];
@@ -1035,11 +1043,11 @@ static int test_mout(void)
     events_block(CTL);
     ok &= out_n() == 2;
     for (n = 0; out_n(); ) { uint32_t pk = out_pop(); n |= pk == (0x0Bu | 0xB2u << 8 | 7u << 16 | 127u << 24) ? 1u :
-                                                        pk == (0x0Bu | 0xB2u << 8 | 70u << 16 | 127u << 24) ? 2u : 4u; }
+                                                        pk == (0x0Bu | 0xB2u << 8 | CC_MAC << 16 | 127u << 24) ? 2u : 4u; }
     ok &= n == 3u;
     trk[1].p[P_E4] = 3; events_block(CTL);
     ok &= out_n() == 0;                                    /* (track 2 is INT) */
-    bad += check("knobs: CC74 once on a change (not again unchanged); LEVEL -> CC7, K4 -> CC70; INT tracks send none", ok);
+    bad += check("knobs: CC74 once on a change (not again unchanged); LEVEL -> CC7, K4 -> CC17 (WaveLoop); INT tracks send none", ok);
     queued(0xB2, 74, 99, 1); queued(0xB2, 7, 12, 1); events_block(CTL);
     bad += check("a CC received is not sent back (CC74, CC7 in on channel 3: none out)", out_n() == 0 && t->p[P_LEVEL] == 12);
 
@@ -1158,9 +1166,101 @@ static int test_mout_review(void)
     midi_test_reset();
     return bad;
 }
+/* WaveLoop build: the Oxygen Pro 61's controls (README "WaveLoop build") */
+static int wl_ch16_test(void)
+{
+    int bad = 0, ok;
+    uint32_t r;
+    midi_test_reset(); song.sel = 2;
+    set_engine_of(&trk[0], ENGI_OBX); set_engine_of(&trk[2], ENGI_OBX);
+    trk[0].engine = trk[0].eng_req; trk[2].engine = trk[2].eng_req;
+    trk[0].p[P_SUS] = trk[2].p[P_SUS] = 127; events_block(CTL);
+    queued(0x9F, 60, 100, 1);
+    bad += check("WaveLoop ch16: ROUT CH1-4, channel 16 plays the selected track (T3)", gate_note(&trk[2], 60) &&
+                 !gate_note(&trk[0], 60) && midi_slot(15) == 2 && midi_slot(14) < 0);
+    track_select(0);
+    queued(0x9F, 64, 100, 1); queued(0xBF, 74, 127, 1);
+    ok = gate_note(&trk[0], 64) && !gate_note(&trk[2], 64) && trk[0].p[P_E4] == track_desc(&trk[0], P_E4)->max;
+    queued(0x8F, 60, 0, 1);
+    ok &= !gate_note(&trk[2], 60) && gate_note(&trk[0], 64);
+    bad += check("  the selection moves (T1): 16's notes and CCs follow; a note held before ends on T3", ok);
+    queued(0x8F, 64, 0, 1);
+    for (r = 2, ok = 1; r <= 4u; r++) {                 /* the other blocks: 16 the selected track, unless it is the block's */
+        song.g[G_ROUTE] = (int16_t)r; events_block(CTL);
+        ok &= midi_slot(15) == (r == 4u ? 3 : (int32_t)song.sel);
+    }
+    song.g[G_ROUTE] = ROUTE_TRACK; events_block(CTL);
+    ok &= midi_slot(15) < 0;                             /* (TRACK: the channels are the user's) */
+    song.g[G_ROUTE] = 0; events_block(CTL);
+    bad += check("  CH5-8 / CH9-12 follow too; CH13-16 keeps 16 as T4; TRACK leaves it alone", ok);
+    return bad;
+}
+static int wl_encoder_test(void)
+{
+    int bad = 0, ok;
+    uint32_t total, cur, cur2, e;
+    midi_test_reset();
+    cur = preset_pos(&total);
+    queued(0xBF, 114, 65, 1); frame();
+    cur2 = preset_pos(&total);
+    queued(0xBF, 114, 63, 1); queued(0xBF, 114, 63, 1); frame();
+    ok = cur2 == cur + 1u && preset_pos(&total) == cur - 1u + (cur ? 0u : total);
+    bad += check("WaveLoop encoder: CC114 65 the next sound of the selected track, 63 63 two back", ok);
+    apply_preset_to(TSEL, ENGINES[TSEL->eng_req]->npresets - 1u);   /* (T1 OB-Z, LIST ALL) */
+    e = TSEL->eng_req;
+    queued(0xBF, 114, 65, 1); frame();
+    bad += check("  past the machine's last sound: the next machine's first", TSEL->eng_req == eng_step(e, 1) && TSEL->preset == 0u &&
+                 ui.msg_t && !strncmp(ui.msg, ENGINES[TSEL->eng_req]->name, str_len(ENGINES[TSEL->eng_req]->name)));
+    e = TSEL->eng_req;
+    queued(0xBF, 112, 63, 1); queued(0xBF, 112, 64, 1); frame();
+    ok = TSEL->eng_req == eng_step(e, -1) && TSEL->preset == 0u;
+    queued(0xBF, 112, 65, 1); queued(0xBF, 112, 64, 1); queued(0xBF, 112, 65, 1); queued(0xBF, 112, 64, 1); frame();
+    ok &= TSEL->eng_req == eng_step(e, 1);
+    bad += check("  CC112 63 the previous machine, 65 the next (64, the button let go: nothing)", ok);
+    queued(0xBF, 115, 127, 1); queued(0xBF, 115, 0, 1); frame();
+    ok = song.sel == 1u;
+    queued(0xBF, 115, 127, 1); queued(0xBF, 115, 127, 1); queued(0xBF, 115, 127, 1); frame();
+    ok &= song.sel == 0u;
+    bad += check("  CC115 127 the next track (0, the release: nothing); after T4, T1", ok);
+    e = trk[0].eng_req;
+    queued(0xB0, 112, 65, 1); queued(0xB0, 114, 65, 1); queued(0xB0, 115, 127, 1);
+    ui.menu = 1; frame(); ui.menu = 0; frame();
+    ok = trk[0].eng_req == e && song.sel == 0u && !wl_enc_sound && !wl_enc_bank && !wl_enc_press;
+    bad += check("  with the MENU open: dropped (nothing loads, no track changes later)", ok);
+    ok = !ml_free_cc(112) && !ml_free_cc(114) && !ml_free_cc(115) && ml_free_cc(113);
+    bad += check("  MIDI LEARN never takes CC112 / 114 / 115", ok);
+    return bad;
+}
+static int wl_map_test(void)
+{
+    int bad = 0, ok;
+    uint8_t seq;
+    midi_test_reset();
+    apply_preset_to(&trk[2], 0);                          /* NANO's 303 */
+    trk[2].p[P_ATK] = 5; trk[2].p[P_SUS] = 6; trk[2].p[P_REL] = 7; trk[2].p[P_DEC] = 8;
+    queued(0xB2, 75, 127, 1); queued(0xB2, 73, 127, 1); queued(0xB2, 79, 127, 1); queued(0xB2, 72, 127, 1);
+    ok = !sub_on(&trk[2]) && trk[2].p[P_E2] == track_desc(&trk[2], P_E2)->max && trk[2].p[P_ATK] == 5 &&
+         trk[2].p[P_SUS] == 6 && trk[2].p[P_REL] == 7 && trk[2].p[P_DEC] == 8;
+    bad += check("WaveLoop map: NANO's 303, fader 6 (CC75) is its DECAY; ATK SUS REL are not its", ok);
+    apply_preset_to(&trk[2], 2);                          /* NANO's SUB: its amp ADSR is P_ATK .. P_REL */
+    queued(0xB2, 73, 0, 1); queued(0xB2, 75, 0, 1); queued(0xB2, 79, 0, 1); queued(0xB2, 72, 0, 1);
+    ok = sub_on(&trk[2]) && !trk[2].p[P_ATK] && !trk[2].p[P_DEC] && !trk[2].p[P_SUS] && !trk[2].p[P_REL];
+    bad += check("  NANO's SUB: faders 5..8 its ATK DEC SUS REL", ok);
+    seq = wl_io[3];
+    queued(0xB1, 77, 100, 1);
+    ok = wl_io[3] == (uint8_t)(seq + 1u) && wl_io[4] == 1u && wl_io[5] == P_LD_FLT &&
+         (int16_t)(wl_io[6] | wl_io[7] << 8) == trk[1].p[P_LD_FLT];
+    queued(0xB1, 77, 100, 1);
+    ok &= wl_io[3] == (uint8_t)(seq + 2u);               /* (the same value again: the card stays up) */
+    queued(0xB3, 1, 90, 1);
+    ok &= wl_io[4] == 3u && wl_io[5] == KC_WHEEL && wl_io[6] == 90u && trk[3].mw == 90u;
+    bad += check("  the knob card is noted: CC77 on T2 (LFO > FILTER, its value), again unchanged; CC1 on T4 (the wheel)", ok);
+    return bad;
+}
 int main(void)
 {
     int bad = controls_test() + sustain_test() + ownership_test() + clock_test(1) + clock_test(2) + clock_arp_and_boundaries() +
-              arp_ext_stop_test() + usb_burst_test() + route_test() + route_block_test() + route_track_test() + follow_test() + cc_map_test() + test_cc_contract() + learn_test() + pc_test() + test_mout() + test_mout_review();
+              arp_ext_stop_test() + usb_burst_test() + route_test() + route_block_test() + route_track_test() + follow_test() + cc_map_test() + test_cc_contract() + learn_test() + pc_test() + test_mout() + test_mout_review() +
+              wl_ch16_test() + wl_encoder_test() + wl_map_test();
     printf("%s\n", bad ? "MIDI CONTROL/CLOCK TEST FAILED" : "MIDI control/clock integration tests passed"); return bad != 0;
 }

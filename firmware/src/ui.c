@@ -205,6 +205,13 @@ static struct {
     } ml;
     volatile uint8_t mpc[NTRK];  /* MIDI Program Change per track, 0x80 | program, 0 none (midi_control.c mpc_io: here
                                   * for the same reason as ml.io; midi_pc_poll) */
+    struct {                     /* WaveLoop build: the Oxygen's encoder and the knob card (midi_control.c wl_io: here
+                                  * for the same reason as ml.io; ui_input.c wl_encoder, ui_draw.c draw_knob_card) */
+        volatile uint8_t io[8];
+        uint8_t seq, on, trk, id;  /* the card shown: the count it was taken at, up, its track and parameter, */
+        int16_t v;               /* .. its value, */
+        uint32_t t;              /* .. fm1_ms of the move */
+    } wl;
 } ui;
 
 enum { CF_NONE, CF_CLEAR_SEQ, CF_CLEAR_TRK, CF_OVR_PROJ, CF_OVR_USER, CF_LOAD_PAT,
@@ -1215,6 +1222,18 @@ static void clean_engine(void) { clean_engine_of(TSEL); }
  * from 0: its n-th preset, loaded as from there (the track's own settings kept, one undo for a run of them). A program
  * past the last is ignored, not wrapped: a number is always the same sound */
 static volatile uint8_t *const mpc_io = ui.mpc;
+static volatile uint8_t *const wl_io = ui.wl.io;
+/* a knob on the FM-1 moved parameter id of track t (the main loop): on HOME, where nothing else shows the value, the knob
+ * card shows it as a MIDI knob's does (a page's own cards light the knob turned and show its value, its graph under
+ * them: no card over it) */
+static void kc_knob(const track_t *t, uint32_t id)
+{
+    if (id >= P_COUNT || !ui.home)
+        return;
+    fm1_irq_off();                                   /* (the ISR notes MIDI knobs into the same bytes) */
+    kc_note(trk_index(t), id, t->p[id]);
+    fm1_irq_on();
+}
 static void midi_pc_load(track_t *t, uint32_t n)
 {
     uint32_t e = t->eng_req % NENGINES;

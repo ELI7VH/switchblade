@@ -217,24 +217,31 @@ static int midi_track_held(uint32_t track)
 /* The fixed CC map (#103; FM1-Four Task 2.1): always on, these CCs only, on the track the channel plays (ROUT as notes),
  * the same numbers in and out (MIDI OUT: mout_param). A CC sets its parameter as a knob would, 0..127 over the
  * parameter's range (64: the middle of a bipolar one), and AUTOMATION records it as a knob move (motion_capture: the
- * selected track, armed and playing). CC74 71 79 70 are the EDIT screen's four controls of the track's machine
- * (engine_t.knob: CUT, RES, ENV and the machine's own), CC7 its VOLUME (LEVEL); the rest as Felucca had them. CC121
- * resets none of them (RP-015: they are the sound's) */
+ * selected track, armed and playing). CC121 resets none of them (RP-015: they are the sound's).
+ * WaveLoop build: the map is the Oxygen Pro 61's (README "WaveLoop build"): knobs 1..8 CC74 71 5 10 76 77 78 70 are
+ * the machine's CUT and RES (engine_t.knob[0..1]), GLIDE, PAN, the LFO's RATE, its depth to the filter and to the amp
+ * (tremolo) and its WAVE; faders 5..8 CC73 75 79 72 the amp envelope ATK DEC SUS REL (NANO's 303: DEC is its DECAY,
+ * the rest is not its: cc_param); CC7 VOLUME. EDIT's KNOB 3 ENV and the machine's KNOB 4 moved to CC16 / CC17 (up to
+ * Switch Blade 9d07527 they were CC79 / CC70) */
 #define CC_VOL 7u
 #define CC_CUT 74u
 #define CC_RES 71u
-#define CC_ENV 79u
-#define CC_MAC 70u
+#define CC_ENV 16u
+#define CC_MAC 17u
 static const uint8_t CC_KNOB[4] = {CC_CUT, CC_RES, CC_ENV, CC_MAC};   /* EDIT K1..K4 */
 static const uint8_t MIDI_CC_MAP[][2] = {          /* the common rows, the same on every machine */
-    {5, P_GLIDE}, {CC_VOL, P_LEVEL}, {10, P_PAN}, {72, P_REL}, {73, P_ATK}, {75, P_DEC},
-    {91, P_REV}, {93, P_CHOR}, {94, P_DLY},
+    {5, P_GLIDE}, {CC_VOL, P_LEVEL}, {10, P_PAN}, {70, P_LWAVE}, {72, P_REL}, {73, P_ATK}, {75, P_DEC},
+    {76, P_LRATE}, {77, P_LD_FLT}, {78, P_LD_AMP}, {79, P_SUS}, {91, P_REV}, {93, P_CHOR}, {94, P_DLY},
 };
+/* NANO's 303 runs its own envelope (eng_acid.c): DEC (CC75) is its DECAY, ATK SUS REL are not its */
+static int cc_303(const track_t *t) { return eng_idx(t->eng_req) == ENGI_ACID && !sub_on(t); }
 /* the parameter CC cc sets on track t, -1 none */
 static int32_t cc_param(const track_t *t, uint32_t cc)
 {
     const engine_t *e = ENGINES[eng_idx(t->eng_req)];
     uint32_t i;
+    if (cc_303(t) && (cc == 73u || cc == 75u || cc == 79u || cc == 72u))
+        return cc == 75u ? P_E2 : -1;               /* (the 303's DECAY: E3, its KNOB 4) */
     for (i = 0; i < 4u; i++)
         if (CC_KNOB[i] == cc)
             return e->knob[i];
@@ -486,12 +493,53 @@ static __attribute__((noinline)) void mout_block(uint32_t seq_n, uint32_t clock_
     mout_run = song.playing;
 }
 
+/* WaveLoop build: what the audio ISR hands the main loop for the Oxygen (README "WaveLoop build"), in ui.wl.io (ui.c; a
+ * build without the UI: none; not globals here, as ml_io). Bytes 0..2 the encoder: CC114's turns (signed, relative 64 =
+ * still), CC112's (fader buttons 1 / 2: 63 previous, 65 next machine, 64 their release), CC115's presses; done by
+ * ui_input.c wl_encoder. Bytes 3..7 the knob card (ui_draw.c draw_knob_card): a count that moves on each change, the
+ * track, the parameter (P_*, or KC_WHEEL: the mod wheel 0..127), its value (LSB first) */
+#define KC_WHEEL 0xFEu
+static volatile uint8_t *const wl_io;
+#define wl_enc_sound (wl_io[0])
+#define wl_enc_bank (wl_io[1])
+#define wl_enc_press (wl_io[2])
+static void kc_note(uint32_t k, uint32_t id, int32_t v)   /* a knob moved: parameter id of track k is v now */
+{
+    if (!wl_io)
+        return;
+    wl_io[4] = (uint8_t)k;
+    wl_io[5] = (uint8_t)id;
+    wl_io[6] = (uint8_t)v;
+    wl_io[7] = (uint8_t)((uint32_t)v >> 8);
+    wl_io[3]++;
+}
+/* 1: cc is the Oxygen's encoder (any channel ROUT hears), counted for the main loop; never the CC map's */
+static int __attribute__((noinline)) wl_encoder_cc(uint32_t cc, uint32_t value)
+{
+    int32_t d = (int32_t)value - 64;
+    if (cc != 112u && cc != 114u && cc != 115u)
+        return 0;
+    if (!wl_io)
+        return 1;
+    if (cc == 115u) {
+        if (value)
+            wl_enc_press++;
+    } else if (d) {
+        volatile uint8_t *a = cc == 114u ? &wl_enc_sound : &wl_enc_bank;
+        *a = (uint8_t)clamp((int8_t)*a + d, -64, 63);
+    }
+    return 1;
+}
+
 /* a CC sets parameter id of track t as a knob would: 0..127 over its range */
 static void midi_cc_set(track_t *t, uint32_t id, uint32_t value)
 {
     const param_desc_t *d = param_desc_of(eng_idx(t->eng_req), id);
     int32_t v = d->min + ((int32_t)value * (d->max - d->min) + 63) / 127;
-    if (d->max <= d->min || t->p[id] == v)
+    if (d->max <= d->min)
+        return;
+    kc_note(trk_index(t), id, v);                  /* (the card: also for a value it already has) */
+    if (t->p[id] == v)
         return;
     t->p[id] = (int16_t)v;
     (void)motion_capture(t, id, (int16_t)v);
@@ -517,10 +565,10 @@ static uint32_t ml_id(uint32_t code)        /* an entry's code -> P_* id, P_COUN
 {
     return code >= ML_E0 ? P_E0 + code - ML_E0 : code && code <= P_E0 ? code - 1u : P_COUNT;
 }
-static int ml_free_cc(uint32_t cc)          /* (CC1 6 38 64 98..101 120..127: midi_control's own) */
+static int ml_free_cc(uint32_t cc)          /* (CC1 6 38 64 98..101 112 114 115 120..127: midi_control's own) */
 {
     return cc && cc < 120u && cc != 1u && cc != 6u && cc != 11u && cc != 32u && cc != 38u && cc != 64u &&
-           (cc < 96u || cc > 101u);
+           (cc < 96u || cc > 101u) && cc != 112u && cc != 114u && cc != 115u;   /* (WaveLoop: the encoder's) */
 }
 /* 1: cc is learned (set here) or taken by MIDI LEARN waiting for one */
 static int __attribute__((noinline)) midi_learned(uint32_t cc, uint32_t value)
@@ -560,6 +608,7 @@ static void midi_control(uint32_t ch, uint32_t cc, uint32_t value)
     switch (cc) {
     case 1:
         c->wheel = (uint8_t)value;
+        kc_note(trk_index(midi_track(ch)), KC_WHEEL, (int32_t)value);   /* (WaveLoop: the card; voice.c its vibrato) */
         break;
     case 120:                                      /* All Sound Off: ignores the pedal */
         mask = midi_targets(ch);
@@ -607,7 +656,8 @@ static void midi_control(uint32_t ch, uint32_t cc, uint32_t value)
         }
         break;
     default:
-        midi_cc_map(midi_track(ch), cc, value);
+        if (!wl_encoder_cc(cc, value))
+            midi_cc_map(midi_track(ch), cc, value);
         break;
     }
 }

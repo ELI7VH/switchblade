@@ -1126,8 +1126,9 @@ static int32_t midi_slot(uint32_t ch)      /* the track channel ch plays, -1 non
 {
     int32_t b = midi_base(), omni = -1;
     uint32_t i;
-    if (b != -2)
-        return b >= 0 && ch - (uint32_t)b < NPART ? (int32_t)(ch - (uint32_t)b) : -1;
+    if (b != -2)                           /* (WaveLoop build: channel 16 outside the block plays and edits the track
+                                            * selected on the FM-1, so a controller on 16 follows ALGORITHM) */
+        return b >= 0 && ch - (uint32_t)b < NPART ? (int32_t)(ch - (uint32_t)b) : b >= 0 && ch == 15u ? (int32_t)song.sel : -1;
     for (i = 0; i < NPART; i++) {
         uint32_t c = mch_get(i);
         if (c == ch)
