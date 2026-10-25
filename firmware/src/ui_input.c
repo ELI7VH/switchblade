@@ -317,6 +317,28 @@ static uint32_t key_leds(uint32_t *br)                 /* (*br: a layer's keys t
  * rest: the root's keys lit, the scale's at the mid level, the others glowing; the keys held and playing as ever
  * (lit, INV dark). Each picture is built off-line and copied one byte per column, the
  * glow first: an LED going from lit to dim never has a dark frame */
+/* WaveLoop: the OP shift's LEDs. On an ARP page OP1 is lit (its shift is there: ZOOM); OP1 held, OCT- / OCT+ light
+ * where ZOOM out / in would do something (ash_subdivide on a copy of the pattern; nothing changes). Bit 0 OCT-, 1 OCT+,
+ * bit 2 the page has the shift */
+static int op_held(uint32_t n);                        /* (ui_layer.c) */
+static uint32_t op_shift_leds(void)
+{
+    arp_pat_t c;
+    uint32_t in, steps, rate, out;
+    if (ui.home || ui.menu || ui.confirm || name_on() || cur_page()->graph != GR_ARP)
+        return 0;
+    out = 4u;
+    if (!op_held(1))
+        return out;
+    for (in = 0; in < 2u; in++) {
+        c = arp_pat[song.sel];
+        steps = arp_steps(TSEL);
+        rate = (uint32_t)clamp(TSEL->p[P_ARATE], 0, 7);
+        if (ash_subdivide(&c, &steps, &rate, (int)in) == AZ_OK)
+            out |= 1u << in;
+    }
+    return out;
+}
 static void ui_leds(void)
 {
     uint8_t nl[FM1_NCOL] = {0}, nd[FM1_NCOL] = {0}, own[FM1_NCOL] = {0}, nb[FM1_NCOL] = {0};
@@ -341,6 +363,11 @@ static void ui_leds(void)
         led_put(nb, panel.btn[layer_btn()], 1);
     led_put(nl, panel.btn[B_REC], song.rec != 0u && ui.layer != LAYER_REC);   /* (its layer: it breathes) */
     k = oct_leds();
+    if ((c = op_shift_leds()) != 0u) {                  /* WaveLoop: OP1 the ARP page's shift; held, the OCTs ZOOM */
+        led_put(nl, panel.btn[B_FX], 1);
+        if (op_held(1))
+            k = c & 3u;                                 /* (only the ways ZOOM can go; no breathing) */
+    }
     led_put(nl, panel.btn[B_OCTDN], (int)(k & 1u));
     led_put(nl, panel.btn[B_OCTUP], (int)((k >> 1) & 1u));
     led_put(nb, panel.btn[B_OCTUP], (int)(k & OCT_BREATH));
