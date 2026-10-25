@@ -34,6 +34,9 @@
 #                   (1.2: when it writes, the power-on restore, damaged copies, a write cut short, wear over a session),
 #                   malformed transfers, transport-stop timeouts, MIDI and UART recovery; the MENU settings over the
 #                   editor (MENU_DESC / MENU_SET: every item, clamping, unknown ids, saving, USB SERIAL applied later).
+# ARP (tests/arp_shape_test.c, WaveLoop): SHAYPE's core (src/arp_shape.c) against WaveLoop's Shape Arp: tests/arp_vectors.h, written
+#                   by tools/arp_vectors.mjs running the toy's sequence.mjs (patterns, chords, roots, directions, boundaries,
+#                   passes), played tick by tick as seq.c arp_fire plays them: every note, step and length the same.
 # CHORD (tests/chord_test.c): the chord keys (src/chord.c): diatonic triads / sevenths of several scales and roots,
 #                   the fixed shapes and voicings (at most 4 notes), names, MONO plays the root, a release ends
 #                   exactly what its key / MIDI note started, recording, the ARP, MIDI IN.
@@ -242,6 +245,8 @@ if [ -f build/gen/felucca_tables.h ]; then
     run "scales: white-key mapping and note lifecycle" "$OUT/scale_test"
     $CC -w -Ibuild/gen -Ifirmware/src -o "$OUT/chord_test" tests/chord_test.c -lm
     run "chord keys: diatonic and fixed chords, voicings, MONO root, releases, recording, ARP, MIDI IN" "$OUT/chord_test"
+    $CC -O1 -w -Ifirmware/src -Itests -o "$OUT/arp_shape_test" tests/arp_shape_test.c
+    run "ARP (SHAYPE): every case of tests/arp_vectors.h as WaveLoop's sequence.mjs plays it, the toy's unit tests, editing" "$OUT/arp_shape_test"
     $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/speaker_test" tests/speaker_test.c -lm
     run "SPEAKER EQ: FLAT / LOWCUT / BASS+ responses, BASS+ harmonics of the bass, the sub cut, no offset after, headroom on a full-scale kick (#180)" "$OUT/speaker_test"
     run "DSP render (ANALOG preset 0)" "$OUT/hostsim" 0 0 1 "$OUT/render.wav"
