@@ -122,209 +122,126 @@ static int loads_and_song(void)
     seq_stop(); bad += check("song stop restores current base and editable pattern", t->p[P_REV] == 43 && t->step[0].note[0] == 72);
     return bad;
 }
-static int repeat_mode(void)
+/* WaveLoop: the ARP is SHAYPE (seq.c arp_fire over arp_shape.c; the core's parity with the toy: tests/arp_shape_test.c).
+ * Here the host: the keys held as the chord, the steps on the track's clock, the notes and their gates, HOLD, ROOT,
+ * the rate, recording. arp_next runs blocks until the next step plays; with GATE under 100 % and length-1 notes the
+ * notes sounding then are exactly that step's */
+static uint32_t arp_next(track_t *t, uint8_t *got)
 {
-    int bad = 0; ui_power_on(); track_t *t = &trk[0];
-    t->p[P_AMODE] = 6; t->p[P_AOCT] = 4; t->p[P_APROB] = 127;
-    arp_add(t, 72); arp_add(t, 60);
-    arp_tick(t, CTL);
-    bad += check("REPEAT retriggers the last played note without octave traversal", t->arp_note == 60);
-    t->arp_pos = 0xFFFFFFF; arp_tick(t, CTL);
-    bad += check("REPEAT remains on the same note on the next pulse", t->arp_note == 60);
-    arp_remove(t, 60); arp_remove(t, 72); arp_tick(t, CTL);
-    bad += check("REPEAT releases after the last held key is released", !t->nheld && !t->arp_note);
-    t->p[P_AHOLD] = 1; arp_add(t, 65); arp_remove(t, 65); t->arp_pos = 0xFFFFFFF; arp_tick(t, CTL);
-    bad += check("REPEAT supports ARP HOLD", t->nheld == 1u && t->arp_note == 65);
-    return bad;
-}
-
-/* 1.2 (Discussion #95): the ARP modes appended after REPEAT (seq.c AM_*), each over a 3- and a 4-note chord, OCT,
- * ORD PLAY, HOLD, REPEAT switched in and out, WALK's random steps the same from the same seed */
-static void arp_fresh(track_t *t, int32_t mode, int32_t oct, const uint8_t *notes, uint32_t n)
-{
-    uint32_t i;
-    if (t->arp_note)
-        arp_off(t);
-    t->nheld = 0; t->arp_phys = 0;
-    t->p[P_AMODE] = (int16_t)mode; t->p[P_AOCT] = (int16_t)oct; t->p[P_APROB] = 127;
-    for (i = 0; i < n; i++)
-        arp_add(t, notes[i]);
-}
-static int arp_plays(track_t *t, const uint8_t *want, uint32_t n)   /* the next n steps play these notes */
-{
-    uint32_t i;
-    int ok = 1;
-    for (i = 0; i < n; i++) {
-        t->arp_pos = 0xFFFFFFF;
+    uint32_t idx = t->arp_idx, g = 0, i;
+    while (t->arp_idx == idx && g++ < 200000u)
         arp_tick(t, CTL);
-        ok &= t->arp_note == want[i] && !t->arp_ch[0];
-        if (t->arp_note != want[i])
-            printf("    step %u: %u, not %u\n", (unsigned)i, (unsigned)t->arp_note, (unsigned)want[i]);
+    for (i = 0; i < t->arp_n; i++)
+        got[i] = arp_snd[trk_index(t)].note[i];
+    return t->arp_n;
+}
+static int arp_seq(track_t *t, const uint8_t *want, uint32_t steps, uint32_t per)   /* the next steps play these */
+{
+    uint8_t got[ARP_SND];
+    uint32_t s, n;
+    int ok = 1;
+    for (s = 0; s < steps; s++) {
+        n = arp_next(t, got);
+        if (n != per || memcmp(got, want + s * per, per)) {
+            ok = 0;
+            printf("    step %u: %u notes (%u %u), want %u %u\n", (unsigned)s, (unsigned)n, got[0], n > 1 ? got[1] : 0u,
+                   want[s * per], per > 1 ? want[s * per + 1] : 0u);
+        }
     }
     return ok;
 }
-static int arp_new_modes(void)
+static void arp_chord(track_t *t, const uint8_t *notes, uint32_t n)
 {
-    static const uint8_t CEG[3] = {60, 64, 67}, CEGB[4] = {60, 64, 67, 71}, GCE[3] = {67, 60, 64};
-    static const uint8_t FIVE[5] = {60, 64, 67, 71, 74};
+    uint32_t i;
+    arp_silence(t);
+    t->nheld = 0; t->arp_phys = 0;
+    for (i = 0; i < n; i++)
+        arp_add(t, notes[i]);
+}
+static int shape_arp(void)
+{
+    static const uint8_t CEGBD[5] = {60, 64, 67, 71, 74}, CEG[3] = {60, 64, 67};
+    uint8_t got[ARP_SND];
+    uint32_t i, k, c0;
     int bad = 0, ok;
-    uint32_t i, k;
-    uint8_t a[32], b[32];
     track_t *t;
     ui_power_on();
     t = &trk[0];
-    ok = TP[P_AMODE].max == 14 && str_eq(TP[P_AMODE].names[6], "REPEAT") && str_eq(TP[P_AMODE].names[7], "DNUP") &&
-         str_eq(TP[P_AMODE].names[8], "UP+8") && str_eq(TP[P_AMODE].names[9], "CONV") &&
-         str_eq(TP[P_AMODE].names[10], "DIVG") && str_eq(TP[P_AMODE].names[11], "PINKY") &&
-         str_eq(TP[P_AMODE].names[12], "THUMB") && str_eq(TP[P_AMODE].names[13], "WALK") &&
-         str_eq(TP[P_AMODE].names[14], "CHORD");
-    for (i = 0; i <= 14u; i++)
-        ok &= strlen(TP[P_AMODE].names[i]) <= 6u;
-    bad += check("ARP modes: OFF..REPEAT keep their numbers, DNUP UP+8 CONV DIVG PINKY THUMB WALK CHORD appended (<= 6 chars)", ok);
-    /* the modes before 1.2 play as they did */
-    arp_fresh(t, AM_UP, 1, CEG, 3);   ok = arp_plays(t, (const uint8_t[]){60, 64, 67, 60}, 4);
-    arp_fresh(t, AM_DN, 1, CEG, 3);   ok &= arp_plays(t, (const uint8_t[]){67, 64, 60, 67}, 4);
-    arp_fresh(t, AM_UPDN, 1, CEG, 3); ok &= arp_plays(t, (const uint8_t[]){60, 64, 67, 64, 60}, 5);
-    bad += check("ARP UP, DN, UPDN as before", ok);
-    /* 1.2: ORD plays the notes in the order pressed (it played as UP before), across OCT, ARP 2's ORD NOTE or PLAY */
-    arp_fresh(t, AM_ORD, 1, GCE, 3);  ok = arp_plays(t, (const uint8_t[]){67, 60, 64, 67}, 4);
-    arp_fresh(t, AM_ORD, 2, GCE, 3);  ok &= arp_plays(t, (const uint8_t[]){67, 60, 64, 79, 72, 76, 67}, 7);
-    arp_fresh(t, AM_ORD, 1, CEG, 3);  ok &= arp_plays(t, (const uint8_t[]){60, 64, 67, 60}, 3);
-    t->p[P_AORDER] = 1;
-    arp_fresh(t, AM_ORD, 1, GCE, 3);  ok &= arp_plays(t, (const uint8_t[]){67, 60, 64}, 3);
-    t->p[P_AORDER] = 0;
-    arp_fresh(t, AM_ORD, 1, GCE, 3);  arp_remove(t, 60); arp_add(t, 62);   /* C let go, D pressed: G E D */
-    ok &= arp_plays(t, (const uint8_t[]){67, 64, 62, 67}, 4);
-    bad += check("ARP ORD (1.2): G C E pressed play G C E (not C E G), across OCT 2, either ORD switch; a new note last", ok);
-    arp_fresh(t, AM_DNUP, 1, CEG, 3);  ok = arp_plays(t, (const uint8_t[]){67, 64, 60, 64, 67, 64}, 6);
-    arp_fresh(t, AM_DNUP, 1, CEGB, 4); ok &= arp_plays(t, (const uint8_t[]){71, 67, 64, 60, 64, 67, 71}, 7);
-    arp_fresh(t, AM_DNUP, 2, CEG, 3);  ok &= arp_plays(t, (const uint8_t[]){79, 76, 72, 67, 64, 60, 64, 67, 72, 76, 79}, 11);
-    bad += check("ARP DNUP: G E C E; B G E C E G for 4; across OCT 2", ok);
-    arp_fresh(t, AM_UP8, 1, CEG, 3);  ok = arp_plays(t, (const uint8_t[]){60, 64, 67, 72, 60}, 5);
-    arp_fresh(t, AM_UP8, 1, CEGB, 4); ok &= arp_plays(t, (const uint8_t[]){60, 64, 67, 71, 72, 60}, 6);
-    arp_fresh(t, AM_UP8, 2, CEG, 3);  ok &= arp_plays(t, (const uint8_t[]){60, 64, 67, 72, 76, 79, 84, 60}, 8);
-    t->p[P_AORDER] = 1;                               /* ORD PLAY: as played, G C E, then G an octave up */
-    arp_fresh(t, AM_UP8, 1, GCE, 3);  ok &= arp_plays(t, (const uint8_t[]){67, 60, 64, 79, 67}, 5);
-    t->p[P_AORDER] = 0;
-    bad += check("ARP UP+8: C E G C'; C E G B C'; OCT 2 ends on C''; ORD PLAY: the first played an octave over the top", ok);
-    arp_fresh(t, AM_CONV, 1, CEG, 3);  ok = arp_plays(t, (const uint8_t[]){60, 67, 64, 60}, 4);
-    arp_fresh(t, AM_CONV, 1, CEGB, 4); ok &= arp_plays(t, (const uint8_t[]){60, 71, 64, 67, 60}, 5);
-    arp_fresh(t, AM_CONV, 2, CEG, 3);  ok &= arp_plays(t, (const uint8_t[]){60, 79, 64, 76, 67, 72, 60}, 7);
-    arp_fresh(t, AM_DIVG, 1, CEG, 3);  ok &= arp_plays(t, (const uint8_t[]){64, 67, 60, 64}, 4);
-    arp_fresh(t, AM_DIVG, 1, CEGB, 4); ok &= arp_plays(t, (const uint8_t[]){67, 64, 71, 60, 67}, 5);
-    bad += check("ARP CONV: C G E, C B E G (outside in), OCT 2; DIVG: E G C, G E B C (inside out)", ok);
-    arp_fresh(t, AM_PINKY, 1, CEG, 3);  ok = arp_plays(t, (const uint8_t[]){60, 67, 64, 67, 60}, 5);
-    arp_fresh(t, AM_PINKY, 1, CEGB, 4); ok &= arp_plays(t, (const uint8_t[]){60, 71, 64, 71, 67, 71, 60}, 7);
-    arp_fresh(t, AM_PINKY, 2, CEG, 3);  ok &= arp_plays(t, (const uint8_t[]){60, 79, 64, 79, 67, 79, 72, 79, 76, 79, 60}, 11);
-    arp_fresh(t, AM_THUMB, 1, CEG, 3);  ok &= arp_plays(t, (const uint8_t[]){60, 64, 60, 67, 60}, 5);
-    arp_fresh(t, AM_THUMB, 1, CEGB, 4); ok &= arp_plays(t, (const uint8_t[]){60, 64, 60, 67, 60, 71, 60}, 7);
-    arp_fresh(t, AM_THUMB, 1, CEG, 1);  ok &= arp_plays(t, (const uint8_t[]){60, 60, 60}, 3);   /* (one note) */
-    bad += check("ARP PINKY: C G E G, C B E B G B, the OCT 2 top; THUMB: C E C G, C E C G C B; one note", ok);
-    /* CHORD: the held notes together, an octave up each step through OCT; the first 4 of more */
-    arp_fresh(t, AM_CHORD, 2, CEG, 3);
-    ok = 1;
-    for (i = 0; i < 4u; i++) {
-        uint32_t o = 12u * (i & 1u);
-        t->arp_pos = 0xFFFFFFF;
-        arp_tick(t, CTL);
-        ok &= t->arp_note == 60u + o && t->arp_ch[0] == 64u + o && t->arp_ch[1] == 67u + o && !t->arp_ch[2];
-    }
-    arp_fresh(t, AM_CHORD, 1, FIVE, 5);
-    t->arp_pos = 0xFFFFFFF;
+    bad += check("ARP: the power-on pattern is SHAYPE (the toy's DEFAULT_PATTERN), 4 steps, 1/8, GATE 75 %, ARP off",
+                 arp_pat[0].n == 8u && arp_pat[0].note[1] == ARP_NOTE(0, 2, 1) && t->p[P_APROB] == 4 && t->p[P_ARATE] == 3 &&
+                 t->p[P_AGATE] == 75 && !t->p[P_AMODE] && t->p[P_APAT] == 1);
+    t->p[P_AMODE] = 1;
+    arp_chord(t, CEGBD, 5);
+    bad += check("  C E G B D held: pass 1 C+G E+B G+B C+B, pass 2 a place up (the toy's example)",
+                 arp_seq(t, (const uint8_t[]){60, 67, 64, 71, 67, 71, 60, 71, 64, 71, 67, 74, 71, 74, 64, 74}, 8, 2));
+    t->p[P_AOCT] = AD_DOWN;
+    arp_chord(t, CEGBD, 5);
+    bad += check("  DOWN: the second pass a place down, wrapping round the top (D+E)",
+                 arp_seq(t, (const uint8_t[]){60, 67, 64, 71, 67, 71, 60, 71, 74, 64}, 5, 2));
+    t->p[P_AOCT] = AD_UP; t->p[P_AORDER] = AB_OCT;
+    arp_chord(t, CEG, 3);
+    bad += check("  BOUND OCT over C E G: row 4 is C an octave up", arp_seq(t, (const uint8_t[]){60, 67, 64, 72}, 2, 2));
+    t->p[P_AORDER] = AB_WRAP; t->p[P_AROOT] = 8;     /* ROOT G */
+    arp_chord(t, CEG, 3);
+    bad += check("  ROOT G over C E G: G C E, step 1 plays G and E an octave up", arp_seq(t, (const uint8_t[]){67, 76}, 1, 2));
+    t->p[P_AROOT] = 0;
+    /* the rate: a step of 1/8 at 120 BPM is 11025 samples, 1/16T 3675 */
+    arp_chord(t, CEG, 3);
+    arp_next(t, got);
+    c0 = t->arp_clk;
+    arp_next(t, got);
+    k = t->arp_clk - c0;
+    t->p[P_ARATE] = 6;
+    arp_next(t, got);
+    c0 = t->arp_clk;
+    arp_next(t, got);
+    bad += check("  RATE: 1/8 and 1/16T steps their length (within a block)",
+                 k >= 11025u && k < 11025u + CTL && t->arp_clk - c0 >= 3675u && t->arp_clk - c0 < 3675u + CTL);
+    t->p[P_ARATE] = 3;
+    /* gates: a note of length 2 over GATE 75 % sounds 1.5 steps: on at the next step, gone before the one after */
+    fm1_irq_off(); arp_pat[0].n = 0; ash_paint(&arp_pat[0], 0, 0, 2); fm1_irq_on();
+    arp_chord(t, CEG, 3);
+    arp_next(t, got);
+    ok = t->arp_n == 1u && got[0] == 60;
+    arp_next(t, got);
+    ok &= t->arp_n == 1u && got[0] == 60;
+    arp_next(t, got);
+    ok &= t->arp_n == 0u;
+    bad += check("  a note two steps long sounds 1.5 steps at GATE 75 %", ok);
+    ash_load(&arp_pat[0], 0);
+    /* let go: the notes end; HOLD: the chord stays, the next press replaces it from step 1 */
+    arp_chord(t, CEG, 3);
+    arp_next(t, got);
+    for (i = 0; i < 3u; i++) arp_remove(t, CEG[i]);
     arp_tick(t, CTL);
-    ok &= t->arp_note == 60u && t->arp_ch[0] == 64u && t->arp_ch[1] == 67u && t->arp_ch[2] == 71u;
-    t->arp_off = 1;                                    /* its gate ends: all four end */
-    arp_tick(t, 2);
-    ok &= !t->arp_note && !t->arp_ch[0] && !t->arp_ch[1] && !t->arp_ch[2];
-    arp_fresh(t, AM_CHORD, 1, CEG, 3);
-    t->arp_pos = 0xFFFFFFF;
-    arp_tick(t, CTL);
-    arp_remove(t, 60); arp_remove(t, 64); arp_remove(t, 67);
-    arp_tick(t, CTL);                                  /* let go: the chord ends */
-    ok &= !t->nheld && !t->arp_note && !t->arp_ch[0] && !t->arp_ch[1];
-    bad += check("ARP CHORD: C E G together, then an octave up (OCT 2); 5 held: the first 4; the gate and a release end them all", ok);
-    /* WALK: from the bottom, one place up or down each step, inside the list; the same from the same seed */
-    ok = 1;
-    for (k = 0; k < 2u; k++) {
-        rng_state = 0x2468ACEu;
-        arp_fresh(t, AM_WALK, 2, CEGB, 4);             /* the list: C E G B C' E' G' B' */
-        for (i = 0; i < 32u; i++) {
-            t->arp_pos = 0xFFFFFFF;
-            arp_tick(t, CTL);
-            (k ? b : a)[i] = t->arp_note;
-        }
-    }
-    ok &= a[0] == 60u && !memcmp(a, b, sizeof a);
-    {
-        static const uint8_t L[8] = {60, 64, 67, 71, 72, 76, 79, 83};
-        uint32_t pos[32], up = 0, dn = 0;
-        for (i = 0; i < 32u; i++) {
-            for (pos[i] = 0; pos[i] < 8u && L[pos[i]] != a[i]; pos[i]++)
-                ;
-            ok &= pos[i] < 8u;
-            if (i) {
-                ok &= pos[i] == pos[i - 1u] + 1u || pos[i] + 1u == pos[i - 1u];
-                up += pos[i] > pos[i - 1u];
-                dn += pos[i] < pos[i - 1u];
-            }
-        }
-        ok &= up > 4u && dn > 4u;
-    }
-    rng_state = 0x13579BDu;
-    arp_fresh(t, AM_WALK, 2, CEGB, 4);
-    for (i = 0; i < 32u; i++) {
-        t->arp_pos = 0xFFFFFFF;
-        arp_tick(t, CTL);
-        b[i] = t->arp_note;
-    }
-    ok &= memcmp(a, b, sizeof a) != 0;
-    arp_remove(t, 71); arp_remove(t, 67);              /* notes let go: back inside the shorter list */
-    for (i = 0; i < 8u; i++) {
-        t->arp_pos = 0xFFFFFFF;
-        arp_tick(t, CTL);
-        ok &= t->arp_note == 60 || t->arp_note == 64 || t->arp_note == 72 || t->arp_note == 76;
-    }
-    bad += check("ARP WALK: from the bottom, a step up or down each time inside the list; the same seed the same walk", ok);
-    /* HOLD: the latched chord keeps its mode; a new chord replaces it */
+    bad += check("  the keys let go: nothing sounds, nothing held", !t->nheld && !t->arp_n);
     t->p[P_AHOLD] = 1;
-    arp_fresh(t, AM_PINKY, 1, CEG, 3);
-    arp_remove(t, 60); arp_remove(t, 64); arp_remove(t, 67);
-    ok = t->nheld == 3u && arp_plays(t, (const uint8_t[]){60, 67, 64, 67}, 4);
-    arp_add(t, 62); arp_add(t, 65); arp_add(t, 69);   /* D F A: replaces it, from the top of the pattern */
-    ok &= t->nheld == 3u && arp_plays(t, (const uint8_t[]){62, 69, 65, 69}, 4);
-    arp_remove(t, 62); arp_remove(t, 65); arp_remove(t, 69);
+    arp_chord(t, CEG, 3);
+    for (i = 0; i < 3u; i++) arp_remove(t, CEG[i]);
+    ok = t->nheld == 3u && arp_seq(t, (const uint8_t[]){60, 67, 64, 60}, 2, 2);   /* (C E G: row 3 wraps to C) */
+    arp_add(t, 62); arp_add(t, 65); arp_add(t, 69);
+    ok &= t->nheld == 3u && arp_seq(t, (const uint8_t[]){62, 69}, 1, 2);
+    for (i = 0; i < 3u; i++) arp_remove(t, (uint32_t[]){62, 65, 69}[i]);
+    bad += check("  HOLD: the chord stays after the keys; a new one replaces it from the first step", ok && t->nheld == 3u);
     t->p[P_AHOLD] = 0;
-    bad += check("ARP HOLD: PINKY keeps playing the latched C E G; D F A replaces it", ok);
-    /* REPEAT in and out: the last played note alone, then the new mode over the whole chord again */
-    arp_fresh(t, AM_REPEAT, 2, CEG, 3);
-    ok = arp_plays(t, (const uint8_t[]){67, 67}, 2);
-    t->p[P_AMODE] = AM_THUMB;                          /* (its step count goes on: step 2 of C E C G C' ..) */
-    ok &= arp_plays(t, (const uint8_t[]){60, 67, 60, 72}, 4);
-    t->p[P_AMODE] = AM_REPEAT;
-    ok &= arp_plays(t, (const uint8_t[]){67, 67}, 2);
-    t->p[P_AMODE] = AM_CHORD;
-    t->arp_pos = 0xFFFFFFF;
-    arp_tick(t, CTL);
-    ok &= t->arp_ch[0] && t->arp_ch[1];
-    t->p[P_AMODE] = AM_REPEAT;
-    ok &= arp_plays(t, (const uint8_t[]){67}, 1);      /* (CHORD's other notes ended) */
-    bad += check("ARP REPEAT switched to THUMB and back, CHORD to REPEAT: each plays its own", ok);
-    /* recording: CHORD writes its notes into one step, as the keys' chords (POLY) */
+    t->nheld = 0; arp_tick(t, CTL);
+    /* recording: the notes the arp plays are written, a step's chord into one step */
     song.sel = 0; song.rec = 1;
     t->p[P_VOICE] = V_POLY;
     for (i = 0; i < NSTEP; i++)
         t->step[i] = (step_t){0};
     seq_start();
     seq_tick(t, CTL);
-    arp_fresh(t, AM_CHORD, 1, CEG, 3);
-    t->arp_pos = 0xFFFFFFF;
+    fm1_irq_off(); ash_load(&arp_pat[0], 3); fm1_irq_on();   /* STABS: C E G together on step 1 */
+    arp_chord(t, CEG, 3);
     arp_tick(t, CTL);
     for (i = 0, k = 0; i < NSTEP; i++)
         k += t->step[i].n == 3u && t->step[i].note[0] == 60 && t->step[i].note[1] == 64 && t->step[i].note[2] == 67;
     seq_stop();
     song.rec = 0;
-    bad += check("ARP CHORD recorded: C E G into one step", k == 1u);
-    arp_fresh(t, AM_OFF, 1, CEG, 0);
+    bad += check("  recording: STABS' chord written into one step, C E G", k == 1u);
+    t->nheld = 0; t->p[P_AMODE] = 0; arp_tick(t, CTL);
+    ash_load(&arp_pat[0], 0);
     return bad;
 }
 /* ------------------------------------------------ 1.1 parameter locks --- */
@@ -697,8 +614,8 @@ static int auto_list(void)
 }
 int main(void)
 {
-    int bad = motion_recording() + motion_capacity() + probability_playback() + compact_project() + loads_and_song() + repeat_mode();
-    bad += arp_new_modes();
+    int bad = motion_recording() + motion_capacity() + probability_playback() + compact_project() + loads_and_song();
+    bad += shape_arp();
     bad += lock_playback() + lock_edit() + lock_project() + lock_ui() + lock_undo() + auto_list();
     printf("%s\n", bad ? "MOTION TEST FAILED" : "motion/chance/compact storage tests passed"); return bad != 0;
 }

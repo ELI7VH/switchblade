@@ -42,8 +42,8 @@ enum {                          /* per-track parameters */
     P_ED_FLT, P_ED_PIT, P_ED_SHP, P_ED_FX,     /* P_ED_FX: unused, kept for the formats / protocol */
     P_LRATE, P_LWAVE, P_LPHASE, P_LFADE,
     P_LD_PIT, P_LD_FLT, P_LD_SHP, P_LD_AMP,
-    P_AMODE, P_ARATE, P_AOCT, P_AGATE,
-    P_ASWING, P_APROB, P_AHOLD, P_AORDER,
+    P_AMODE, P_ARATE, P_AOCT, P_AGATE,         /* WaveLoop: the ARP is SHAYPE (arp_shape.c), these ids its settings: */
+    P_ASWING, P_APROB, P_AHOLD, P_AORDER,      /* ARP (on), RATE, DIR, GATE %, SWING, STEPS, HOLD, BOUND */
     P_ROOT, P_SCALE, P_QUANT, P_TRANS,
     P_SLEN, P_SDIV, P_SSWING, P_SGATE,
     P_DIST, P_CHOR, P_DLY, P_REV,
@@ -71,6 +71,10 @@ enum {                          /* per-track parameters */
     P_E0, P_E1, P_E2, P_E3, P_E4, P_E5, P_E6, P_E7,
     P_COUNT
 };
+/* WaveLoop: two of the retired DRUM lanes' ids hold the ARP's ROOT (OFF, C..B) and PAT (the factory pattern last
+ * loaded, 0 USER). Every older project and user preset holds 127 there (param_fit reads it as 0) */
+#define P_AROOT (P_RSV_LN + 2)
+#define P_APAT (P_RSV_LN + 3)
 
 enum {                          /* global parameters */
     G_BPM, G_SWING, G_CLOCK, G_TUNE,
@@ -307,13 +311,13 @@ typedef struct track {
     uint8_t nheld;
     uint8_t arp_phys;            /* keys physically held for the arp */
     uint8_t latched;             /* HOLD: keep notes after release */
-    /* arp runtime */
-    uint32_t arp_pos;            /* q8 samples into the current arp step */
-    uint32_t arp_idx;
-    uint8_t arp_note;            /* sounding arp note, 0 = none */
-    uint8_t arp_walk;            /* WALK: the place in the note list it stands on */
-    uint8_t arp_ch[3];           /* CHORD: the other notes sounding with arp_note, 0 = none */
-    uint32_t arp_off;            /* q8 sample time of its note-off */
+    /* arp runtime (SHAYPE: seq.c; its notes sounding: arp_snd) */
+    uint32_t arp_pos;            /* samples into the current arp step */
+    uint32_t arp_idx;            /* the step it plays, counted from the chord's first note (tick: step, pass) */
+    uint8_t arp_n;               /* notes it sounds now (arp_snd), 0 = none */
+    int8_t arp_ofs;              /* the pass's offset (arp_shape.c ash_pass_offset) */
+    uint8_t arp_rsv[3];
+    uint32_t arp_clk;            /* samples since the chord began: its notes' gates end against it (arp_snd .off) */
     /* sequencer */
     step_t step[NSTEP];
     uint32_t seq_pos;            /* q8 samples into the current step */

@@ -136,7 +136,7 @@ static int clock_test(uint32_t source)
 }
 static int clock_arp_and_boundaries(void)
 {
-    int bad = 0; clock_setup(1); trk[0].p[P_AMODE] = 1; trk[0].p[P_ARATE] = 2;
+    int bad = 0; clock_setup(1); trk[0].p[P_AMODE] = 1; trk[0].p[P_ARATE] = 5;
     queued(0x90, 60, 100, 1); queued(0x90, 64, 100, 1);
     clock_packet(1, 0xFA, 10); clock_to(1, 10, 1); uint32_t before = trk[0].arp_idx;
     clock_to(2, 20, 7);
@@ -155,17 +155,26 @@ static int clock_arp_and_boundaries(void)
 }
 /* ARP HOLD latched on an external clock: a Stop, a lost clock or a tap while stopped must not leave the arp note
  * sounding; Continue plays the latched chord again; the internal clock's free-running arp is unchanged by STOP */
-static void arp_latch(uint32_t mode)
+static int arp_has(const track_t *t, uint32_t note)   /* (WaveLoop: SHAYPE sounds several notes at once) */
+{
+    uint32_t i;
+    for (i = 0; i < t->arp_n; i++)
+        if (arp_snd[trk_index(t)].note[i] == note)
+            return 1;
+    return 0;
+}
+static void arp_latch(uint32_t mode)            /* (WaveLoop: SHAYPE's UP 4, BOUND OCT, over one note: C and its octaves) */
 {
     midi_test_reset(); song.g[G_CLOCK] = (int16_t)mode; events_block(CTL);
-    trk[0].p[P_AMODE] = 1; trk[0].p[P_AHOLD] = 1; trk[0].p[P_ARATE] = 2; trk[0].p[P_AGATE] = 120; trk[0].p[P_AOCT] = 2;
+    trk[0].p[P_AMODE] = 1; trk[0].p[P_AHOLD] = 1; trk[0].p[P_ARATE] = 5; trk[0].p[P_AGATE] = 94;
+    ash_load(&arp_pat[0], 1); trk[0].p[P_APROB] = 4; trk[0].p[P_AORDER] = AB_OCT;
     events_block(CTL);
 }
 static uint32_t arp_ext_run(uint32_t ms)       /* Start, tap 60 (latched), clocks until the arp plays 72 */
 {
     uint32_t i;
     clock_packet(1, 0xFA, ms); queued(0x90, 60, 100, 1); queued(0x80, 60, 0, 1);
-    for (i = 0; i < 400 && trk[0].arp_note != 72; i++) clock_packet(1, 0xF8, ms + i * 21u);
+    for (i = 0; i < 400 && !arp_has(&trk[0], 72); i++) clock_packet(1, 0xF8, ms + i * 21u);
     return ms + i * 21u;
 }
 static void idle_ms(uint32_t ms)               /* about ms of audio blocks, no MIDI */
@@ -177,26 +186,27 @@ static int arp_ext_stop_test(void)
 {
     int bad = 0; uint32_t ms, i, off;
     arp_latch(1); ms = arp_ext_run(10);
-    bad += check("ARP HOLD on the external clock plays the upper octave", trk[0].arp_note == 72 && gate_note(&trk[0], 72));
+    bad += check("ARP HOLD on the external clock plays the upper octave", arp_has(&trk[0], 72) && gate_note(&trk[0], 72));
     clock_packet(1, 0xFC, ms + 5); idle_ms(2000);
-    bad += check("external Stop ends the sounding ARP note", !trk[0].arp_note && !gate_note(&trk[0], 72) && !gate_note(&trk[0], 60));
+    bad += check("external Stop ends the sounding ARP note", !trk[0].arp_n && !gate_note(&trk[0], 72) && !gate_note(&trk[0], 60));
     bad += check("external Stop keeps the latched HOLD chord", trk[0].nheld == 1u && trk[0].held[0] == 60u);
     ms = fm1_ms; clock_packet(1, 0xFB, ms);
-    for (i = 1; i < 40 && !trk[0].arp_note; i++) clock_packet(1, 0xF8, ms + i * 21u);
-    bad += check("Continue plays the latched chord again", trk[0].arp_note != 0);
+    for (i = 1; i < 40 && !trk[0].arp_n; i++) clock_packet(1, 0xF8, ms + i * 21u);
+    bad += check("Continue plays the latched chord again", trk[0].arp_n != 0);
     arp_latch(1); arp_ext_run(10); idle_ms(2000);
-    bad += check("a lost external clock stops the transport and ends the ARP note", !song.playing && !trk[0].arp_note && !gate_note(&trk[0], 72));
+    bad += check("a lost external clock stops the transport and ends the ARP note", !song.playing && !trk[0].arp_n && !gate_note(&trk[0], 72));
     arp_latch(1); queued(0x90, 64, 100, 1); queued(0x80, 64, 0, 1);
-    bad += check("a tap while the external transport is stopped sounds", trk[0].arp_note == 64);
+    bad += check("a tap while the external transport is stopped sounds", arp_has(&trk[0], 64));
     idle_ms(2000);
-    bad += check("its ARP gate still ends in real time", !trk[0].arp_note && !gate_note(&trk[0], 64));
+    bad += check("its ARP gate still ends in real time", !trk[0].arp_n && !gate_note(&trk[0], 64));
     arp_latch(0); transport_req = 1; events_block(CTL); queued(0x90, 60, 100, 1); queued(0x80, 60, 0, 1);
-    for (i = 0; i < 4000 && trk[0].arp_note != 72; i++) events_block(CTL);
-    off = trk[0].arp_off;
+    for (i = 0; i < 4000 && !arp_has(&trk[0], 72); i++) events_block(CTL);
+    off = arp_snd[0].off[0] - trk[0].arp_clk;
     transport_req = 2; events_block(CTL);
-    bad += check("internal clock: STOP leaves the free-running ARP note to its gate", trk[0].arp_note == 72 && gate_note(&trk[0], 72) && trk[0].arp_off == off - CTL);
-    for (i = 0; i < 4000 && (!trk[0].arp_note || trk[0].arp_note == 72); i++) events_block(CTL);
-    bad += check("internal clock: the ARP keeps stepping after STOP", trk[0].arp_note && trk[0].arp_note != 72 && trk[0].nheld == 1u);
+    bad += check("internal clock: STOP leaves the free-running ARP note to its gate", arp_has(&trk[0], 72) && gate_note(&trk[0], 72) &&
+                 arp_snd[0].off[0] - trk[0].arp_clk == off - CTL);
+    for (i = 0; i < 4000 && (!trk[0].arp_n || arp_has(&trk[0], 72)); i++) events_block(CTL);
+    bad += check("internal clock: the ARP keeps stepping after STOP", trk[0].arp_n && !arp_has(&trk[0], 72) && trk[0].nheld == 1u);
     return bad;
 }
 /* USB-MIDI back-pressure: full 64-byte bulk packets (16 events) faster than the audio ISR drains the ring are

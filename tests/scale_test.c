@@ -84,6 +84,8 @@ static void key_events_test(void)
     t->p[P_QUANT] = 2;
     t->p[P_SCALE] = 2;                      /* C minor: E key plays Eb */
     t->p[P_AMODE] = 1;
+    ash_load(&arp_pat[trk_index(t)], 1);    /* (WaveLoop: SHAYPE's UP 4) */
+    t->p[P_APROB] = 4; t->p[P_AGATE] = 75;
     song.playing = song.rec = 1;
     fm1_in.notes = 1u << 8;                /* C# is silent */
     keyboard_block();
@@ -251,10 +253,10 @@ static void seq_quant_test(void)
 static uint32_t arp_seen[8];
 static uint32_t arp_run(track_t *t, uint32_t steps)  /* the notes of `steps` arp steps into arp_seen; the count sounding */
 {
-    uint32_t period = div_samples((uint32_t)t->p[P_ARATE]), i;
+    uint32_t period = arp_period(t), i;
     for (i = 0; i < steps && i < 8u; i++) {
         arp_tick(t, period);
-        arp_seen[i] = t->arp_note;
+        arp_seen[i] = t->arp_n ? arp_snd[trk_index(t)].note[t->arp_n - 1u] : 0u;
     }
     return steps;
 }
@@ -273,8 +275,10 @@ static void arp_reset(track_t *t)
     host_preset(t, 0, 0);                          /* ANALOG, POLY */
     t->engine = t->eng_req = 0;
     t->p[P_VOICE] = V_POLY;
-    t->p[P_AMODE] = 1;                             /* UP */
-    t->p[P_AOCT] = 1;
+    t->p[P_AMODE] = 1;                             /* (WaveLoop: SHAYPE, one note a step on STEPS 1: each step a pass, */
+    t->p[P_AOCT] = AD_UP;                          /* the row up the chord: the classic UP) */
+    t->p[P_APROB] = 1; t->p[P_AGATE] = 75; t->p[P_ARATE] = 5;
+    arp_pat[0].n = 1; arp_pat[0].note[0] = ARP_NOTE(0, 0, 1);
     t->p[P_SCALE] = 2;                             /* C minor */
     t->p[P_ROOT] = 0;
     t->p[P_TRANS] = 0;
@@ -315,7 +319,7 @@ static void arp_follow_test(void)
     t->p[P_AHOLD] = 0;                             /* HOLD off: the latched chord goes, nothing left sounding */
     events_block(CTL);
     arp_run(t, 2);
-    assert(t->nheld == 0 && t->arp_note == 0 && gated(t) == 0);
+    assert(t->nheld == 0 && t->arp_n == 0 && gated(t) == 0);
 
     /* QNT OFF, no HOLD: the keys held follow TRN too; their release ends them, whatever TRN is now */
     arp_reset(t);
@@ -333,7 +337,7 @@ static void arp_follow_test(void)
     fm1_in.notes = 0;
     keyboard_block();
     arp_run(t, 2);
-    assert(t->nheld == 0 && t->arp_note == 0 && gated(t) == 0);
+    assert(t->nheld == 0 && t->arp_n == 0 && gated(t) == 0);
 
     /* MIDI IN into the arp: its notes are not the keyboard's, TRN never moved them (nor does it now) */
     arp_reset(t);
@@ -385,7 +389,7 @@ static void arp_follow_test(void)
     keyboard_block();
     t->p[P_QUANT] = QN_WHITE;
     arp_run(t, 4);
-    assert(t->nheld == 1 && t->arp_note == 0 && gated(t) == 0);
+    assert(t->nheld == 1 && t->arp_n == 0 && gated(t) == 0);
     t->p[P_QUANT] = QN_OFF;
     arp_run(t, 1);
     assert(arp_seen[0] == 61);

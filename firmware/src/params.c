@@ -8,8 +8,15 @@ static const char *const N_LSYNC[] = {"OFF", "4BAR", "2BAR", "1/1", "1/2", "1/4"
 static const uint8_t LSYNC_DIV[11] = {0, 9, 8, 7, 6, 0, 1, 4, 2, 5, 3};
 static const char *const N_LTRIG[] = {"NOTE", "FREE"};
 static const char *const N_LPOL[] = {"BI", "UNI"};
-static const char *const N_AMODE[] = {"OFF", "UP", "DN", "UPDN", "RND", "ORD", "REPEAT",   /* (append-only: seq.c AM_*) */
-                                       "DNUP", "UP+8", "CONV", "DIVG", "PINKY", "THUMB", "WALK", "CHORD"};
+/* the ARP (WaveLoop: SHAYPE, arp_shape.c). RATE: steps per beat as the toy's RATES (ARP_RATE2); DIR: how each pass moves the
+ * rows; BOUND: a row past the chord wraps round the held notes or goes up / down octaves; ROOT: the held note of that
+ * name is the lowest, the ones under it up octaves; PAT: the factory pattern last loaded (turning loads one), USER once
+ * the pattern is edited */
+static const char *const N_ARATE[] = {"1/2", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32"};
+static const char *const N_ADIR[] = {"UP", "DOWN", "PEND", "RAND"};
+static const char *const N_ABOUND[] = {"WRAP", "OCT"};
+static const char *const N_AROOT[] = {"OFF", "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+static const char *const N_APAT[] = {"USER", "SHAYPE", "UP 4", "UPDOWN", "STABS", "OCT RUN", "PEDAL", "DRONE"};
 static const char *const N_DIV[] = {"1/4", "1/8", "1/16", "1/32", "8T", "16T", "1/2", "1/1", "2BAR", "4BAR"};
 /* the delay's TIME (G_DTIME): N_DIV's ten (their values kept), then 1.5.1's dotted ones appended (stored values:
  * append-only). A list of its own: ARP RATE, SEQ DIV and LFO SYNC keep N_DIV's ten (fx.c delay_samples) */
@@ -46,7 +53,6 @@ static const char *const N_VOICE[] = {"POLY", "MONO", "LEG", "UNI"};   /* V_POLY
 static const char *const N_GLMODE[] = {"RATE", "TIME"};
 static const char *const N_PRIO[] = {"LAST", "LOW", "HIGH"};
 static const char *const N_ALLOC[] = {"ROT", "REUSE"};
-static const char *const N_ORDER[] = {"NOTE", "PLAY"};
 static const char *const N_CLOCK[] = {"INT", "USB", "TRS"};
 static const char *const N_MIDI_INPUT[] = {"USB", "TRS"};
 /* MIDI IN (seq.c midi_base): 1..4 -> parts, 5..16 ignored / all -> selected / (1.2, append-only) 5..8, 9..12, 13..16 -> parts
@@ -96,14 +102,14 @@ static const param_desc_t TP[P_COUNT] = {
     [P_LD_FLT] = PD("FLT", F_BIPCT, -64, 63, 0),
     [P_LD_SHP] = PD("SHP", F_BIPCT, -64, 63, 0),
     [P_LD_AMP] = PD("AMP", F_PCT, 0, 127, 0),
-    [P_AMODE] = PE("MODE", N_AMODE, 0),
-    [P_ARATE] = PE("RATE", N_DIV, 2),
-    [P_AOCT] = PD("OCT", F_INT, 1, 4, 1),
-    [P_AGATE] = PD("GATE", F_PCT, 1, 127, 64),
+    [P_AMODE] = PE("ARP", N_ONOFF, 0),             /* (a project of before: its MODE, any but OFF, is ON) */
+    [P_ARATE] = PE("RATE", N_ARATE, 3),           /* 1/8, the toy's */
+    [P_AOCT] = PE("DIR", N_ADIR, 0),
+    [P_AGATE] = {"GATE", F_INT, 10, 100, 75, 0, "%"},
     [P_ASWING] = PD("SWG", F_PCT, 0, 100, 0),
-    [P_APROB] = PD("PROB", F_PCT, 0, 127, 127),
+    [P_APROB] = PD("STEPS", F_STEPS, 1, 64, 4),
     [P_AHOLD] = PE("HOLD", N_ONOFF, 0),
-    [P_AORDER] = PE("ORD", N_ORDER, 0),
+    [P_AORDER] = PE("BOUND", N_ABOUND, 0),
     [P_ROOT] = PD("ROOT", F_NOTE, 0, 11, 0),
     [P_SCALE] = PE("SCL", N_SCALE, 0),
     [P_QUANT] = PE("QNT", N_QUANT, 0),
@@ -149,7 +155,9 @@ static const param_desc_t TP[P_COUNT] = {
  * every project and user preset saved before it holds the lane's old default 127 there (param_fit) */
 #define LANE(k) [P_RSV_LN + (k)] = PD("-", F_PCT, 0, 127, 127)
     [P_RSV_LN] = PE("CHOR", N_CHOR, 0),
-    LANE(1), LANE(2), LANE(3), LANE(4), LANE(5), LANE(6), LANE(7),
+    LANE(1), LANE(4), LANE(5), LANE(6), LANE(7),
+    [P_AROOT] = PE("ROOT", N_AROOT, 0),           /* WaveLoop: the ARP's ROOT and PAT (core.h) */
+    [P_APAT] = PE("PAT", N_APAT, 1),
 #undef LANE
     [P_LSYNC] = PE("SYNC", N_LSYNC, 0),
     [P_LTRIG] = PE("TRIG", N_LTRIG, 0),
@@ -252,6 +260,8 @@ static int32_t param_fit(const param_desc_t *d, int32_t v)
         return d->def;          /* WAVE's WARP, in the slot that held TBL2 (0..8) up to Task 4.5: a stored 0..8 is WARP off, not the heaviest warp */
     if (d == &TP[P_RSV_LN] && (v < d->min || v > d->max))
         return d->def;          /* CHOR: the 127 every project and user preset saved before it holds in that reserved id means OFF, not "I+II" */
+    if ((d == &TP[P_AROOT] || d == &TP[P_APAT]) && (v < d->min || v > d->max))
+        return d->def;          /* WaveLoop: the ARP's ROOT and PAT, the same 127 (ROOT OFF; PAT SHAYPE, the pattern an older project gets) */
     return clamp(v, d->min, d->max);
 }
 
@@ -451,8 +461,10 @@ static const page_t PAGES[] = {
                                                                              * the tap after PRESETS (up to 1.1.5 SEQ's) */
     {"PROJECT", FAM_SAVE, SC_GLOBAL, GR_SLOTS, {G_SLOT, 0xFF, G_LOAD, G_SAVE}},
     {"TOOLS", FAM_SAVE, SC_GLOBAL, GR_TOOLS, {G_CLRSEQ, G_INITSND, 0xFF, 0xFF}},
-    {"ARP", FAM_ARP, SC_TRACK, GR_ARP, {P_AMODE, P_ARATE, P_AOCT, P_AGATE}},
-    {"ARP 2", FAM_ARP, SC_TRACK, GR_NONE, {P_ASWING, P_APROB, P_AHOLD, P_AORDER}},
+    /* WaveLoop: the ARP is SHAYPE; its pattern's grid on every page (ui_graph.c graph_arp, ui_arp.c) */
+    {"ARP", FAM_ARP, SC_TRACK, GR_ARP, {P_AMODE, P_APROB, P_ARATE, P_AOCT}},
+    {"ARP 2", FAM_ARP, SC_TRACK, GR_ARP, {P_AORDER, P_AGATE, P_AHOLD, P_AROOT}},
+    {"ARP 3", FAM_ARP, SC_TRACK, GR_ARP, {P_APAT, P_ASWING, 0xFF, 0xFF}},
     {"STEP", FAM_SEQ, SC_STEP, GR_ROLL, {0, 1, 2, 3}},
     {"DETAIL", FAM_SEQ, SC_STEP, GR_ROLL, {0, 1, 2, 3}},   /* 1.5.1 (#199): the cursor step's CHANCE RATCH NUDGE VEL
                                                              * (ui.c detail_on, ui_input.c sd_turn) */
@@ -502,6 +514,6 @@ static const param_desc_t *page_desc(const page_t *pg, uint32_t slot, int16_t **
  * and must restore the same parameters, or one preset's settings would carry into the next one's render */
 static int param_kept(uint32_t i)
 {
-    return i == P_LEVEL || i == P_PAN || i == P_MUTE || (i >= P_AMODE && i <= P_SGATE) ||
+    return i == P_LEVEL || i == P_PAN || i == P_MUTE || (i >= P_AMODE && i <= P_SGATE) || i == P_AROOT || i == P_APAT ||
            (i >= P_SLCR && i <= P_SLDEPTH) || i == P_CHRD || i == P_VOIC || i == P_SQNT || i == P_MOUT;
 }

@@ -19,6 +19,7 @@ typedef struct {                               /* one track */
     int16_t p[P_COUNT];
     uint8_t engine, preset;
     step_t step[NSTEP];
+    arp_pat_t arp;                             /* WaveLoop: the ARP's pattern (SHAYPE, PROJ_ARP_OFF) */
 } proj_trk_t;
 typedef struct {
     uint32_t magic, size;
@@ -50,6 +51,13 @@ typedef struct {
  * channels make, else CH1-4), which is all a firmware before 1.5.5 reads (these bytes it never did): a TRACK project plays
  * there as that block. Every project before has them 0: channels 1..4, MIDI IN as its G_ROUTE says */
 #define PROJ_MIDI_OFF (PROJ_FM6_OFF - 3u)
+/* WaveLoop: the ARP's pattern (SHAYPE, seq.c arp_pat) lives in the retired FM6 area, track k's at PROJ_ARP_OFF + 128 k:
+ * 'S', version 1, the notes' count (0..ARP_NMAX), 0, then the notes, 16 bits LE each (arp_shape.c ARP_NOTE). A project
+ * without it (all 0: saved before, or by Switch Blade without the WaveLoop build, which never reads it) gets the toy's
+ * DEFAULT_PATTERN (SHAYPE), and its ARP settings, which meant other things then, are mapped (proj_arp_migrate) */
+#define PROJ_ARP_OFF PROJ_FM6_OFF
+#define PROJ_ARP_MAGIC 'S'
+_Static_assert(4u + 2u * ARP_NMAX <= PROJ_FM6_PACKED, "the ARP's pattern fits a track's retired FM6 area");
 typedef union { uint32_t align; uint8_t raw[PROJ_STORE_SIZE]; } project_store_t;
 /* the header holds the first PROJ_NG globals (bytes 8..61, the original ids); G_CLKOUT (FM1-Four), the one after them, is
  * header byte 65 (0 OFF, 1 ON) */
@@ -139,6 +147,37 @@ static void proj_midi_unpack(project_t *q, const uint8_t *b)
         q->g[G_ROUTE] = ROUTE_TRACK;
 }
 
+/* WaveLoop: a project saved before the ARP was SHAYPE: its ARP settings meant MODE (OFF, UP .. CHORD), RATE (N_DIV: 1/4 1/8
+ * 1/16 1/32 8T 16T 1/2 1/1 2BAR 4BAR), OCT, GATE (1..127), PROB, ORD; now they are ARP (on), RATE (1/2 .. 1/32), DIR,
+ * GATE %, STEPS, BOUND. ON stays on, the rate and the gate keep what they were (the slowest rate for the bar-long ones),
+ * HOLD and SWING stay; DIR UP, STEPS 4, BOUND WRAP, ROOT OFF, PAT SHAYPE, as the pattern it gets */
+static void proj_arp_migrate(int16_t *p)
+{
+    static const uint8_t RATE[10] = {1, 3, 5, 7, 4, 6, 0, 0, 0, 0};
+    p[P_AMODE] = (int16_t)(p[P_AMODE] != 0);
+    p[P_ARATE] = (int16_t)(p[P_ARATE] >= 0 && p[P_ARATE] < 10 ? RATE[p[P_ARATE]] : 3);
+    p[P_AGATE] = (int16_t)clamp(p[P_AGATE] * 100 / 128, 10, 100);
+    p[P_AOCT] = AD_UP;
+    p[P_APROB] = 4;
+    p[P_AORDER] = AB_WRAP;
+    p[P_AROOT] = 0;
+    p[P_APAT] = 1;
+}
+static void proj_arp_unpack(proj_trk_t *t, const uint8_t *a)   /* a track's stored pattern (PROJ_ARP_OFF) */
+{
+    uint32_t i;
+    if (a[0] == PROJ_ARP_MAGIC && a[1] == 1u && a[2] <= ARP_NMAX) {
+        t->arp.n = a[2];
+        for (i = 0; i < a[2]; i++)
+            t->arp.note[i] = (uint16_t)(a[4u + 2u * i] | a[5u + 2u * i] << 8);
+        if (ash_valid(&t->arp))
+            return;
+    }
+    ash_load(&t->arp, 0);                               /* (older, or damaged: the toy's DEFAULT_PATTERN) */
+    if (a[0] != PROJ_ARP_MAGIC)
+        proj_arp_migrate(t->p);
+}
+
 /* A stable serialized schema: first header retains FUN6's fields; at byte66
  * np, format flags, then four byte-param tracks and nine-byte steps; FUN8: the patches at PROJ_FM6_OFF. */
 static int proj_pack(project_store_t *out, const project_t *q)
@@ -172,7 +211,14 @@ static int proj_pack(project_store_t *out, const project_t *q)
     if (pos + sizeof q->chain + sizeof q->motion > PROJ_MIDI_OFF) return 0;
     memcpy(b + pos, &q->chain, sizeof q->chain); pos += sizeof q->chain;
     memcpy(b + pos, &q->motion, sizeof q->motion);
-    proj_midi_pack(b, q);                               /* (PROJ_FM6_OFF: the retired patches' bytes stay 0) */
+    proj_midi_pack(b, q);
+    for (t = 0; t < NTRK; t++) {                        /* WaveLoop: the ARP's patterns (PROJ_ARP_OFF) */
+        uint8_t *a = b + PROJ_ARP_OFF + t * PROJ_FM6_PACKED;
+        const arp_pat_t *ap = &q->t[t].arp;
+        if (!ash_valid(ap)) return 0;
+        a[0] = PROJ_ARP_MAGIC; a[1] = 1u; a[2] = ap->n;
+        for (i = 0; i < ap->n; i++) { a[4u + 2u * i] = (uint8_t)ap->note[i]; a[5u + 2u * i] = (uint8_t)(ap->note[i] >> 8); }
+    }
     {   /* the name (0-padded; stops at the first 0) */
         char n[PROJ_NAME_LEN + 1u];
         memcpy(b + PROJ_NAME_OFF, n, proj_name_get(n, (const uint8_t *)q->name));
@@ -217,6 +263,8 @@ static int proj_unpack(project_t *q, const uint8_t *b, uint32_t st)
     memcpy(&q->motion, b + pos, sizeof q->motion);
     if (!chain_valid(&q->chain) || !motion_valid(&q->motion)) return 0;
     proj_midi_unpack(q, b);
+    for (t = 0; t < NTRK; t++)                          /* WaveLoop: the ARP's patterns, or an older project's */
+        proj_arp_unpack(&q->t[t], b + PROJ_ARP_OFF + t * PROJ_FM6_PACKED);
     {
         char n[PROJ_NAME_LEN + 1u];
         memcpy(q->name, n, proj_name_get(n, b + name_off));
@@ -307,6 +355,8 @@ static void project_capture(project_t *p)
         p->t[i].engine = trk[i].eng_req;
         p->t[i].preset = trk[i].preset;
         memcpy(p->t[i].step, trk[i].step, sizeof trk[i].step);
+        p->t[i].arp.n = arp_pat[i].n < ARP_NMAX ? arp_pat[i].n : (uint8_t)ARP_NMAX;   /* WaveLoop: the ARP's pattern (its */
+        memcpy(p->t[i].arp.note, arp_pat[i].note, 2u * p->t[i].arp.n);              /* notes; the rest 0, as unpacked) */
     }
     p->motion = motion;
     memcpy(p->mch, song.mch, sizeof p->mch);
@@ -519,6 +569,11 @@ static int project_restore_runtime(const project_t *input)
         t->preset = (uint8_t)(ENGINES[e]->npresets ? (s->preset == PROJ_DEF_SOUND ? 0u : s->preset) % ENGINES[e]->npresets : 0u);
         memcpy(t->step, s->step, sizeof t->step);
         proj_steps(t->step);
+        if (ash_valid(&s->arp))                         /* WaveLoop: the ARP's pattern (the ISR is off) */
+            arp_pat[k] = s->arp;
+        else
+            ash_load(&arp_pat[k], 0);
+        t->arp_n = 0;                                   /* (its notes ended: transport_req, panic_req) */
     }
     song.sel = (uint8_t)(p->sel < NTRK ? p->sel : 0u);
     fm1_irq_on();
@@ -719,6 +774,7 @@ static uint32_t autosave_sig(void)
         h = as_mix(h, &t->eng_req, 1);
         h = as_mix(h, &t->preset, 1);
         h = as_mix(h, t->step, sizeof t->step);
+        h = as_mix(h, &arp_pat[i], sizeof arp_pat[i]);  /* (WaveLoop: the ARP's pattern) */
     }
     for (i = 0; i < G_COUNT; i++)
         if (i != G_SLOT && i != G_NAME && i != G_LOAD && i != G_SAVE)

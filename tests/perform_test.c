@@ -1157,12 +1157,12 @@ static int test_throw(void)
     song.g[G_CLOCK] = 0;
     song.g[G_BPM] = 120;
     bad += check("TIME 1/4D: fits from 61 BPM, clamps to 65535 samples at 60 and below; the external clock's quarter", ok);
-    {   /* the list: append-only, its own; the knob longest first; ARP RATE / SEQ DIV keep ten */
+    {   /* the list: append-only, its own; the knob longest first; SEQ DIV keeps ten (WaveLoop: ARP RATE is SHAYPE's eight) */
         const param_desc_t *d = &GP[G_DTIME];
         static const uint8_t SHOWN[13] = {9, 8, 7, 6, 12, 0, 10, 1, 11, 4, 2, 5, 3};
         int32_t x = 9;
         ok = d->max == 12 && d->names[1][0] == '1' && d->names[1][2] == '8' && !d->names[1][3] && d->names[9][0] == '4' &&
-             TP[P_ARATE].max == 9 && TP[P_SDIV].max == 9 && TP[P_ARATE].names == TP[P_SDIV].names;
+             TP[P_ARATE].max == 7 && TP[P_SDIV].max == 9 && TP[P_ARATE].names != TP[P_SDIV].names;
         for (v = 0; v < 13u; v++) {
             ok &= x == SHOWN[v];
             x = param_turn(d, x, 1);

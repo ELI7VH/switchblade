@@ -4,7 +4,8 @@
  * (magic "FOR4", 3840 bytes, 112 parameters per track (FM1-Four Task 2.2: P_MOUT), engines 0..3 = OB-Z WAVE ACID DRIFT). Every Felucca
  * format (FUN1..FUN10, any size) is refused, not converted: an engine byte 1..3 of a Felucca project would
  * otherwise load as another machine. Also: the round trip (engines, steps, chain, motion with locks, name), a
- * damaged hash, an engine past the fourth, the retired FM6 area written 0 and not read.
+ * damaged hash, an engine past the fourth; WaveLoop: the ARP's patterns in the retired FM6 area (round trip, a project
+ * without them gets SHAYPE and its old ARP settings mapped).
  * Run by tests/run_tests.sh (needs build/gen from one firmware build). */
 #define main hostsim_main
 #include "hostsim.c"
@@ -41,6 +42,7 @@ static void four_project(project_t *a)
             a->t[k].step[s].time = (uint8_t)(s % 3u);
             a->t[k].step[s].vel = (uint8_t)(64u + k);
         }
+        ash_load(&a->t[k].arp, k + 1u);                 /* WaveLoop: the ARP's pattern (UP 4, UPDOWN, STABS, OCT RUN) */
     }
     a->sum = proj_sum(a);
 }
@@ -62,14 +64,18 @@ int main(void)
                  PROJ_NAME_OFF == 3824u && PROJ_FM6_OFF == 3312u && 68u + NTRK * (P_COUNT + 2u + NSTEP * 9u) +
                  sizeof(chain_config_t) + sizeof(motion_store_t) + 12u == PROJ_FM6_OFF);
 
-    /* round trip: the four engines, presets, steps, the name, the retired FM6 area all 0 */
+    /* round trip: the four engines, presets, steps, the name, the ARP's patterns ('S' 1 n 0 + the notes, the rest 0) */
     four_project(&a);
     memcpy(a.name, "lofi jam", 8);
     a.sum = proj_sum(&a);
     ok = proj_pack(&st, &a) && ((uint32_t *)st.raw)[0] == PROJ_MAGIC && ((uint32_t *)st.raw)[1] == PROJ_STORE_SIZE &&
          st.raw[66] == P_COUNT;
-    for (k = 0; k < NTRK * PROJ_FM6_PACKED; k++)
-        ok &= st.raw[PROJ_FM6_OFF + k] == 0u;
+    for (k = 0; k < NTRK * PROJ_FM6_PACKED; k++) {
+        uint32_t t = k / PROJ_FM6_PACKED, o = k % PROJ_FM6_PACKED, n = a.t[t].arp.n;
+        uint32_t want = o == 0u ? 'S' : o == 1u ? 1u : o == 2u ? n : o == 3u || o >= 4u + 2u * n ? 0u :
+                        (uint32_t)(a.t[t].arp.note[(o - 4u) / 2u] >> ((o - 4u) % 2u * 8u)) & 255u;
+        ok &= st.raw[PROJ_ARP_OFF + k] == want;
+    }
     ok &= proj_import(&c, &st, sizeof st);
     for (k = 0; k < NTRK; k++)
         ok &= c.t[k].engine == k && c.t[k].preset == 31u - k;
@@ -158,12 +164,33 @@ int main(void)
     st2 = st; st2.raw[68u + P_COUNT - 1u] = 192u; reseal(&st2);
     bad += check("a parameter byte past 191 (value > 127), a valid hash: refused", !proj_import(&c, &st2, sizeof st2));
 
-    /* the retired FM6 area is not read */
-    st2 = st; st2.raw[PROJ_FM6_OFF + 5] ^= 1u;
-    bad += check("the retired FM6 area: a changed byte, the hash refuses it", !proj_import(&c, &st2, sizeof st2));
+    /* the ARP's area after a pattern's notes is not read */
+    st2 = st; st2.raw[PROJ_ARP_OFF + 100] ^= 1u;
+    bad += check("the ARP's area: a changed byte, the hash refuses it", !proj_import(&c, &st2, sizeof st2));
     reseal(&st2);
-    bad += check("  with its hash right: loads, the byte not read", proj_import(&c, &st2, sizeof st2) &&
+    bad += check("  with its hash right: loads, a byte past the notes not read", proj_import(&c, &st2, sizeof st2) &&
                  !memcmp(c.t, a.t, sizeof a.t));
+    /* WaveLoop: a project from before the ARP was SHAYPE (its area all 0): SHAYPE, its ARP settings mapped */
+    {
+        static project_t o;
+        o = a;
+        o.t[0].p[P_AMODE] = 7; o.t[0].p[P_ARATE] = 2; o.t[0].p[P_AGATE] = 64; o.t[0].p[P_AOCT] = 3; o.t[0].p[P_APROB] = 127;
+        o.t[0].p[P_AORDER] = 1; o.t[0].p[P_AHOLD] = 1; o.t[0].p[P_ASWING] = 30;
+        o.t[1].p[P_ARATE] = 8;                              /* (2BAR: the slowest, 1/2) */
+        o.sum = proj_sum(&o);
+        ok = proj_pack(&st2, &o);
+        memset(st2.raw + PROJ_ARP_OFF, 0, NTRK * PROJ_FM6_PACKED);
+        reseal(&st2);
+        ok &= proj_import(&c, &st2, sizeof st2);
+        for (k = 0; k < NTRK; k++)
+            ok &= c.t[k].arp.n == 8u && c.t[k].arp.note[1] == ARP_NOTE(0, 2, 1) && c.t[k].p[P_APAT] == 1 && c.t[k].p[P_APROB] == 4;
+        bad += check("an older project (no ARP pattern): SHAYPE on every track; ON, 1/16, GATE 50 %, HOLD, SWING kept; UP WRAP",
+                     ok && c.t[0].p[P_AMODE] == 1 && c.t[0].p[P_ARATE] == 5 && c.t[0].p[P_AGATE] == 50 && c.t[0].p[P_AOCT] == AD_UP &&
+                     c.t[0].p[P_AORDER] == AB_WRAP && c.t[0].p[P_AHOLD] == 1 && c.t[0].p[P_ASWING] == 30 && c.t[1].p[P_ARATE] == 0);
+        st2 = st; st2.raw[PROJ_ARP_OFF + 2] = ARP_NMAX + 1u; reseal(&st2);
+        ok = proj_import(&c, &st2, sizeof st2) && c.t[0].arp.n == 8u && c.t[0].p[P_AOCT] == a.t[0].p[P_AOCT];
+        bad += check("  a damaged pattern (63 notes): SHAYPE, its settings left as they are", ok);
+    }
 
     /* motion with parameter locks, a name byte outside 32..126 */
     {

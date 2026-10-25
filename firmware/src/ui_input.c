@@ -180,19 +180,16 @@ static uint32_t midi_leds(const track_t *t)
 /* the keys of the notes the selected track's sequencer and ARP sound now (#38), bit k = key k: where the keys
  * play that note (kb_map: the octave, TRN, QNT), the lowest key that gives it (QNT SNAP
  * rounds the keys above down onto it); a note no key plays is not shown. A snapshot of the ISR's seq_notes /
- * arp_note (arp_ch): no state of its own, nothing to do while nothing sounds */
+ * arp_snd: no state of its own, nothing to do while nothing sounds */
 static uint32_t play_leds(void)
 {
     const track_t *t = TSEL;
-    uint8_t s[4 + 4];
-    uint32_t n = t->seq_n < 4u ? t->seq_n : 4u, i, k, note, used = 0, m = 0, hit;
+    uint8_t s[4 + ARP_SND];
+    uint32_t n = t->seq_n < 4u ? t->seq_n : 4u, i, k, note, used = 0, m = 0, hit, a = t->arp_n < ARP_SND ? t->arp_n : ARP_SND;
     for (i = 0; i < n; i++)
         s[i] = t->seq_notes[i];
-    if (t->arp_note)
-        s[n++] = t->arp_note;
-    for (i = 0; i < 3u; i++)                            /* (the ARP's CHORD) */
-        if (t->arp_ch[i])
-            s[n++] = t->arp_ch[i];
+    for (i = 0; i < a; i++)                             /* (the ARP's: SHAYPE sounds several at once) */
+        s[n++] = arp_snd[song.sel].note[i];
     for (k = 0; n && k < 27u; k++) {
         note = kb_map(t, k);
         for (i = 0, hit = 0; i < n; i++)
@@ -300,6 +297,7 @@ static uint32_t key_leds(uint32_t *br)                 /* (*br: a layer's keys t
     if (br)
         *br = 0;
     c = name_on() && !ui.menu ? name_leds() : ui.layer ? layer_leds(br) :
+        arp_keys_on() ? ((fm1_in.notes & ~kb_layer) | play_leds()) & ~ARP_KEYS | arp_leds() :   /* (ui_arp.c) */
                  (fm1_in.notes & ~kb_layer) | play_leds() | step_leds() | (song_keys_on() ? song_leds() : 0u);
     return c;
 }
@@ -880,6 +878,13 @@ static void edit_param(uint32_t slot, int32_t steps)
     if (!d || !vp || d->max == d->min)
         return;
     v = param_turn(d, *vp, accel(EN_K1 + slot, steps, d->fmt == F_ENUM ? 0 : d->max - d->min));
+    if (vp == &TSEL->p[P_APAT] && v != *vp) {          /* WaveLoop: ARP 3's PAT loads the factory pattern turned to */
+        *vp = (int16_t)v;
+        arp_factory(TSEL, (uint32_t)v);
+    } else if (vp == &TSEL->p[P_APROB] && v != *vp) {  /* .. STEPS: the pattern cut to it (the toy's rule) */
+        *vp = (int16_t)v;
+        arp_steps_set(TSEL);
+    }
     *vp = (int16_t)v;
     if (pg->scope != SC_GLOBAL) {
         motion_capture(TSEL, (uint32_t)(vp - TSEL->p), *vp);
@@ -1115,6 +1120,8 @@ static void presets_turn(int32_t s)
         eng_list_step(s);
     } else if (g == GR_BROWSE) {
         preset_step(s);
+    } else if (g == GR_ARP) {                             /* WaveLoop: the ARP's grid, its cursor (ui_arp.c) */
+        arp_cursor_move(s);
     } else if (g == GR_ROLL || g == GR_USER || g == GR_SLOTS || g == GR_PATS || g == GR_SONG || g == GR_EVENTS) {
         edit_param(0, s);                                 /* KNOB 1's (STEP: STOP TO EDIT while a song plays) */
         ui.hot_col = 0;
@@ -1188,6 +1195,10 @@ static int page_tap(uint32_t b)
         (void)motion_clear_locks(TSEL, ui.cursor);
         cursor_set(ui.cursor + 1);
         ui_message("STEP CLEARED");
+        return 1;
+    }
+    if (b == B_EDIT && arp_keys_on()) {                 /* WaveLoop: an ARP page, EDIT clears the cursor step's notes */
+        arp_clear_step();
         return 1;
     }
     if (b == B_EDIT && !ui.home && cur_page()->graph == GR_EVENTS) {   /* AUTOMATION: EDIT deletes the row's record */
@@ -1569,8 +1580,12 @@ static void ui_input(void)
         ml_oct(oct);
     }
     song.grid = (uint8_t)keys_mode();                 /* (seq.c: what the keys are) */
+    if (song.grid != 4u)
+        ui.arp.down = ui.arp.made = ui.arp.moved = 0;   /* (WaveLoop: not on an ARP page, no row key is held for it) */
     if (song.grid == 3u) {
         song_keys(notes);
+    } else if (song.grid == 4u) {                       /* WaveLoop: an ARP page, the row keys (ui_arp.c) */
+        arp_keys(notes);
     } else if (!song.grid && song.seq_mode && cur_page()->graph == GR_ROLL) {   /* STEP */
         if (live_rec_sel() || !((song.rec >> song.sel) & 1u))   /* armed and playing: the keys record live, not
                                                          * into the cursor step too; not armed (1.2, #133): they
@@ -1614,6 +1629,10 @@ static void ui_input(void)
             continue;
         if (mom_down())                                 /* (LFO + a knob, MOMENTARY or not: LFO's release opens no page) */
             ui.pg_down &= (uint16_t)~(1u << panel.btn[B_LFO]);
+        if (arp_len_turn(s)) {                          /* WaveLoop: an ARP page's row key held: its note's length */
+            ui.hot_t = 0;
+            continue;
+        }
         if ((held = lock_held()) != 0u) {               /* a step held on STEP: KNOB k locks (parameter locks) */
             lock_turn(k, s, held);
             ui.hot_col = (uint8_t)k;

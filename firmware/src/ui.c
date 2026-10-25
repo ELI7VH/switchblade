@@ -212,6 +212,11 @@ static struct {
         int16_t v;               /* .. its value, */
         uint32_t t;              /* .. fm1_ms of the move */
     } wl;
+    struct {                     /* WaveLoop: the ARP pages' editing (ui_arp.c) */
+        uint8_t cur;             /* the cursor step (PRESETS moves it) */
+        uint8_t down;            /* the row keys held, a bit per row */
+        uint8_t made, moved;     /* .. rows whose press wrote a note, whose length a knob set (their release keeps it) */
+    } arp;
 } ui;
 
 enum { CF_NONE, CF_CLEAR_SEQ, CF_CLEAR_TRK, CF_OVR_PROJ, CF_OVR_USER, CF_LOAD_PAT,
@@ -380,7 +385,7 @@ static uint32_t large_kind(void)
         return LK_TALL;
     g = cur_page()->graph;
     return g == GR_BROWSE || g == GR_SLOTS || g == GR_USER || g == GR_PATS || g == GR_SONG || g == GR_ROLL ||
-           g == GR_EVENTS ? LK_LABEL : LK_TALL;
+           g == GR_EVENTS || g == GR_ARP ? LK_LABEL : LK_TALL;   /* (WaveLoop: the ARP's grid as the roll) */
 }
 /* VOID FOUR's EDIT page (params.c GR_BIG, ui_big.c) shown: its own layout (header, two strips of two big cards, a
  * footer of the steps), in every MENU > LARGE setting; a quick layer over it draws as over any page */
@@ -1263,6 +1268,7 @@ static void track_defaults(track_t *t)
     uint32_t i;
     for (i = 0; i < P_E0; i++)
         t->p[i] = TP[i].def;
+    ash_load(&arp_pat[trk_index(t)], 0);          /* WaveLoop: the ARP's pattern, SHAYPE (the toy's DEFAULT_PATTERN) */
     track_defaults_steps(t);
 }
 
@@ -1512,6 +1518,7 @@ static void track_select(uint32_t i)
     ui.ev_keep = 0;                              /* (AUTOMATION: a row kept at its default was the other track's) */
     ui.cursor = 0;
     ui.bank = 0;
+    memset(&ui.arp, 0, sizeof ui.arp);           /* (WaveLoop: the ARP's cursor and row keys were the other track's) */
     follow.hold = 0;                             /* (1.6, #242: the roll follows the new track's playhead) */
     sync_reload = 1;
     ui.force = 1;
@@ -1519,6 +1526,7 @@ static void track_select(uint32_t i)
 
 #include "ui_events.c"                            /* SEQ > AUTOMATION: locks, events, CHANCE, RATCH as a list (an action page) */
 #include "midi_learn.c"                           /* MIDI LEARN (1.5): GLO + D4, a knob, a CC */
+#include "ui_arp.c"                               /* WaveLoop: the ARP pages (SHAYPE's grid: the cursor, the row keys) */
 
 /* ---------------------------------------------------- action pages --- */
 /* Pages whose purpose is an action (SAVE > USER, PHRASES, PROJECT, TOOLS, SEQ > AUTOMATION): the knobs pick,

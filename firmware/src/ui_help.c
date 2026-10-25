@@ -41,8 +41,9 @@ static const struct { const char *title, *hint; } HELP_PAGE[] = {
     {"PHRASES", "[K1]PHRASE[OCT+]LOAD[SAVE]PROJECT"},
     {"PROJECT", "[K2]ERASE[K4]SAVE[EDIT]NAME"},   /* (1.5.5, #199: ERASE) */
     {"TOOLS", "[K1]CLEAR[K2]INIT, CLEAN[OCT+]DO"},   /* (1.5.5, #190: KNOB 2 on, CLEAN INIT) */
-    {"ARP", "[K1]MODE[KEYS]CHORD[ARP]ARP 2"},
-    {"ARP 2", "[K3]LATCH[K4]ORDER[ARP]ARP"},
+    {"ARP", "[PRESETS]STEP[KEYS]ROWS[ARP]ARP 2"},   /* (WaveLoop: SHAYPE, ui_arp.c) */
+    {"ARP 2", "[K1]WRAP, OCT[K4]ROOT[ARP]ARP 3"},
+    {"ARP 3", "[K1]PATTERN[EDIT]CLEAR[ARP]ARP"},
     {"STEP", "[KEYS]WRITE[K1]STEP[SEQ]RATCH"},   /* (1.5.1: SEQ to DETAIL) */
     {"DETAIL", "[PRESETS]STEP[K1]CHANCE, 1:4, FILL"},   /* (1.5.5: the conditions past 100 %) */
     {"AUTOMATION", "[K1]ROW[OCT+]DO[EDIT]DELETE"},

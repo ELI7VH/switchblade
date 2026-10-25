@@ -38,6 +38,42 @@ synth from an **M-Audio Oxygen Pro 61** set to the preset of the WaveLoop Melode
 EDIT's knob 3 (ENV) and knob 4 (the machine's own control) moved from CC79 / CC70 to CC16 / CC17, in and out
 ([docs/MIDI.md](docs/MIDI.md)). Nothing new is stored: the card, the wheel and the encoder are live controls.
 
+### The ARP is SHAYPE
+
+The arpeggiator is WaveLoop's Shape Arp. A pattern is notes on a grid: steps across, rows up. A row is a place in the
+chord you hold, counted from its lowest note. Each pass through the steps moves every row one place (DIR), so the shape
+climbs, falls, swings or jumps through the chord. Hold a chord (keys, the Oxygen, MIDI IN) and the track plays the pattern
+over it, on its own clock or the external one, as the old ARP did. Each track has its own pattern.
+
+The ARP button opens three pages, all showing the grid: 16 steps at a time around the cursor, the step playing lit.
+
+- **Move the cursor** with PRESETS (it goes round the pattern's STEPS).
+- **Write a note:** tap a row key at the cursor. The row keys are the white keys F3 to F4 (F3 is row 1, F4 is row 8).
+  Tap the key again to take the note away. On these pages the row keys and the black keys between them make no sound.
+  The keys above F4 still play, so you can hold a chord there while you edit.
+- **Set a note's length:** hold its row key and turn any knob.
+- **EDIT** clears every note that starts on the cursor step.
+
+| Page | Knob 1 | Knob 2 | Knob 3 | Knob 4 |
+| --- | --- | --- | --- | --- |
+| ARP | ARP (on / off) | STEPS (1-64) | RATE (1/2 to 1/32, triplets included) | DIR (UP, DOWN, PEND, RAND) |
+| ARP 2 | BOUND (WRAP, OCT) | GATE (10-100 %) | HOLD | ROOT (OFF, C to B) |
+| ARP 3 | PAT (factory pattern) | SWING | | |
+
+- **BOUND:** when a row goes past the top of the chord, WRAP starts again from its lowest note. OCT carries on an
+  octave up (or down).
+- **GATE:** each note sounds for its length times the step times GATE.
+- **HOLD:** the chord stays after you let go. The next chord you press replaces it.
+- **ROOT:** the held note with that name becomes the lowest note. The notes below it move up an octave.
+- **PAT** loads a pattern as you turn to it, with its STEPS and BOUND: SHAYPE (the default), UP 4, UPDOWN, STABS, OCT RUN,
+  PEDAL, DRONE. Editing the pattern makes it USER.
+- **STEPS** made shorter removes the notes past the new end.
+
+The pattern and every ARP setting are saved with the project and the autosave, and come back exactly. A project saved
+before this gets SHAYPE on every track. Its ARP stays on or off, and its rate, gate, HOLD and SWING carry over. The rest
+starts at the defaults. The core is a port of the web toy's `sequence.mjs`. `tests/arp_shape_test.c` checks it against
+`tests/arp_vectors.h`, which `node tools/arp_vectors.mjs <path to sequence.mjs>` writes from the toy itself.
+
 ---
 
 Free firmware for the **M-VAVE FM-1** that packs four synth machines into the box: one per track, eight voices shared.

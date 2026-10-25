@@ -2441,8 +2441,8 @@ static int test_song_timeline(void)
  * held undoes it */
 static int test_presets_knob(void)
 {
-    int bad = 0, cur_ok = 1, sel_ok = 1, snd_ok = 1, undo_ok = 1, tools_ok = 1, grid_ok;
-    uint32_t i, n_snd = 0, n_cur = 0;
+    int bad = 0, cur_ok = 1, sel_ok = 1, snd_ok = 1, undo_ok = 1, tools_ok = 1, grid_ok, arp_ok = 1;
+    uint32_t i, n_snd = 0, n_cur = 0, n_arp = 0;
     for (i = 0; i < NPAGES; i++) {
         track_t before;
         uint32_t g = PAGES[i].graph, uslot, ppick;
@@ -2464,6 +2464,9 @@ static int test_presets_knob(void)
             if (g == GR_ROLL) {
                 cur_ok &= ui.cursor == 1u && same_snd && same_steps && ui.page == i;
                 n_cur++;
+            } else if (g == GR_ARP) {                  /* WaveLoop: the ARP's grid, its cursor */
+                arp_ok &= ui.arp.cur == 1u && same_snd && same_steps && ui.page == i;
+                n_arp++;
             } else if (g == GR_USER) {
                 sel_ok &= ui.uslot == uslot + 1u && same_snd && same_steps;
             } else if (g == GR_SLOTS) {
@@ -2488,8 +2491,9 @@ static int test_presets_knob(void)
     bad += check("#92 PRESETS on STEP (and 1.5.1's DETAIL): the step cursor; the sound and the steps stay", cur_ok && n_cur == 2u);
     bad += check("#94 PRESETS on USER, PROJECT, PHRASES, SONG, AUTOMATION: the selection (KNOB 1's); nothing loaded", sel_ok);
     bad += check("#94 PRESETS on TOOLS does nothing", tools_ok);
-    bad += check("#94 PRESETS elsewhere (EDIT, ENV, LFO, FX, SCL, ARP, MIXER, GLOBAL, ...): the next sound, the steps stay",
-                 snd_ok && n_snd >= 15u);
+    bad += check("WaveLoop: PRESETS on ARP, ARP 2, ARP 3: the grid's cursor; the sound and the steps stay", arp_ok && n_arp == 3u);
+    bad += check("#94 PRESETS elsewhere (EDIT, ENV, LFO, FX, SCL, MIXER, GLOBAL, ...): the next sound, the steps stay",
+                 snd_ok && n_snd >= 13u);
     bad += check("#94   SAVE held undoes each of those loads", undo_ok);
     ui_power_on();
     hold(B_HOME);
@@ -4858,9 +4862,9 @@ static int test_play_leds(void)
     ok = kb_map(t, 8) == 60u && play_leds() == (1u << 7 | 1u << 11);
     t->p[P_QUANT] = t->p[P_SCALE] = 0;
     bad += check("QNT SNAP: only the key of the note itself lights, not the keys rounding onto it", ok);
-    t->arp_note = 65;
-    bad += check("the ARP's note lights its key too", play_leds() == (1u << 7 | 1u << 11 | 1u << 12));
-    t->arp_note = 0;
+    arp_snd[song.sel].note[0] = 65; arp_snd[song.sel].note[1] = 76; t->arp_n = 2;   /* (WaveLoop: SHAYPE's notes, several) */
+    bad += check("the ARP's notes light their keys too", play_leds() == (1u << 7 | 1u << 11 | 1u << 12 | 1u << 23));
+    t->arp_n = 0;
     events_block(div_samples((uint32_t)t->p[P_SDIV]) + CTL);
     bad += check("a note above the keyboard (G#7) lights nothing", t->seq_n == 1u && t->seq_notes[0] == 100u &&
                  play_leds() == 0u);
@@ -6124,7 +6128,7 @@ static int test_layer_knob_leak(void)
                     arp_fx++;
             }
     bad += check("#39 FX / GLO / SCL / EDIT + KNOB 1..4, let go while turning: no page under the layer changes",
-                 !fails && arp_fx == 4u);
+                 !fails && arp_fx == 12u);   /* (WaveLoop: three ARP pages) */
     /* the quiet time is short: KNOB 1 edits the page again 0.3 s after FX */
     ui_power_on();
     go_page(GR_ARP);
@@ -6238,7 +6242,7 @@ static int test_layer_knob_race(void)
                         continue;
                     if (mode == 2u && LB[l] == B_EDIT && pg < NPAGES &&   /* (EDIT's tap acts there: no lock) */
                         (PAGES[pg].graph == GR_USER || PAGES[pg].graph == GR_SLOTS || PAGES[pg].graph == GR_ROLL ||
-                         PAGES[pg].graph == GR_EVENTS))
+                         PAGES[pg].graph == GR_EVENTS || PAGES[pg].graph == GR_ARP))   /* (WaveLoop: ARP's EDIT clears a step) */
                         continue;
                     rc_run(LB[l], mode, k, pg, 0, &a0, &b0);
                     rc_run(LB[l], mode, k, pg, 1, &a1, &b1);
@@ -7183,7 +7187,7 @@ static int test_div_order(void)
 {
     int bad = 0, ok = 1;
     uint32_t id, c, k, found = 0;
-    static const param_desc_t *const LISTS[] = {&TP[P_SDIV], &TP[P_ARATE], &GP[G_DTIME], &TP[P_SLRATE]};
+    static const param_desc_t *const LISTS[] = {&TP[P_SDIV], &GP[G_DTIME], &TP[P_SLRATE]};
     ui_power_on();
     for (k = 0; k < NELEM(LISTS); k++) {           /* left end -> right end: each one shorter than the one before */
         const param_desc_t *d = LISTS[k];
@@ -7208,6 +7212,12 @@ static int test_div_order(void)
     ok &= param_turn(&TP[P_SDIV], 2, 1) == 5 && param_turn(&TP[P_SDIV], 2, -1) == 4 &&   /* 1/16: right 16T, left 8T */
           param_turn(&TP[P_SDIV], 3, 1) == 3 && param_turn(&TP[P_SDIV], 9, -1) == 9 &&   /* the ends hold */
           param_turn(&TP[P_SDIV], 2, -6) == 8 && param_turn(&TP[P_SDIV], 2, 40) == 3;    /* 6 left: 2BAR; far: clamped */
+    for (k = 1; k <= (uint32_t)TP[P_ARATE].max; k++) {   /* WaveLoop: SHAYPE's RATE is in that order as stored (1/2 .. 1/32) */
+        uint32_t a, b;
+        TSEL->p[P_ARATE] = (int16_t)(k - 1u); a = arp_period(TSEL);
+        TSEL->p[P_ARATE] = (int16_t)k; b = arp_period(TSEL);
+        ok &= b < a && !enum_order(&TP[P_ARATE]);
+    }
     bad += check("#48 DIV / RATE / TIME / SLICER RATE step longest -> shortest, every value once, the ends hold", ok);
     ok = 1;                                         /* the real knob on the pages that show them, the gauge follows */
     for (id = 0; id < NPAGES; id++)
@@ -7234,7 +7244,8 @@ static int test_div_order(void)
     turn(EN_K2, -2);
     ok &= TSEL->p[P_SDIV] == 4;
     btn_up(B_SEQ); frame();
-    bad += check("#48 the pages' knobs step the divisions by length (SEQ TOOLS, ARP, DLY, SLICER)", ok && found >= 3u);
+    bad += check("#48 the pages' knobs step the divisions by length (SEQ TOOLS, DLY, SLICER; ARP's RATE is in order)",
+                 ok && found >= 2u);
     return bad;
 }
 
@@ -8715,6 +8726,96 @@ static int kc_drawn(const uint16_t *shot)              /* rows of the card's pla
         n += memcmp(&host_screen[y * 240u + KCARD_X], &shot[y * 240u + KCARD_X], KCARD_W * 2u) != 0;
     return (int)n;
 }
+
+/* WaveLoop: the ARP pages (ui_arp.c): SHAYPE's grid. PRESETS moves the cursor; the white keys F3..F4 are rows 1..8 at it
+ * (a tap writes a note or takes it away, silent), a row key held + a knob its length; EDIT clears the step; ARP 3's PAT
+ * loads a factory pattern (STEPS and BOUND too); STEPS cuts the pattern; a project keeps it */
+static int arp_note_at(uint32_t step, uint32_t row, uint32_t len)
+{
+    int32_t i = ash_find(&arp_pat[0], row, step);
+    return i >= 0 && ARP_STEP(arp_pat[0].note[i]) == step && ARP_LEN(arp_pat[0].note[i]) == len;
+}
+static int test_arp_page(void)
+{
+    int bad = 0, ok;
+    uint32_t i;
+    arp_pat_t keep;
+    ui_power_on();
+    song.sel = 0;
+    go_page(GR_ARP);
+    frame();
+    fm1_irq_off(); arp_pat[0].n = 0; fm1_irq_on();
+    bad += check("ARP page: the keys are the grid's (song.grid 4), the cursor on step 1", song.grid == 4u && arp_cur() == 0u);
+    turn(EN_PRESET, 1); turn(EN_PRESET, 1);
+    ok = arp_cur() == 2u;
+    turn(EN_PRESET, 3);                              /* round STEPS (4): 2 + 3 = step 2 again */
+    ok &= arp_cur() == 1u;
+    turn(EN_PRESET, 1);
+    bad += check("  PRESETS: the cursor, round the pattern's STEPS", ok && arp_cur() == 2u);
+    key_down(ARP_ROWKEY[1]); frame();
+    ok = arp_note_at(2, 1, 1) && !gates() && !TSEL->nheld && (key_leds(0) >> ARP_ROWKEY[1] & 1u);
+    key_up(ARP_ROWKEY[1]); frame();
+    ok &= arp_note_at(2, 1, 1) && arp_pat[0].n == 1u && TSEL->p[P_APAT] == 0;
+    bad += check("  row 2's key (G3): a note on the cursor step, silent, its key lit; PAT USER", ok);
+    key_down(ARP_ROWKEY[1]); frame(); key_up(ARP_ROWKEY[1]); frame();
+    bad += check("  tapped again: the note goes", arp_pat[0].n == 0u);
+    turn(EN_PRESET, -1);
+    key_down(ARP_ROWKEY[3]); frame();
+    turn(EN_K2, 1);
+    ok = arp_note_at(1, 3, 2) && TSEL->p[P_APROB] == 4;
+    turn(EN_K1, 5);                                  /* (to the end of STEPS: 3 steps) */
+    ok &= arp_note_at(1, 3, 3) && TSEL->p[P_AMODE] == 0;
+    turn(EN_K1, -1);
+    ok &= arp_note_at(1, 3, 2);
+    key_up(ARP_ROWKEY[3]); frame();
+    bad += check("  row 4's key held + a knob: its length (to the end of STEPS), no knob's own value moved; let go it stays",
+                 ok && arp_note_at(1, 3, 2));
+    turn(EN_PRESET, 1);
+    key_down(ARP_ROWKEY[3]); frame(); key_up(ARP_ROWKEY[3]); frame();
+    bad += check("  a tap on a step a longer note lasts over takes it away", arp_pat[0].n == 0u);
+    key_down(white(12)); frame();
+    ok = gates() == 1u;
+    key_up(white(12)); frame();
+    key_down(1); frame();                            /* (F#3, between the row keys: silent here) */
+    ok &= !gates();
+    key_up(1); frame();
+    bad += check("  the keys above F4 play as everywhere; the black ones among the row keys are silent", ok);
+    turn(EN_PRESET, 1);
+    key_down(ARP_ROWKEY[0]); key_down(ARP_ROWKEY[2]); frame(); key_up(ARP_ROWKEY[0]); key_up(ARP_ROWKEY[2]); frame();
+    ok = arp_pat[0].n == 2u;
+    press(B_EDIT);
+    bad += check("  EDIT: the cursor step's notes go (STEP CLEARED), the page stays", ok && arp_pat[0].n == 0u &&
+                 str_eq(cur_page()->title, "ARP"));
+    for (i = 0; i < NPAGES && !str_eq(PAGES[i].title, "ARP 3"); i++)
+        ;
+    ui.page = (uint8_t)i; page_entered(); frame();
+    TSEL->p[P_APAT] = 0;
+    turn(EN_K1, 1); turn(EN_K1, 1); turn(EN_K1, 1);
+    ash_load(&keep, 2);
+    ok = TSEL->p[P_APAT] == 3 && !memcmp(&arp_pat[0], &keep, sizeof keep) && TSEL->p[P_APROB] == 6;
+    turn(EN_K1, 2);                                  /* OCT RUN: BOUND OCT too */
+    ok &= TSEL->p[P_APAT] == 5 && TSEL->p[P_AORDER] == AB_OCT && TSEL->p[P_APROB] == 8;
+    bad += check("  ARP 3 PAT: each factory pattern as it is turned to, its STEPS and BOUND (UPDOWN 6, OCT RUN 8 OCT)", ok);
+    go_page(GR_ARP); frame();
+    turn(EN_K2, -1); turn(EN_K2, -1); turn(EN_K2, -1); turn(EN_K2, -1);
+    ok = TSEL->p[P_APROB] == 4 && arp_pat[0].n == 4u;
+    for (i = 0; i < arp_pat[0].n; i++)
+        ok &= ARP_STEP(arp_pat[0].note[i]) < 4u;
+    bad += check("  STEPS 8 -> 4: the notes past it go (the toy's rule)", ok);
+    keep = arp_pat[0];
+    TSEL->p[P_AROOT] = 5; TSEL->p[P_AGATE] = 40;
+    ok = !project_save(0);
+    fm1_irq_off(); ash_load(&arp_pat[0], 6); fm1_irq_on();
+    TSEL->p[P_AROOT] = 0; TSEL->p[P_AGATE] = 75; TSEL->p[P_APROB] = 9;
+    project_load(0);
+    bad += check("  a project keeps the pattern and the ARP's settings exactly (ROOT, GATE, STEPS, BOUND)",
+                 ok && !memcmp(&arp_pat[0], &keep, sizeof keep) && TSEL->p[P_AROOT] == 5 && TSEL->p[P_AGATE] == 40 &&
+                 TSEL->p[P_APROB] == 4 && TSEL->p[P_AORDER] == AB_OCT);
+    go_home(); frame();
+    bad += check("  off the ARP pages the keys play again", song.grid == 0u);
+    return bad;
+}
+
 static int test_knob_card(void)
 {
     static uint16_t shot[240 * 240];
@@ -8837,6 +8938,7 @@ int main(void)
     bad += test_no_flash();
     bad += test_acid_flags();
     bad += test_knob_card();
+    bad += test_arp_page();
 
     if (getenv("UI_SCREEN_DIR")) chain_screens(getenv("UI_SCREEN_DIR"));
     printf(bad ? "ui: %d FAILED\n" : "ui: all passed\n", bad);
