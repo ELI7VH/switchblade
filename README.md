@@ -50,6 +50,34 @@ chord you hold, counted from its lowest note. Each pass through the steps moves 
 climbs, falls, swings or jumps through the chord. Hold a chord (keys, the Oxygen, MIDI IN) and the track plays the pattern
 over it, on its own clock or the external one, as the old ARP did. Each track has its own pattern.
 
+**The sequencer plays through the ARP.** With ARP on, the track's sequence does not sound its notes itself: each chord it
+plays becomes the chord the ARP plays, as if you held those keys for as long as the step's notes last (GATE, and TIEs or
+a step's LEN for longer chords). Sequence chords, one per step or tied over several, and SHAYPE plays them. Keys and MIDI
+notes you hold join the sequenced chord, and HOLD keeps them as usual. When a chord ends and nothing is held, the ARP
+stops; nothing is left sounding. With ARP off the sequence plays as before. Nothing new is stored: ARP on is the switch,
+and the chords are the pattern's steps, saved with the project as ever.
+
+While the transport plays (the FM-1's clock or an external one), the ARP steps on the song's grid from PLAY: chord or
+none, its step is where the song is, so it stays in time with the sequence. A new chord starts on the next ARP step, or
+at once if it comes in the first half of a step that started with nothing to play. A chord that changes mid-pass changes
+the notes at the next step; the pass's DIR offset changes at the next pass. Stopped, a chord from nothing starts the
+pattern at its first step, as before. This is the toy's offline form `shapeChords` live: `tests/arp_seq_test.c` plays
+chords through the sequencer and wants exactly the notes `shapeChords` gives for them (`tests/arp_chords_vectors.h`,
+`node tools/arp_vectors.mjs --chords <sequence.mjs>`).
+
+**Recording with the ARP on records the chords you play**, not the ARP's notes, so the take plays back through the ARP.
+
+### Recording from MIDI
+
+MIDI notes (USB and DIN) record exactly as the FM-1's keys, on the track their channel plays: MENU > MIDI > MIDI IN
+CH1-4 (and CH5-8 ...) its four channels, channel 16 the selected track, SEL every channel the selected track.
+
+- **Live:** arm REC and play. Notes go into the nearest step as REC always quantised them (QUANTIZE, NUDGE), held notes
+  as TIEs.
+- **Step:** on SEQ > STEP, arm REC with the transport stopped (KEYS WRITE STEPS). Notes for the selected track write the
+  cursor step: a chord played is one step, and letting go of every note (keys and MIDI) moves the cursor on. CHORD ENTRY
+  ADD works the same. Another track's channel only plays its track.
+
 The ARP button opens three pages, all showing the grid: 16 steps at a time around the cursor, the step playing lit.
 
 - **Move the cursor** with PRESETS (it goes round the pattern's STEPS).
