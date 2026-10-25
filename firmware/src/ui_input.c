@@ -1164,6 +1164,7 @@ static uint32_t btn_hold(uint32_t *t0, uint32_t label, uint32_t now, int hold_ok
 /* the quick layers: ui_layer.c (included after this file) */
 static void layer_masks(void);
 static void layer_arm(uint32_t pressed, uint32_t now);
+static uint32_t op_shift(uint32_t pressed);           /* (WaveLoop: the OP keys as SHIFT, ui_layer.c) */
 static uint32_t layer_held(void);
 static int layer_knobs_quiet(void);
 static uint32_t layer_gesture(uint32_t now, uint32_t combo);
@@ -1375,6 +1376,7 @@ static void ui_input(void)
     save = btn_hold(&ui.save_t0, B_SAVE, now, !ui.menu && !ui.confirm);   /* held: UNDO (ui.c undo_swap) */
     layer_lock_input(pressed);                          /* (#83: a button closes a locked layer) */
     layer_arm(pressed, now);
+    pressed = op_shift(pressed);                        /* WaveLoop: an OP held + a button: SHIFT's (ui_layer.c) */
     if (((pressed >> panel.btn[B_REC]) & 1u) && ui.ly == LAYER_REC)
         ui.rec_t0 |= 2u;                                /* (REC is its layer's button now: its tap is layer_tap's) */
     layer_oct_open(pressed);                            /* (OCT± with a SET layer's button down: it opens now) */

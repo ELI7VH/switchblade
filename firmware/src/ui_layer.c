@@ -177,6 +177,44 @@ static void layer_let_go(uint32_t quiet)
     ui.lock = 0;
 }
 
+/* WaveLoop: the OP keys are SHIFT. The stock FM-1 prints OP1 .. OP4 on the four buttons Switch Blade's panel.c names
+ * first, FX SCL ENV LFO (matrix 2..5): OP1 = FX, OP2 = SCL, OP3 = ENV, OP4 = LFO. An assumption from the stock panel;
+ * if a panel differs, change OP_BTN, nothing else. The convention: an OP held + another button is a shift function
+ * (op_shift). That press is SHIFT's (op_take): the OP's own tap, page, layer or map does not happen, and the other
+ * button's own action does not either. An OP tapped alone acts as always. A shift function is one line in op_shift, the
+ * page or the state it answers in, and op_take(n) */
+static const uint8_t OP_BTN[4] = {B_FX, B_SCL, B_ENV, B_LFO};
+static int op_held(uint32_t n)                         /* OP n (1..4) physically down (a layer's lock is not) */
+{
+    return n >= 1u && n <= 4u && ((fm1_in.buttons >> panel.btn[OP_BTN[n - 1u]]) & 1u) != 0u;
+}
+/* this press of OP n is SHIFT's until it is let go: no tap and no page on release (ENV, LFO: ui.pg_down); a layer's
+ * (FX, SCL) dead: its map closes, its keys are notes again, no tap, nothing put back. (OP4 = LFO: a shift for it must
+ * also keep MOMENTARY out, ui_input mom_down) */
+static void op_take(uint32_t n)
+{
+    uint32_t b = OP_BTN[(n - 1u) & 3u], l;
+    ui.pg_down &= (uint16_t)~(1u << panel.btn[b]);
+    for (l = LAYER_FX; l < LAYER_N; l++)
+        if (ui.ly == l && LAYERS[l].btn == b) {
+            ui.ly_t0 = (ui.ly_t0 & ~LY_OPEN) | LY_DEAD;
+            ui.force = 1;
+        }
+}
+/* each pass, before the layers and OCT read the buttons: the OP shift functions; pressed without the presses a shift
+ * took. Not under the menu, a dialog, NAME or the UPDATE MODE countdown.
+ *   OP1 + OCT+ / OCT-   on an ARP page: ZOOM in / out (ui_arp.c arp_zoom); both at once: nothing */
+static uint32_t op_shift(uint32_t pressed)
+{
+    uint32_t dn = 1u << panel.btn[B_OCTDN], up = 1u << panel.btn[B_OCTUP];
+    if (!(pressed & (dn | up)) || !layer_allowed() || ui.home || cur_page()->graph != GR_ARP || !op_held(1))
+        return pressed;
+    if ((pressed & (dn | up)) != (dn | up))
+        arp_zoom((pressed & up) != 0u);
+    op_take(1);
+    return pressed & ~(dn | up);
+}
+
 /* #83, each pass before the layer's buttons are read: a locked layer closes. Its own button pressed: the lock goes,
  * the button held keeps it open (a peek: let go, it closes, no tap). Another button but PLAY, REC and OCT- / OCT+
  * (another page button, another layer's, HOME, SAVE, SEQ): closed now, and that button acts as always. Any other

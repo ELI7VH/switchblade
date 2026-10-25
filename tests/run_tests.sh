@@ -37,6 +37,7 @@
 # ARP (tests/arp_shape_test.c, WaveLoop): SHAYPE's core (src/arp_shape.c) against WaveLoop's Shape Arp: tests/arp_vectors.h, written
 #                   by tools/arp_vectors.mjs running the toy's sequence.mjs (patterns, chords, roots, directions, boundaries,
 #                   passes), played tick by tick as seq.c arp_fire plays them: every note, step and length the same.
+#                   ZOOM (ash_subdivide) against the toy's subdivide: tests/arp_zoom_vectors.h (--zoom), refusals too.
 # SEQ > ARP (tests/arp_seq_test.c, WaveLoop): the sequencer's chords played through the arp against the toy's shapeChords
 #                   (tests/arp_chords_vectors.h, tools/arp_vectors.mjs --chords), its edges (ARP off, live notes, HOLD, the
 #                   chord's end, STOP, ARP switched, the external clock), recording the chords with the ARP on, MIDI live and
@@ -250,7 +251,7 @@ if [ -f build/gen/felucca_tables.h ]; then
     $CC -w -Ibuild/gen -Ifirmware/src -o "$OUT/chord_test" tests/chord_test.c -lm
     run "chord keys: diatonic and fixed chords, voicings, MONO root, releases, recording, ARP, MIDI IN" "$OUT/chord_test"
     $CC -O1 -w -Ifirmware/src -Itests -o "$OUT/arp_shape_test" tests/arp_shape_test.c
-    run "ARP (SHAYPE): every case of tests/arp_vectors.h as WaveLoop's sequence.mjs plays it, the toy's unit tests, editing" "$OUT/arp_shape_test"
+    run "ARP (SHAYPE): every case of tests/arp_vectors.h as WaveLoop's sequence.mjs plays it, the toy's unit tests, editing, ZOOM" "$OUT/arp_shape_test"
     $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/speaker_test" tests/speaker_test.c -lm
     run "SPEAKER EQ: FLAT / LOWCUT / BASS+ responses, BASS+ harmonics of the bass, the sub cut, no offset after, headroom on a full-scale kick (#180)" "$OUT/speaker_test"
     run "DSP render (ANALOG preset 0)" "$OUT/hostsim" 0 0 1 "$OUT/render.wav"

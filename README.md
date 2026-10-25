@@ -101,9 +101,25 @@ The ARP button opens three pages, all showing the grid: 16 steps at a time aroun
 - **PAT** loads a pattern as you turn to it, with its STEPS and BOUND: SHAYPE (the default), UP 4, UPDOWN, STABS, OCT RUN,
   PEDAL, DRONE. Editing the pattern makes it USER.
 - **STEPS** made shorter removes the notes past the new end.
+- **ZOOM:** hold OP1 and press OCT+ to zoom in: STEPS and RATE double, and every note's step and length double with
+  them, so the pattern sounds the same with twice the steps to draw in (16 steps at 1/16 become 32 at 1/32). OCT- zooms
+  out: half the steps at half the rate. The cursor stays on the same place in the music, a playing arp carries on where
+  it is, and the screen shows the result (ZOOM 32 STEPS 1/32). It works on all three ARP pages, as often as you like
+  while OP1 stays down. When it can't, nothing changes and the screen says why: 64 STEPS MAX, 1/32 IS THE FASTEST,
+  1/2 IS THE SLOWEST, NO 1/32T RATE (from 1/16T), NO 1/2T RATE (from 1/4T), STEPS ARE ODD, or NOTE BETWEEN STEPS (a
+  note starts or ends on an odd step, so joining pairs would move it). This is the toy's x2 and /2 (`subdivide`);
+  `tests/arp_shape_test.c` holds it to `tests/arp_zoom_vectors.h` (`node tools/arp_vectors.mjs --zoom <sequence.mjs>`),
+  the toy's refusals included. The toy goes on to 1/64; RATE here stops at 1/32.
 
-The pattern and every ARP setting are saved with the project and the autosave, and come back exactly. A project saved
-before this gets SHAYPE on every track. Its ARP stays on or off, and its rate, gate, HOLD and SWING carry over. The rest
+**The OP keys are SHIFT.** The stock FM-1 prints OP1 to OP4 on the four buttons Switch Blade calls FX, SCL, ENV and
+LFO (left to right), so OP1 is FX, OP2 SCL, OP3 ENV, OP4 LFO. That is an assumption from the stock panel: if yours
+differs, it is one table (`OP_BTN` in `firmware/src/ui_layer.c`). Hold an OP and press another button for a shift
+function: that press belongs to the shift, so neither the OP's own action (its page, its quick layer) nor the other
+button's (OCT's octave) happens. Tap an OP alone and it does what it always did. OP1 + OCT+ / OCT- on the ARP pages is
+ZOOM (HELP shows it on ARP 2 as FX + OCT ZOOM); OP2 to OP4 are free for more.
+
+The pattern and every ARP setting are saved with the project and the autosave, and come back exactly; a zoom is an
+edit like any other (PAT becomes USER). A project saved before this gets SHAYPE on every track. Its ARP stays on or off, and its rate, gate, HOLD and SWING carry over. The rest
 starts at the defaults. The core is a port of the web toy's `sequence.mjs`. `tests/arp_shape_test.c` checks it against
 `tests/arp_vectors.h`, which `node tools/arp_vectors.mjs <path to sequence.mjs>` writes from the toy itself.
 

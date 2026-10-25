@@ -9,6 +9,7 @@
  *   a row key held + any knob   that row's note at the cursor: its length (a note the press wrote, or one already there)
  *   EDIT        the notes starting on the cursor step go
  *   ARP 3's PAT a factory pattern, loaded as it is turned to (its STEPS and BOUND too); an edit makes it USER
+ *   OP1 + OCT+ / OCT-   ZOOM in / out (the toy's x2 / /2, ui_layer.c op_shift: OP1 is the button Switch Blade calls FX)
  * Every edit is the main loop's, with the audio ISR held off while the pattern changes (arp_fire reads it). */
 static const uint8_t ARP_ROWKEY[ARP_ROWS] = {0, 2, 4, 6, 7, 9, 11, 12};   /* row r's key (from F: F3 G3 A3 B3 C4 D4 E4 F4) */
 
@@ -147,4 +148,53 @@ static int arp_len_turn(int32_t s)
         arp_edited();
     }
     return 1;
+}
+/* ZOOM's refusals (arp_shape.c AZ_*): the screen says why. NORATE: only 1/16T in (no 1/32T) and 1/4T out (no 1/2T) */
+static const char *const AZ_MSG[] = {"", "1/32 IS THE FASTEST", "1/2 IS THE SLOWEST", "", "64 STEPS MAX", "STEPS ARE ODD",
+                                     "NOTE BETWEEN STEPS"};
+/* OP1 + OCT+ (in) / OCT- (out) on an ARP page (ui_layer.c op_shift): the toy's subdivide x2 / /2 (ash_subdivide) on the
+ * selected track's pattern. STEPS and RATE double (or halve), every note's step and length with them: it sounds the
+ * same, zoomed. The cursor stays on its place in the music (its step x2 or /2); an arp playing goes on from where it is
+ * (its pass, the step it is in and how far into it). When it can't, nothing changes and the screen says why. Main loop
+ * only, the ISR held off while the pattern, STEPS and RATE change together (a few dozen notes at most) */
+static void arp_zoom(int in)
+{
+    track_t *t = TSEL;
+    arp_pat_t *p = &arp_pat[song.sel];
+    uint32_t was = arp_steps(t), steps = was, rate = (uint32_t)clamp(t->p[P_ARATE], 0, 7), code, s, pass, per;
+    char b[24];
+    fm1_irq_off();
+    code = ash_subdivide(p, &steps, &rate, in);
+    if (code == AZ_OK) {
+        t->p[P_APROB] = (int16_t)steps;
+        t->p[P_ARATE] = (int16_t)rate;
+        if (t->arp_idx != 0xFFFFFFFFu && t->arp_pos < 0xFFFFFFFu) {   /* (playing, not a fresh chord's first step) */
+            pass = t->arp_idx / was;
+            s = t->arp_idx % was;
+            per = arp_period(t);                     /* (the new RATE's step) */
+            if (in) {
+                s *= 2u;
+                if (t->arp_pos >= per) {             /* (in the old step's second half: the new step after it) */
+                    s++;
+                    t->arp_pos -= per;
+                }
+            } else {
+                if (s & 1u)                          /* (the second of a pair: half way into the joined step) */
+                    t->arp_pos += per / 2u;
+                s /= 2u;
+            }
+            t->arp_idx = pass * steps + s;
+        }
+    }
+    fm1_irq_on();
+    if (code != AZ_OK) {
+        ui_message(code == AZ_NORATE ? (in ? "NO 1/32T RATE" : "NO 1/2T RATE") : AZ_MSG[code]);
+        return;
+    }
+    ui.arp.cur = (uint8_t)(in ? (ui.arp.cur % was) * 2u : (ui.arp.cur % was) / 2u);
+    fmt_int(b, (int32_t)steps);
+    str_cpy(b + str_len(b), " STEPS ", sizeof b - str_len(b));
+    str_cpy(b + str_len(b), N_ARATE[rate], sizeof b - str_len(b));
+    ui_say("ZOOM ", b);                              /* "ZOOM 32 STEPS 1/32" */
+    arp_edited();
 }

@@ -8816,6 +8816,91 @@ static int test_arp_page(void)
     return bad;
 }
 
+/* WaveLoop: ZOOM on the ARP pages (ui_arp.c arp_zoom, ui_layer.c op_shift): OP1 (FX) held + OCT+ / OCT- is the toy's x2 /
+ * /2: STEPS, RATE, every note's step and length, the cursor; FX's tap and OCT's octave do not happen; FX alone still
+ * taps; the refusals say why and change nothing; a playing arp keeps its place; a project keeps the zoomed pattern */
+static int test_arp_zoom(void)
+{
+    int bad = 0, ok;
+    uint32_t i, per;
+    int32_t oct;
+    arp_pat_t keep, z;
+    track_t *t;
+    ui_power_on();
+    song.sel = 0;
+    t = TSEL;
+    go_page(GR_ARP);
+    frame();
+    ash_load(&keep, 0);
+    press(B_FX); frames(100);
+    bad += check("ZOOM: FX tapped alone on ARP still opens its page", str_eq(cur_page()->title, "FX"));
+    go_page(GR_ARP); frame();
+    turn(EN_PRESET, 3);
+    oct = song.octave;
+    btn_down(B_FX); frame();
+    press(B_OCTUP);
+    ok = t->p[P_APROB] == 8 && t->p[P_ARATE] == 5 && arp_cur() == 6u && msg_is("ZOOM 8 STEPS 1/16") &&
+         song.octave == oct && t->p[P_APAT] == 0 && arp_pat[0].n == keep.n;
+    for (i = 0; i < keep.n; i++)
+        ok &= arp_pat[0].note[i] == ARP_NOTE(ARP_STEP(keep.note[i]) * 2u, ARP_ROW(keep.note[i]), 2u);
+    btn_up(B_FX); frame(); frames(200);
+    bad += check("  FX held + OCT+: 8 STEPS 1/16, every note x2, cursor 4 -> 7, ZOOM 8 STEPS 1/16, no octave", ok);
+    bad += check("  .. and FX let go: no FX page, no map", str_eq(cur_page()->title, "ARP") && !ui.layer && !ui.ly);
+    btn_down(B_FX); frames(800);                     /* (held past HOLD: FX's map peeks) */
+    ok = ui.layer == LAYER_FX;
+    press(B_OCTDN);
+    ok &= t->p[P_APROB] == 4 && t->p[P_ARATE] == 3 && arp_cur() == 3u && !memcmp(&arp_pat[0], &keep, sizeof keep) &&
+          song.octave == oct && !ui.layer && msg_is("ZOOM 4 STEPS 1/8");
+    press(B_OCTUP); press(B_OCTDN);                 /* (still held: again, and back) */
+    ok &= t->p[P_APROB] == 4 && !memcmp(&arp_pat[0], &keep, sizeof keep);
+    btn_up(B_FX); frames(200);
+    bad += check("  FX held past HOLD + OCT-: back to SHAYPE exactly, cursor 7 -> 4, the map closes; again while held",
+                 ok && str_eq(cur_page()->title, "ARP"));
+    t->p[P_ARATE] = 7;
+    btn_down(B_FX); frame(); press(B_OCTUP);
+    ok = msg_is("1/32 IS THE FASTEST") && t->p[P_APROB] == 4 && t->p[P_ARATE] == 7;
+    t->p[P_ARATE] = 0; press(B_OCTDN);
+    ok &= msg_is("1/2 IS THE SLOWEST");
+    t->p[P_ARATE] = 3; t->p[P_APROB] = 33; press(B_OCTUP);
+    ok &= msg_is("64 STEPS MAX");
+    press(B_OCTDN);
+    ok &= msg_is("STEPS ARE ODD") && t->p[P_APROB] == 33;
+    t->p[P_APROB] = 4; press(B_OCTDN);
+    ok &= msg_is("NOTE BETWEEN STEPS") && !memcmp(&arp_pat[0], &keep, sizeof keep) && t->p[P_ARATE] == 3;
+    t->p[P_ARATE] = 2; press(B_OCTDN);
+    ok &= msg_is("NO 1/2T RATE");
+    t->p[P_ARATE] = 6; press(B_OCTUP);
+    ok &= msg_is("NO 1/32T RATE") && song.octave == oct;
+    btn_up(B_FX); frames(200);
+    bad += check("  refusals: 1/32 FASTEST, 1/2 SLOWEST, 64 STEPS MAX, STEPS ARE ODD, NOTE BETWEEN STEPS, no 1/2T 1/32T; "
+                 "nothing changes", ok && str_eq(cur_page()->title, "ARP") && !memcmp(&arp_pat[0], &keep, sizeof keep));
+    t->p[P_ARATE] = 3;
+    fm1_irq_off();
+    per = arp_period(t);
+    t->arp_idx = 2u * 4u + 3u;                       /* (pass 3, step 4, three quarters in) */
+    t->arp_pos = per * 3u / 4u;
+    fm1_irq_on();
+    btn_down(B_FX); frame(); press(B_OCTUP);
+    ok = t->arp_idx == 2u * 8u + 7u && t->arp_pos == per * 3u / 4u - per / 2u;
+    press(B_OCTDN);
+    ok &= t->arp_idx == 2u * 4u + 3u && t->arp_pos == per * 3u / 4u;
+    btn_up(B_FX); frames(200);
+    bad += check("  playing: the arp keeps its pass, step and place in it, in and out", ok);
+    btn_down(B_FX); frame(); press(B_OCTUP); btn_up(B_FX); frames(200);
+    z = arp_pat[0];
+    ok = !project_save(0);
+    fm1_irq_off(); ash_load(&arp_pat[0], 6); fm1_irq_on();
+    t->p[P_APROB] = 4; t->p[P_ARATE] = 3;
+    project_load(0);
+    bad += check("  a project keeps the zoomed pattern, STEPS and RATE", ok && !memcmp(&arp_pat[0], &z, sizeof z) &&
+                 t->p[P_APROB] == 8 && t->p[P_ARATE] == 5);
+    go_home(); frame();
+    btn_down(B_FX); frame(); press(B_OCTUP); btn_up(B_FX); frames(200);
+    bad += check("  off the ARP pages FX + OCT+ is as before (the octave), no zoom",
+                 song.octave == oct + 1 && t->p[P_APROB] == 8 && !memcmp(&arp_pat[0], &z, sizeof z));
+    return bad;
+}
+
 static int test_knob_card(void)
 {
     static uint16_t shot[240 * 240];
@@ -8944,6 +9029,7 @@ int main(void)
     bad += test_acid_flags();
     bad += test_knob_card();
     bad += test_arp_page();
+    bad += test_arp_zoom();
 
     if (getenv("UI_SCREEN_DIR")) chain_screens(getenv("UI_SCREEN_DIR"));
     printf(bad ? "ui: %d FAILED\n" : "ui: all passed\n", bad);

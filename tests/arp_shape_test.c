@@ -2,11 +2,13 @@
 /* The ARP (SHAYPE, firmware/src/arp_shape.c) against WaveLoop's Shape Arp core: every case of tests/arp_vectors.h
  * (tools/arp_vectors.mjs ran sequence.mjs on them) played through the C core, tick by tick as seq.c arp_fire plays it,
  * must give exactly the notes, steps and lengths the JS core gave, in its order. Then the toy's own unit tests
- * (sequence.test.mjs) as C, and the editing helpers. Run by tests/run_tests.sh. */
+ * (sequence.test.mjs) as C, and the editing helpers. ZOOM (ash_subdivide) against the toy's subdivide on every case of
+ * tests/arp_zoom_vectors.h (tools/arp_vectors.mjs --zoom), its refusals included. Run by tests/run_tests.sh. */
 #include <stdio.h>
 #include <string.h>
 #include "arp_shape.c"
 #include "arp_vectors.h"
+#include "arp_zoom_vectors.h"
 
 static uint32_t xs;
 static uint32_t xs_next(void)
@@ -51,6 +53,37 @@ static int play_vec(uint32_t k, int verbose)
     if (e != v->nev && verbose)
         printf("arp:   case %u: C played %u notes, JS %u\n", (unsigned)k, (unsigned)e, (unsigned)v->nev);
     return e == v->nev;
+}
+
+/* ZOOM case k through ash_subdivide: the toy's pattern, STEPS and RATE, or its refusal (and nothing changed). The toy's
+ * 1/64 (RATE 1/32 x2) is not a RATE here: AZ_FAST */
+static uint32_t zoom_fast;
+static int zoom_vec(uint32_t k, int verbose)
+{
+    const azv_t *v = &AZV[k];
+    arp_pat_t p, was;
+    uint32_t steps = v->steps, rate = v->rate, code, want = v->code, j, ok;
+    memset(&p, 0, sizeof p);
+    p.n = v->npat;
+    memcpy(p.note, v->pat, sizeof p.note);
+    was = p;
+    for (j = 0; j < 8u && ARP_RATE2[j] != v->nrate2; j++)
+        ;
+    if (want == AZ_OK && j == 8u) {
+        want = AZ_FAST;
+        zoom_fast++;
+    }
+    code = ash_subdivide(&p, &steps, &rate, v->in);
+    if (want != AZ_OK)
+        ok = code == want && !memcmp(&p, &was, sizeof p) && steps == v->steps && rate == v->rate;
+    else
+        ok = code == AZ_OK && steps == v->nsteps && rate == j && p.n == v->npat &&
+             !memcmp(p.note, v->out, 2u * v->npat);
+    if (!ok && verbose)
+        printf("arp:   zoom case %u (%u steps, RATE %u, %s): C %u, %u steps, RATE %u; JS %u, %u steps, x2 rate %u\n",
+               (unsigned)k, (unsigned)v->steps, (unsigned)v->rate, v->in ? "in" : "out", (unsigned)code,
+               (unsigned)steps, (unsigned)rate, (unsigned)want, (unsigned)v->nsteps, (unsigned)v->nrate2);
+    return ok;
 }
 
 static int same(const uint8_t *a, uint32_t n, const uint8_t *b, uint32_t m) { return n == m && !memcmp(a, b, n); }
@@ -133,6 +166,37 @@ int main(void)
             }
         }
         check("factory patterns: inside their steps, rows without overlaps, short names", ok);
+    }
+    {   /* ZOOM: the toy's subdivide, case by case; and in then out is where it started */
+        uint32_t zbad = 0, nref = 0, i, steps = 4, rate = 3, ok;
+        arp_pat_t p, was;
+        for (k = 0; k < AZV_N; k++) {
+            nref += AZV[k].code != AZ_OK;
+            if (!zoom_vec(k, zbad < 5u))
+                zbad++;
+        }
+        snprintf(line, sizeof line, "ZOOM parity: %u cases (%u refused by the toy, %u at 1/32: AZ_FAST)", (unsigned)AZV_N,
+                 (unsigned)nref, (unsigned)zoom_fast);
+        check(line, !zbad && zoom_fast > 0u);
+        ash_load(&p, 0);
+        was = p;
+        ok = ash_subdivide(&p, &steps, &rate, 1) == AZ_OK && steps == 8u && rate == 5u;
+        for (i = 0; i < p.n; i++)
+            ok &= ARP_STEP(p.note[i]) == 2u * ARP_STEP(was.note[i]) && ARP_LEN(p.note[i]) == 2u;
+        ok &= ash_subdivide(&p, &steps, &rate, 0) == AZ_OK && steps == 4u && rate == 3u && !memcmp(&p, &was, sizeof p);
+        steps = 33; rate = 3;
+        ok &= ash_subdivide(&p, &steps, &rate, 1) == AZ_MAX && ash_subdivide(&p, &steps, &rate, 0) == AZ_ODD;
+        steps = 4; rate = 7;
+        ok &= ash_subdivide(&p, &steps, &rate, 1) == AZ_FAST && rate == 7u;
+        rate = 0;
+        ok &= ash_subdivide(&p, &steps, &rate, 0) == AZ_SLOW;
+        rate = 2;
+        ok &= ash_subdivide(&p, &steps, &rate, 0) == AZ_NORATE;
+        rate = 6;
+        ok &= ash_subdivide(&p, &steps, &rate, 1) == AZ_NORATE;
+        rate = 3;
+        ok &= ash_subdivide(&p, &steps, &rate, 0) == AZ_BETWEEN && !memcmp(&p, &was, sizeof p) && steps == 4u;
+        check("ZOOM: SHAYPE in (8 steps 1/16) and out again exactly; 64 MAX, ODD, FASTEST, SLOWEST, no 1/2T 1/32T, BETWEEN", ok);
     }
     printf("arp: %s\n", fails ? "FAILED" : "all ok");
     return fails != 0;

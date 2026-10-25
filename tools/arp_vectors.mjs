@@ -4,6 +4,13 @@
 // firmware/src/arp_shape.c and wants exactly the same notes.
 //   node tools/arp_vectors.mjs [path/to/sequence.mjs] > tests/arp_vectors.h
 //   node tools/arp_vectors.mjs --chords [path/to/sequence.mjs] > tests/arp_chords_vectors.h
+//   node tools/arp_vectors.mjs --zoom [path/to/sequence.mjs] > tests/arp_zoom_vectors.h
+// --zoom: the ARP pages' ZOOM (OP1 + OCT+ / OCT-, firmware/src/ui_arp.c) is the toy's subdivide(pattern, steps, rate,
+// factor): patterns, STEPS and every RATE the firmware has, x2 and /2, and what subdivide gives, null included. Its
+// refusals are named for the firmware's message (why, in subdivide's order of checks; this script throws where the
+// names and subdivide's null disagree). tests/arp_shape_test.c runs ash_subdivide on each and wants the same pattern,
+// STEPS and RATE, or the same refusal; where the toy goes on to 1/64 (RATE 1/32 x2) the firmware's RATE stops at 1/32
+// and says so (AZ_FAST).
 // --chords: the sequencer feeding the ARP (tests/arp_seq_test.c): chords on the sequencer's steps (each a pitch set, its
 // first step, the step after its last, a velocity) go through the toy's offline form, shapeChords, on the arp's grid from
 // step 0 (stepTicks 96 a step of the arp; a sequencer step is 96 x arpPerSeq), and its notes are written: tick, pitch,
@@ -20,9 +27,11 @@ import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const args = process.argv.slice(2), CHORDS = args.includes('--chords'), path = args.find(a => a !== '--chords');
+const args = process.argv.slice(2), CHORDS = args.includes('--chords'), ZOOM = args.includes('--zoom');
+const path = args.find(a => !a.startsWith('--'));
 const src = resolve(path ?? `${process.env.WAVELOOP ?? homedir() + '/repos/waveloop'}/web/src/arp/core/sequence.mjs`);
-const { DEFAULT_PATTERN, passOffset, eventsAt, paintNote, rootVoicing, shapeChords } = await import(pathToFileURL(src).href);
+const { DEFAULT_PATTERN, passOffset, eventsAt, paintNote, rootVoicing, shapeChords, subdivide, RATES } =
+  await import(pathToFileURL(src).href);
 const sha = createHash('sha256').update(readFileSync(src)).digest('hex');
 
 const xorshift = seed => { let s = seed >>> 0 || 1; return () => { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s; }; };
@@ -40,6 +49,74 @@ function play({ pattern, steps, chord, root, direction, boundary, passes, seed }
     for (const [pitch, length] of merged) out.push([tick, pitch, length]);
   }
   return out;
+}
+
+if (ZOOM) {
+  // the firmware's RATE (P_ARATE 0..7: 1/2 .. 1/32) as the toy's steps per beat
+  const FW = [0.5, 1, 1.5, 2, 3, 4, 6, 8];
+  const AZ = ['AZ_OK', 'AZ_FAST', 'AZ_SLOW', 'AZ_NORATE', 'AZ_MAX', 'AZ_ODD', 'AZ_BETWEEN'];
+  const values = RATES.map(r => r.value);
+  // why subdivide says no, in its order of checks (the firmware's messages); checked against its null below
+  const why = (pattern, steps, rate, factor) => {
+    if (!values.includes(rate * factor))
+      return factor === 2 ? (rate === Math.max(...values) ? 'AZ_FAST' : 'AZ_NORATE') : (rate === Math.min(...values) ? 'AZ_SLOW' : 'AZ_NORATE');
+    if (factor === 2) return steps * 2 > 64 ? 'AZ_MAX' : 'AZ_OK';
+    if (steps % 2) return 'AZ_ODD';
+    return pattern.some(n => n.step % 2 || n.length % 2) ? 'AZ_BETWEEN' : 'AZ_OK';
+  };
+  const FACTORY = [[DEFAULT_PATTERN, 4], ...[
+    [[[0, 0, 1], [1, 1, 1], [2, 2, 1], [3, 3, 1]], 4],
+    [[[0, 0, 1], [1, 1, 1], [2, 2, 1], [3, 3, 1], [4, 2, 1], [5, 1, 1]], 6],
+    [[[0, 0, 1], [0, 1, 1], [0, 2, 1], [3, 0, 1], [3, 1, 1], [3, 2, 1], [6, 0, 2], [6, 1, 2], [6, 2, 2]], 8],
+    [[[0, 0, 1], [1, 1, 1], [2, 2, 1], [3, 3, 1], [4, 4, 1], [5, 5, 1], [6, 6, 1], [7, 7, 1]], 8],
+    [[[0, 0, 1], [1, 2, 1], [2, 0, 1], [3, 3, 1], [4, 0, 1], [5, 2, 1], [6, 0, 1], [7, 1, 1]], 8],
+    [[[0, 0, 4], [1, 2, 1], [3, 1, 1]], 4],
+  ].map(([n, steps]) => [n.map(([step, row, length]) => ({ step, row, length })), steps])];
+  const cases = [];
+  const add = (pattern, steps, rate, factor) => {
+    const got = subdivide(pattern, steps, FW[rate], factor), code = why(pattern, steps, FW[rate], factor);
+    if ((got === null) !== (code !== 'AZ_OK')) throw new Error(`why() disagrees with subdivide: ${steps} ${FW[rate]} ${factor}`);
+    cases.push({ pattern, steps, rate, factor, got, code });
+  };
+  const rnd = xorshift(0x200A);
+  const draw = (steps, even) => {
+    let pattern = [];
+    for (let i = 0, n = 1 + rnd() % 14; i < n; i++) {
+      let step = rnd() % steps, length = 1 + rnd() % (steps - step);
+      if (even) { step &= ~1; length = Math.max(2, length & ~1); if (step + length > steps) length = steps - step; }
+      pattern = paintNote(pattern, rnd() % 8, step, length);
+    }
+    return pattern;
+  };
+  for (const [pattern, steps] of FACTORY) for (let rate = 0; rate < FW.length; rate++) for (const factor of [2, 0.5]) {
+    add(pattern, steps, rate, factor);                                     // (as loaded: a join mostly between steps)
+    const z = subdivide(pattern, steps, 4, 2);                             // (zoomed in once: every join works)
+    add(z.pattern, z.steps, rate, factor);
+  }
+  for (const steps of [1, 2, 3, 31, 32, 33, 34, 62, 63, 64]) for (const factor of [2, 0.5]) {
+    add(draw(steps, false), steps, 5, factor);
+    if (steps % 2 === 0) add(draw(steps, true), steps, 5, factor);
+  }
+  add([], 16, 3, 2); add([], 16, 3, 0.5); add([], 64, 3, 2); add([], 15, 3, 0.5);
+  for (let k = 0; k < 120; k++) {
+    const even = k % 2 === 1, steps = even ? 2 * (1 + rnd() % 32) : 1 + rnd() % 64;
+    add(draw(steps, even), steps, rnd() % FW.length, rnd() % 2 ? 2 : 0.5);
+  }
+  const pk = p => `{${p.map(n => `AV_NOTE(${n.step}, ${n.row}, ${n.length})`).join(', ') || '0'}}`;
+  const lines = [`/* generated by tools/arp_vectors.mjs --zoom from sequence.mjs sha256 ${sha} - do not edit */`];
+  lines.push('#define AV_NOTE(s, r, l) ARP_NOTE(s, r, l)');
+  lines.push('/* a pattern, its STEPS, RATE (P_ARATE), x2 (in) or /2; what subdivide gave (its refusal named), the steps, the');
+  lines.push(' * rate (steps per two beats: ARP_RATE2; 32 = the toy\'s 1/64) and the pattern */');
+  lines.push('typedef struct { uint8_t steps, rate, in, code, nsteps, nrate2, npat; uint16_t pat[ARP_NMAX], out[ARP_NMAX]; } azv_t;');
+  lines.push('static const azv_t AZV[] = {');
+  for (const c of cases)
+    lines.push(`    {${c.steps}, ${c.rate}, ${c.factor === 2 ? 1 : 0}, ${c.code}, ${c.got ? c.got.steps : 0}, ${c.got ? c.got.rate * 2 : 0}, ` +
+      `${c.pattern.length}, ${pk(c.pattern)}, ${pk(c.got ? c.got.pattern : [])}},`);
+  lines.push('};');
+  const n = code => cases.filter(c => c.code === code).length;
+  lines.push(`#define AZV_N ${cases.length}u   /* ${AZ.map(a => `${a.slice(3)} ${n(a)}`).join(', ')} */`);
+  console.log(lines.join('\n'));
+  process.exit(0);
 }
 
 if (CHORDS) {

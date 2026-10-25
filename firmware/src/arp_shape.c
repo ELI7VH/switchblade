@@ -209,3 +209,42 @@ static int ash_valid(const arp_pat_t *p)
             return 0;
     return 1;
 }
+/* subdivide(pattern, steps, rate, factor), the toy's x2 / /2: ZOOM. In (factor 2) every step splits in two at twice
+ * the rate; out (0.5) pairs join at half the rate. Every note's step and length go with it, so the pattern sounds the
+ * same. rate: P_ARATE (an index of ARP_RATE2). AZ_OK and the new *steps *rate, or why not, the toy's checks in its
+ * order, nothing changed: no such rate, past 64 steps, or (joining) STEPS odd or a note starting or ending inside a
+ * pair. The toy's RATES go on to 1/64, RATE here stops at 1/32: where the toy would zoom 1/32 in, AZ_FAST */
+enum { AZ_OK, AZ_FAST, AZ_SLOW, AZ_NORATE, AZ_MAX, AZ_ODD, AZ_BETWEEN };
+static uint32_t ash_subdivide(arp_pat_t *p, uint32_t *steps, uint32_t *rate, int in)
+{
+    uint32_t r = ARP_RATE2[*rate < 8u ? *rate : 7u], next = in ? r * 2u : r / 2u, j, i;
+    for (j = 0; j < 8u && ARP_RATE2[j] != next; j++)
+        ;
+    if (in) {
+        if (j == 8u && next != 2u * ARP_RATE2[7])      /* (the toy's 1/64: its next checks first) */
+            return AZ_NORATE;
+        if (*steps * 2u > ARP_STEPS)
+            return AZ_MAX;
+        if (j == 8u)
+            return AZ_FAST;
+        for (i = 0; i < p->n; i++)               /* (a note past STEPS that would not fit: never, kept out anyway) */
+            if ((ARP_STEP(p->note[i]) + ARP_LEN(p->note[i])) * 2u > ARP_STEPS)
+                return AZ_MAX;
+        for (i = 0; i < p->n; i++)
+            p->note[i] = ARP_NOTE(ARP_STEP(p->note[i]) * 2u, ARP_ROW(p->note[i]), ARP_LEN(p->note[i]) * 2u);
+        *steps *= 2u;
+    } else {
+        if (j == 8u || (r & 1u))
+            return r <= ARP_RATE2[0] ? AZ_SLOW : AZ_NORATE;
+        if (*steps & 1u)
+            return AZ_ODD;
+        for (i = 0; i < p->n; i++)
+            if ((ARP_STEP(p->note[i]) | ARP_LEN(p->note[i])) & 1u)
+                return AZ_BETWEEN;
+        for (i = 0; i < p->n; i++)
+            p->note[i] = ARP_NOTE(ARP_STEP(p->note[i]) / 2u, ARP_ROW(p->note[i]), ARP_LEN(p->note[i]) / 2u);
+        *steps /= 2u;
+    }
+    *rate = j;
+    return AZ_OK;
+}
