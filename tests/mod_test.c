@@ -142,6 +142,8 @@ static uint64_t phrase_child(uint32_t k)
             trk[0].mw = 100;
         } else if (k == 3u || k == 4u) {           /* WaveLoop build: the mod wheel alone (no slot), its vibrato */
             trk[0].mw = k == 3u ? 100u : 30u;
+        } else if (k == 5u || k == 6u) {           /* .. the pressure alone: vibrato and the filter */
+            trk[0].at = k == 5u ? 100u : 30u;
         }
         memcpy(keep, trk[0].p, sizeof keep);
         h = phrase();
@@ -162,10 +164,91 @@ static uint64_t phrase_child(uint32_t k)
 static void test_off(void)
 {
     uint64_t h0 = phrase_child(0), h1 = phrase_child(1), h2 = phrase_child(2), h3 = phrase_child(3), h4 = phrase_child(4);
+    uint64_t h5 = phrase_child(5), h6 = phrase_child(6);
     check("slots that do nothing: bit-identical to the matrix off", h0 && h0 == h1);
     check("an active matrix changes the sound, and leaves no modulated value in p[]", h2 && h2 != h0);
     check("WaveLoop: the mod wheel alone (no MODW slot) is a vibrato: the sound changes, more wheel another", h3 && h4 &&
           h3 != h0 && h4 != h0 && h3 != h4);
+    check("WaveLoop: the pressure alone (no AT slot) changes the sound, more pressure another; none: as the matrix off",
+          h5 && h6 && h5 != h0 && h6 != h0 && h5 != h6 && h5 != h3);
+}
+/* WaveLoop build: the pressure (aftertouch: channel, or poly as its hardest key) is a vibrato as the wheel's, added to
+ * it (together at most the wheel's top), and opens the filter up to AT_CUT_MAX, glided; 0: nothing, the glide idle */
+static void pkt(uint32_t st, uint32_t d1, uint32_t d2);
+static double brightness(uint32_t n)                /* n blocks: the mean |second difference| over the mean |x|, left */
+{
+    double d = 0, a = 0;
+    uint32_t i;
+    while (n--) {
+        mix_block(out_buf, CTL);
+        for (i = 4; i < 2u * CTL; i += 2) {
+            d += fabs((double)out_buf[i] - 2.0 * out_buf[i - 2] + out_buf[i - 4]);
+            a += fabs((double)out_buf[i]);
+        }
+    }
+    return a > 0 ? d / a : 0;
+}
+static void test_aftertouch(void)
+{
+    track_t *t = &trk[0];
+    double b0, b1;
+    uint32_t i, ok;
+    fresh(0, 0);                                    /* OB-Z, its first sound: a filtered saw */
+    t->vib_ph = 7;
+    trk_note_on(t, 48, 100);
+    blocks(64);
+    check("WaveLoop pressure: 0, the vibrato's phase stands still, the filter's glide idle (nothing added)",
+          t->vib_ph == 7 && !t->at_s);
+    b0 = brightness(256);
+    t->at = 127;
+    blocks(1);
+    ok = t->at_s == 16u;                             /* (an eighth of the way the first block) */
+    blocks(64);
+    ok &= t->at_s == 127u && t->vib_ph != 7u;
+    b1 = brightness(256);
+    check("  full pressure: the filter opens (glided: an eighth the first block, all of it within 64), the vibrato runs",
+          ok && b1 > b0 * 1.05);
+    printf("mod:   brightness at pressure 0 %.4f, 127 %.4f (x%.2f); the opening AT_CUT_MAX %d cutoff steps\n", b0, b1,
+           b1 / b0, AT_CUT_MAX / 256);
+    t->at = 0;
+    blocks(64);
+    check("  pressure back to 0: the filter closes again (the glide back to 0)", !t->at_s);
+    t->mw = 0; t->at = 100;
+    ok = vib_depth(t) == 100;
+    t->mw = 60;
+    ok &= vib_depth(t) == 127;
+    t->mw = 127; t->at = 127;
+    ok &= vib_depth(t) == 127;
+    t->mw = t->at = 0;
+    check("  vibrato: the pressure's depth as the wheel's, the two added, at most the wheel's top", ok && !vib_depth(t));
+    trk_note_off(t, 48);
+    /* poly pressure through MIDI: the hardest key; let go (0) the next; channel 16 follows the selected track */
+    fresh(0, 0);
+    song.sel = 2;
+    pkt(0xA3, 60, 50);
+    pkt(0xA3, 64, 90);
+    blocks(1);
+    ok = trk[3].at == 90;
+    pkt(0xA3, 64, 0);
+    blocks(1);
+    ok &= trk[3].at == 50;
+    pkt(0xA3, 60, 0);
+    blocks(1);
+    ok &= trk[3].at == 0;
+    for (i = 0; i < 10u; i++)                        /* more keys than slots: the softest give way */
+        pkt(0xA3, 60 + i, 10 + i);
+    blocks(1);
+    ok &= trk[3].at == 19;
+    pkt(0xB3, 121, 0);
+    blocks(1);
+    ok &= trk[3].at == 0;
+    pkt(0xA3, 70, 5);
+    blocks(1);
+    ok &= trk[3].at == 5;
+    check("USB poly pressure (ch 4 -> part 4): the hardest key's; a key let go, the next; CC121 forgets them", ok);
+    pkt(0xDF, 70, 0);
+    blocks(1);
+    check("  channel pressure on channel 16 (ROUT CH1-4): the selected track's (T3)", trk[2].at == 70 && trk[0].at == 0);
 }
 /* WaveLoop build: the mod wheel's vibrato (voice.c track_render): its phase runs only while the wheel is up, ~5.4 Hz, at
  * most +-1/2 semitone (Q8: 128), the wheel squared */
@@ -661,6 +744,7 @@ int main(int argc, char **argv)
 {
     test_off();
     test_wheel_vibrato();
+    test_aftertouch();
     test_math();
     test_midi();
     test_cost();

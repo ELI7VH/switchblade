@@ -354,7 +354,9 @@ typedef struct track {
     uint8_t ins_run;             /* the INSERT still sounds (fx.c track_insert: its wet share above 0) */
     uint8_t cond_loop;           /* 1.5.5 (#209): the loop of its LEN playing (0..COND_LOOPS - 1, seq.c seq_tick) */
     uint8_t vib_ph;              /* WaveLoop: the mod wheel's vibrato, its phase (voice.c track_render) */
-    uint8_t rsv_sz[5];           /* (sizeof(track_t) a multiple of 16: below) */
+    uint8_t at_s;                /* WaveLoop: the pressure (at) as the filter follows it, glided (voice.c wl_press) */
+    int16_t at_cut;              /* .. its share of the voices' cutoff (m.cutoff's unit), 0 = none */
+    uint8_t rsv_sz[2];           /* (sizeof(track_t) a multiple of 16: below) */
     int16_t armp, aholdp;        /* P_AMODE / P_AHOLD as last seen by the ISR */
     /* engine switch (voice.c engine_block): the old engine's voices fade out, then it switches */
     uint8_t xf_on, xf;           /* fading; blocks of the fade still to render */

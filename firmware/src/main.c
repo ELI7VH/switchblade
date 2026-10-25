@@ -100,6 +100,7 @@ static void felucca_init(void)
 {
     uint32_t i;
     chain_defaults(&chain_config);
+    memset(pp_val, 0, sizeof pp_val);         /* (WaveLoop: no key pressing; mod.c, .pool is not zeroed) */
     for (i = 0; i < G_COUNT; i++)
         song.g[i] = GP[i].def;
     undo_depth++;                             /* (no undo copy of the power-on loads) */

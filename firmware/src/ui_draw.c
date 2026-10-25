@@ -1467,6 +1467,9 @@ static void draw_knob_card(void)
         name = "MOD WHEEL VIBRATO";
         fmt_int(val, (v * 100 + 63) / 127);
         unit = "%";
+    } else if (ui.wl.id == KC_AT) {                     /* the pressure: vibrato and the filter (voice.c), 0..127 */
+        name = "AFTERTOUCH";
+        fmt_int(val, v);
     } else if (ui.wl.id < P_COUNT) {
         const param_desc_t *d = track_desc(t, ui.wl.id);
         name = kc_name(t, ui.wl.id);

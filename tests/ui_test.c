@@ -8848,6 +8848,11 @@ static int test_knob_card(void)
     ok &= ui.wl.id == KC_WHEEL && ui.wl.v == 127;
     frames(KCARD_MS + 100u);
     bad += check("  the FM-1's own knob (HOME KNOB 2: RESONANCE) shows it too; the mod wheel (CC1) as VIBRATO", ok && !ui.wl.on);
+    midi_event(0xD0, 0, 64, 0);                       /* WaveLoop: the pressure (channel aftertouch) */
+    frame();
+    ok = ui.wl.on && ui.wl.id == KC_AT && ui.wl.v == 64 && ui.wl.trk == 0u && kc_drawn(shot) > 40;
+    frames(KCARD_MS + 100u);
+    bad += check("  the pressure (aftertouch) shows as T1 AFTERTOUCH 64", ok && !ui.wl.on);
     return bad;
 }
 int main(void)

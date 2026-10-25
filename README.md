@@ -15,6 +15,10 @@ synth from an **M-Audio Oxygen Pro 61** set to the preset of the WaveLoop Melode
   machine, what the knob does and its value, with a bar. It goes 0.8 s after the last move.
 - **The mod wheel is a vibrato** on every machine: about 5.4 Hz, up to half a semitone at the top, the wheel squared so
   the bottom is gentle. It adds to any MOD slot that uses MODW. Pitch bend is unchanged.
+- **Aftertouch** (channel pressure, or poly pressure as the hardest key) adds the same vibrato as the wheel (the two
+  together go no deeper than the wheel at the top) and opens the filter a little: up to 12 steps of CUTOFF at full
+  pressure, about an octave, gliding so it never zips. With no pressure the sound is exactly as before. On channel 16
+  it follows the selected track, and the knob card shows it as AFTERTOUCH.
 
 | Oxygen control | Sends | Does (every machine) |
 | --- | --- | --- |
@@ -34,6 +38,7 @@ synth from an **M-Audio Oxygen Pro 61** set to the preset of the WaveLoop Melode
 | Encoder press | CC115 | next track (after T4, T1) |
 | Pads | notes, channel 4 | track 4 |
 | Mod wheel | CC1 | vibrato |
+| Aftertouch | channel / poly pressure | vibrato and a little more cutoff |
 
 EDIT's knob 3 (ENV) and knob 4 (the machine's own control) moved from CC79 / CC70 to CC16 / CC17, in and out
 ([docs/MIDI.md](docs/MIDI.md)). Nothing new is stored: the card, the wheel and the encoder are live controls.

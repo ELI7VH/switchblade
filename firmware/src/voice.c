@@ -644,6 +644,33 @@ static __attribute__((noinline)) void spread_sum(int32_t *out)
         out[i] += spread_buf[i];
 }
 
+/* WaveLoop: full pressure (aftertouch 127) opens every machine's filter this far, in cutoff steps << 8 (m.cutoff's unit,
+ * the CUT knob's steps: 12 of its 127, about an octave on the machines' cutoff laws) */
+#define AT_CUT_MAX (12 * 256)
+/* WaveLoop: the vibrato's depth 0..127 (track_render squares it): the mod wheel and the pressure added, at most the
+ * wheel's top */
+static inline int32_t vib_depth(const track_t *t)
+{
+    int32_t w = (int32_t)t->mw + t->at;
+    return w < 127 ? w : 127;
+}
+/* WaveLoop: the mod wheel and the pressure, once a block (track_render): the vibrato, ~5.4 Hz (a 256-step sine, a step a
+ * block), up to +-1/2 semitone at the top, its depth squared (fine at the bottom), returned as Q8 bend; and the pressure
+ * opening the filter, glided (an eighth of the way a block, ~20 ms end to end: no zipper), t->at_cut its share of m.cutoff,
+ * 0 .. AT_CUT_MAX (x 3096 / 128: 127 is 3071). Not inlined: only while the wheel or the pressure is up, and out of the
+ * audio ISR's loop over the tracks (tests/target_budget.py) */
+static __attribute__((noinline)) int32_t wl_press(track_t *t)
+{
+    int32_t w = vib_depth(t), b = 0, d = (int32_t)t->at - t->at_s;
+    if (w) {
+        t->vib_ph++;
+        b = (osc_sine((uint32_t)t->vib_ph << 24) * w * w) >> 22;
+    }
+    if (d)
+        t->at_s = (uint8_t)(t->at_s + (d > 0 ? (d + 7) >> 3 : -((-d + 7) >> 3)));
+    t->at_cut = (int16_t)(((int32_t)t->at_s * (AT_CUT_MAX * 129 / 128)) >> 7);
+    return b;
+}
 /* render one block of a part into out (cleared here); returns the voices rendered */
 /* Channel bend is live performance state, outside projects/presets. Q8 semitones. */
 static int32_t midi_bend_q8[NTRK], midi_bend_target[NTRK];
@@ -665,13 +692,10 @@ static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
         midi_bend_q8[ti] += d > 0 ? (d < 4 ? d : (d + 3) / 4) : (d > -4 ? d : (d - 3) / 4);
     }
     bend = midi_bend_q8[ti];
-    if (t->mw) {                                        /* WaveLoop: the mod wheel is a vibrato on every machine, on
-                                                         * top of the matrix's MODW: ~5.4 Hz (a 256-step sine, a step a
-                                                         * block), up to +-1/2 semitone at the top, the wheel squared
-                                                         * (fine at the bottom); 0: none, bit for bit as before */
-        t->vib_ph++;
-        bend += (osc_sine((uint32_t)t->vib_ph << 24) * (int32_t)t->mw * (int32_t)t->mw) >> 22;
-    }
+    if (t->mw | t->at | t->at_s)                        /* WaveLoop: the mod wheel is a vibrato on every machine, on top
+                                                         * of the matrix's MODW; the pressure (aftertouch) adds to it and
+                                                         * opens the filter (wl_press); none: bit for bit as before */
+        bend += wl_press(t);
     bend16 = bend >= 0 ? bend / 16 : -((-bend + 15) / 16);
     bend_fine = (bend - bend16 * 16) * 2367 / 2560;
     uint32_t nr = 0, fade = t->xf_on && t->xf;
@@ -734,7 +758,7 @@ static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
         m.fine = v->fine + tune_fine + bend_fine;
         if (v->fine + tune_fine + bend_fine)             /* residual below 1/16 semitone */
             m.inc += (uint32_t)((int32_t)(m.inc >> 12) * (v->fine + tune_fine + bend_fine));
-        m.cutoff = ((lfo * p[P_LD_FLT]) >> 7) + ((m.envq15 * p[P_ED_FLT]) >> 7);
+        m.cutoff = ((lfo * p[P_LD_FLT]) >> 7) + ((m.envq15 * p[P_ED_FLT]) >> 7) + t->at_cut;   /* (WaveLoop: the pressure's) */
         if (v->vel > 110)                               /* accent opens the filter with the env */
             m.cutoff += (m.envq15 * 24) >> 7;
         m.shape = (64 << 8) + ((lfo * p[P_LD_SHP]) >> 7) + ((m.envq15 * p[P_ED_SHP]) >> 7);

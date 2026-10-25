@@ -90,7 +90,7 @@ Program Change 0..31 picks the track machine's preset with that number, in the o
 A program number past the last preset is ignored.
 
 Other controllers received: CC1 (mod wheel), CC11 (expression), CC64 (sustain), pitch bend with RPN 0 bend range, channel aftertouch, and CC120, CC121 and CC123 (sound off, reset controllers, notes off).
-WaveLoop build: the mod wheel is a vibrato on every machine (about 5.4 Hz, up to half a semitone at the top), on top of any MOD slot with the MODW source.
+WaveLoop build: the mod wheel is a vibrato on every machine (about 5.4 Hz, up to half a semitone at the top), on top of any MOD slot with the MODW source. Aftertouch (channel pressure, or poly pressure: the hardest key) adds the same vibrato (wheel and pressure together at most the wheel's top) and opens the filter up to 12 CUTOFF steps, glided; it also feeds the AT source as before.
 With MENU > CONTROL > SELECT set to MODW, turning SELECT on a track set to EXT or BOTH sends CC1 on that track's channel.
 
 ## Clock

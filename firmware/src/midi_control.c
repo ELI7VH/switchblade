@@ -513,6 +513,21 @@ static void kc_note(uint32_t k, uint32_t id, int32_t v)   /* a knob moved: param
     wl_io[7] = (uint8_t)((uint32_t)v >> 8);
     wl_io[3]++;
 }
+/* WaveLoop: the knob card for the pressure (AFTERTOUCH), throttled: a pressure streams tens of values a second, the card
+ * takes one when it moved 4 or more, every KC_AT_MS while it moves less, and its 0 and 127 always */
+#define KC_AT 0xFDu
+#define KC_AT_MS 60u
+static void kc_pressure(const track_t *t)
+{
+    static uint8_t shown[NTRK];
+    static uint32_t ms[NTRK];
+    uint32_t k = trk_index(t), v = t->at, d = v > shown[k] ? v - shown[k] : shown[k] - v;
+    if (!d || (d < 4u && v && v != 127u && fm1_ms - ms[k] < KC_AT_MS))
+        return;
+    shown[k] = (uint8_t)v;
+    ms[k] = fm1_ms;
+    kc_note(k, KC_AT, (int32_t)v);
+}
 /* 1: cc is the Oxygen's encoder (any channel ROUT hears), counted for the main loop; never the CC map's */
 static int __attribute__((noinline)) wl_encoder_cc(uint32_t cc, uint32_t value)
 {
@@ -705,8 +720,11 @@ static void __attribute__((noinline)) midi_event(uint32_t st, uint32_t ch, uint3
     } else if (st == 0xB0u) {
         mod_midi(midi_track(ch), st, d1, d2);
         midi_control(ch, d1, d2);
-    } else if (st == 0xD0u)
-        mod_midi(midi_track(ch), st, d1, d2);
+    } else if (st == 0xD0u || st == 0xA0u) {      /* channel / poly pressure (WaveLoop: the vibrato, the filter) */
+        track_t *t = midi_track(ch);
+        mod_midi(t, st, d1, d2);
+        kc_pressure(t);
+    }
     else if (st == 0xC0u && mpc_io)                /* Program Change: the main loop loads it (ui.c midi_pc_poll) */
         mpc_io[trk_index(midi_track(ch))] = (uint8_t)(0x80u | d1);
 }

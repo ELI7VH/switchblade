@@ -1265,6 +1265,21 @@ static int wl_map_test(void)
     queued(0xB3, 1, 90, 1);
     ok &= wl_io[4] == 3u && wl_io[5] == KC_WHEEL && wl_io[6] == 90u && trk[3].mw == 90u;
     bad += check("  the knob card is noted: CC77 on T2 (LFO > FILTER, its value), again unchanged; CC1 on T4 (the wheel)", ok);
+    seq = wl_io[3];                                       /* WaveLoop: the pressure's card, throttled */
+    queued(0xD1, 40, 0, 1);
+    ok = wl_io[3] == (uint8_t)(seq + 1u) && wl_io[4] == 1u && wl_io[5] == KC_AT && wl_io[6] == 40u && trk[1].at == 40u;
+    queued(0xD1, 42, 0, 1); queued(0xD1, 41, 0, 1);       /* (moved less than 4 within KC_AT_MS: not again) */
+    ok &= wl_io[3] == (uint8_t)(seq + 1u) && trk[1].at == 41u;
+    queued(0xD1, 60, 0, 1);
+    ok &= wl_io[3] == (uint8_t)(seq + 2u) && wl_io[6] == 60u;
+    fm1_ms += KC_AT_MS;
+    queued(0xD1, 61, 0, 1);                               /* (KC_AT_MS later: a small move shows) */
+    ok &= wl_io[3] == (uint8_t)(seq + 3u) && wl_io[6] == 61u;
+    queued(0xD1, 59, 0, 1); queued(0xD1, 0, 0, 1);        /* (0 always) */
+    ok &= wl_io[3] == (uint8_t)(seq + 4u) && wl_io[6] == 0u;
+    queued(0xA1, 62, 90, 1);                              /* poly pressure: the card too */
+    ok &= wl_io[3] == (uint8_t)(seq + 5u) && wl_io[6] == 90u && trk[1].at == 90u;
+    bad += check("  the pressure's card (AFTERTOUCH): a move of 4 or more, else one every 60 ms; 0 always; poly too", ok);
     return bad;
 }
 int main(void)

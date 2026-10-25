@@ -325,18 +325,48 @@ static __attribute__((noinline)) uint32_t mod_time(track_t *t, uint32_t note, ui
     return d < mx ? d : mx;
 }
 
-/* a MIDI controller for track t (seq.c events_block): CC1 / CC11 / channel aftertouch; CC121 resets them */
+/* WaveLoop: poly pressure (0xA0) per track, the keys pressing now (a key's pressure, 0 = let go): the track's at is the
+ * hardest of them (the matrix's AT, voice.c's vibrato and filter) */
+#define PP_N 8u
+static uint8_t pp_note[NTRK][PP_N] __attribute__((section(".pool")));   /* (not loose ISR data: its layout and cost stay) */
+static uint8_t pp_val[NTRK][PP_N] __attribute__((section(".pool")));
+static uint32_t pp_max(uint32_t k, uint32_t note, uint32_t v)   /* key note pressed v (0: up); the hardest now */
+{
+    uint32_t i, j = PP_N, m = 0;
+    for (i = 0; i < PP_N; i++)
+        if (pp_val[k][i] && pp_note[k][i] == note)
+            j = i;
+    if (j == PP_N && v)                             /* (a new key: a free slot, else the softest one's) */
+        for (i = 0, j = 0; i < PP_N; i++)
+            if (!pp_val[k][i] || pp_val[k][i] < pp_val[k][j])
+                j = i;
+    if (j < PP_N) {
+        pp_note[k][j] = (uint8_t)note;
+        pp_val[k][j] = (uint8_t)v;
+    }
+    for (i = 0; i < PP_N; i++)
+        m = pp_val[k][i] > m ? pp_val[k][i] : m;
+    return m;
+}
+/* a MIDI controller for track t (seq.c events_block): CC1 / CC11 / channel aftertouch (WaveLoop: and poly pressure, the
+ * hardest key's); CC121 resets them */
 static __attribute__((noinline)) void mod_midi(track_t *t, uint32_t st, uint32_t d1, uint32_t d2)
 {
     if (st == 0xD0u) {
         t->at = (uint8_t)d1;
+    } else if (st == 0xA0u) {
+        t->at = (uint8_t)pp_max((uint32_t)(t - trk), d1, d2);
     } else if (st == 0xB0u) {
         if (d1 == 1u)
             t->mw = (uint8_t)d2;
         else if (d1 == 11u)
             t->ex_off = (uint8_t)(127u - d2);
-        else if (d1 == 121u)
+        else if (d1 == 121u) {
             t->mw = t->at = t->ex_off = 0;
+            uint32_t i;
+            for (i = 0; i < PP_N; i++)
+                pp_val[t - trk][i] = 0;
+        }
     }
 }
 
