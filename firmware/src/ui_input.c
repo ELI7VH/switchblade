@@ -892,6 +892,10 @@ static void edit_param(uint32_t slot, int32_t steps)
     } else if (vp == &TSEL->p[P_AATT] && v != *vp) {   /* .. ATTACH: when a key reaches the arp, in the top bar */
         arp_attach_say((uint32_t)v);
     }
+    if (vp == &TSEL->p[P_AMODE] && v && TSEL->eng_req == ENGI_DRUM) {   /* WaveLoop: no ARP on a DRUM track (seq.c) */
+        ui_message("NO ARP ON DRUMS");
+        return;
+    }
     *vp = (int16_t)v;
     if (pg->scope != SC_GLOBAL) {
         motion_capture(TSEL, (uint32_t)(vp - TSEL->p), *vp);
@@ -1356,6 +1360,7 @@ static void ui_input(void)
     uint32_t mk = mst_take(mn);                         /* (WaveLoop: MIDI IN's notes for step recording, every pass) */
     midi_take();                                        /* (MIDI IN notes: lights, SCREEN WAKE, AUTO SELECT's) */
     midi_pc_poll();                                     /* MIDI Program Change */
+    drum_pick_poll();                                   /* WaveLoop: a hit on a DRUM track picks its drum */
     wl_encoder();                                       /* WaveLoop: the Oxygen's encoder */
     perf_latch_on = fx_latch & 1u;                      /* (MENU > FX LATCH; a settings load sets it too) */
     fx_map_sync();                                      /* (the FX layer's key map: ui_layer.c, a settings load too) */

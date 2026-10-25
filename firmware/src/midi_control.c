@@ -237,11 +237,29 @@ static const uint8_t MIDI_CC_MAP[][2] = {          /* the common rows, the same 
 };
 /* NANO's 303 runs its own envelope (eng_acid.c): DEC (CC75) is its DECAY, ATK SUS REL are not its */
 static int cc_303(const track_t *t) { return eng_idx(t->eng_req) == ENGI_ACID && !sub_on(t); }
+/* WaveLoop: on a DRUM track the Oxygen's knobs shape the picked drum (eng_drum.c, E1..E7): knob 1 CC74 PITCH, 2 CC71
+ * TONE (EDIT's K1 K2: engine_t.knob), 3 CC5 DECAY, 4 CC10 PAN, 5 CC76 SEND, 6 CC77 LEVEL, 8 CC70 SNAP; knob 7 (CC78, LFO >
+ * AMP) and faders 5..8 (the amp envelope: CC73 75 79 72) nothing (a hit is its own envelope). -2: the common map's */
+static int32_t cc_drum(uint32_t cc)
+{
+    switch (cc) {
+    case 5u: return P_E3;
+    case 10u: return P_E6;
+    case 76u: return P_E7;
+    case 77u: return P_E5;
+    case 70u: return P_E4;
+    case 72u: case 73u: case 75u: case 78u: case 79u: return -1;
+    default: return -2;
+    }
+}
 /* the parameter CC cc sets on track t, -1 none */
 static int32_t cc_param(const track_t *t, uint32_t cc)
 {
     const engine_t *e = ENGINES[eng_idx(t->eng_req)];
     uint32_t i;
+    int32_t d;
+    if (eng_idx(t->eng_req) == ENGI_DRUM && (d = cc_drum(cc)) != -2)
+        return d;
     if (cc_303(t) && (cc == 73u || cc == 75u || cc == 79u || cc == 72u))
         return cc == 75u ? P_E2 : -1;               /* (the 303's DECAY: E3, its KNOB 4) */
     for (i = 0; i < 4u; i++)

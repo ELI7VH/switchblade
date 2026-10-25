@@ -114,6 +114,7 @@ static void host_preset_values(track_t *t, uint32_t e, uint32_t pi, const preset
                                                    * them and as apply_preset_to restores them first. */
     drift_track_loaded(t);                        /* DRIFT's chorus (DRIFT_PX), as ui.c apply_preset_to */
     acid_track_loaded(t);                         /* NANO's model and filter TYPE (NANO_PX), as ui.c apply_preset_to */
+    drum_track_loaded(t);                         /* WaveLoop: DRUM, every drum the kit's values, as ui.c apply_preset_to */
 }
 static void host_preset_req(track_t *t, uint32_t e, uint32_t pi)
 {

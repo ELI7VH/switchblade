@@ -11,18 +11,23 @@
  * engine (cat_of_engine) */
 #ifndef FELUCCA_CATEGORY
 #define FELUCCA_CATEGORY 1
-enum { CAT_NONE, CAT_BASS, CAT_LEAD, CAT_KEYS, CAT_BRASS, CAT_STRINGS, CAT_ATMOS, CAT_ACID, NCAT };
-static const char *const CAT_NAME[NCAT] = {"-", "BASS", "LEAD", "KEYS", "BRASS", "STRINGS", "ATMOS", "ACID"};
-/* the category a sound without one is listed under: its machine's main one (OB-Z LEAD, WAVE ATMOS, ACID, DRIFT BASS) */
-static uint32_t cat_of_engine(uint32_t e) { return e == 1u ? CAT_ATMOS : e == 2u ? CAT_ACID : e == 3u ? CAT_BASS : CAT_LEAD; }
+enum { CAT_NONE, CAT_BASS, CAT_LEAD, CAT_KEYS, CAT_BRASS, CAT_STRINGS, CAT_ATMOS, CAT_ACID, CAT_DRUMS, NCAT };   /* (WaveLoop:
+                                                         * DRUMS appended, the DRUM machine's) */
+static const char *const CAT_NAME[NCAT] = {"-", "BASS", "LEAD", "KEYS", "BRASS", "STRINGS", "ATMOS", "ACID", "DRUMS"};
+/* the category a sound without one is listed under: its machine's main one (OB-Z LEAD, WAVE ATMOS, ACID, DRIFT BASS,
+ * DRUM DRUMS) */
+static uint32_t cat_of_engine(uint32_t e)
+{
+    return e == 1u ? CAT_ATMOS : e == 2u ? CAT_ACID : e == 3u ? CAT_BASS : e == 4u ? CAT_DRUMS : CAT_LEAD;
+}
 
 #ifndef UP_HOST
 #include "four_presets.h"        /* build/gen: OBX_ WAVE_ ACID_ DRIFT_ PRESETS[32] and _CAT[32], WAVE_PX[32] */
-static const uint8_t *const PRESET_CAT[NENGINES] = {OBX_CAT, WAVE_CAT, ACID_CAT, DRIFT_CAT};   /* per engine number */
+static const uint8_t *const PRESET_CAT[4] = {OBX_CAT, WAVE_CAT, ACID_CAT, DRIFT_CAT};   /* per engine number (DRUM: all DRUMS) */
 /* a preset's category is a hint for browsing: nothing else reads it */
 static uint32_t preset_cat(uint32_t e, uint32_t k)    /* factory preset k of engine e */
 {
-    return e < NENGINES && k < 32u ? PRESET_CAT[e][k] : cat_of_engine(e);
+    return e < 4u && k < 32u ? PRESET_CAT[e][k] : cat_of_engine(e);
 }
 #endif
 #endif

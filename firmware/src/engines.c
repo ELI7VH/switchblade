@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
-/* Engine table: the four machines OB-Z, WAVE, ACID, DRIFT (order = PRESETS browsing order and the engine numbers
- * of the editor protocol), the factory patterns (SAVE > PHRASES) and the parts' sounds at power-on. */
+/* Engine table: the five machines OB-Z, WAVE, ACID, DRIFT and (WaveLoop) DRUM (order = PRESETS browsing order and the
+ * engine numbers of the editor protocol), the factory patterns (SAVE > PHRASES) and the parts' sounds at power-on. */
 #include "dsp.c"
 #include "category.c"           /* the CAT_* numbers, and (with four_presets.h) every machine's 32 presets and their categories */
 _Static_assert(NELEM(OBX_PRESETS) == 32u && NELEM(OBX_CAT) == 32u, "OBX: 32 presets");
@@ -18,15 +18,17 @@ _Static_assert(NELEM(WAVE_PX) == 32u, "WAVE: 32 presets (WAVE_PX)");
  * below them). Zero-initialised pool section: main.c fm1_cstart clears it. */
 static inline void *eng_mem_of(uint32_t p);
 #define ENG_MEM(p) eng_mem_of(p)           /* part p's region (p < NPART) */
-#define ENG_MEM_PART (VOID_MEM > ACID_MEM ? (VOID_MEM > DRIFT_MEM ? VOID_MEM : DRIFT_MEM) \
-                                          : (ACID_MEM > DRIFT_MEM ? ACID_MEM : DRIFT_MEM))
+#define ENG_MEM_MAX2(a, b) ((a) > (b) ? (a) : (b))
+#define ENG_MEM_PART ENG_MEM_MAX2(ENG_MEM_MAX2(VOID_MEM, ACID_MEM), ENG_MEM_MAX2(DRIFT_MEM, DRUM_MEM))
 #define ENG_MEM_FITS(name, size) _Static_assert((size) <= ENG_MEM_PART, name " state over ENG_MEM_PART")
 
+#include "eng_drum.c"           /* WaveLoop: DRUM, the WaveLoop Kit's drums (drum_voice.c, drum_yama.c; first: DRUM_MEM sizes the region) */
 #include "eng_obx.c"            /* OB-Z: two oscillators, noise, drive, the filter */
 #include "eng_acid.c"           /* ACID: the TB-303 voice (bass303.c, after Open303) */
 #include "eng_drift.c"          /* DRIFT: the Juno voice (dsp_va.c, after the Ultramaster KR-106) */
 #include "eng_wave.c"           /* WAVE: the VOID WAVE plugin's voice (wavetables: tools/gen_void_tables.py) */
 ENG_MEM_FITS("DRIFT", DRIFT_MEM);
+ENG_MEM_FITS("DRUM", DRUM_MEM);
 ENG_MEM_FITS("ACID", ACID_MEM);    /* (against the region, not against WAVE: ACID owes the pool nothing but its own size; the test pins that the pool did not grow) */
 
 static union {
@@ -45,6 +47,7 @@ static const engine_t *ENGINES_QUAL ENGINES[NENGINES] = {
     &ENG_WAVE,                   /* 1 (ENGI_WAVE) */
     &ENG_ACID,                   /* 2 (ENGI_ACID) */
     &ENG_DRIFT,                  /* 3 (ENGI_DRIFT) */
+    &ENG_DRUM,                   /* 4 (ENGI_DRUM, WaveLoop) */
 };
 
 /* a track's engine number as an index (the audio paths: a compare, cheaper than % NENGINES; a bad number: 0) */
@@ -70,7 +73,7 @@ static void eng_mem_claim(const track_t *t)
 }
 
 /* the order the engines are shown in (PRESETS browsing and its ENG knob, the EDIT layer's keys, the editor's list) */
-static const uint8_t ENGINE_ORDER[NENG_SHOWN] = {0, 1, 2, 3};
+static const uint8_t ENGINE_ORDER[NENG_SHOWN] = {0, 1, 2, 3, 4};
 
 /* the engines one can pick, in ENGINE_ORDER: eng_ok(e), the n-th of them eng_vis(n), e's place among them
  * eng_rank(e), the next / previous one eng_step(e, dir) (wraps) */
@@ -117,11 +120,14 @@ static const struct {
      * now that the arpeggiator is the track's and a preset no longer switches it on */
     {"ARP", {48, 51, 55, 60, 63, 67, 72, 75, 48, 51, 55, 60, 63, 67, 72, 75},       /* 9 */
      {1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0}},
+    /* WaveLoop: a beat in General MIDI drum notes (kick 36, snare 38, closed hat 42, open hat 46), the DRUM kits' */
+    {"BEAT", {36, 42, 42, 42, 38, 42, 36, 42, 36, 42, 42, 36, 38, 42, 46, 42},     /* 10 */
+     {1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0}},
 };
 #undef T_
 #define NPATTERNS (sizeof PATTERNS / sizeof PATTERNS[0])
 
-/* the parts at power-on (engine, preset, PATTERNS[n - 1] in the sequencer, 0 = empty): the four machines, ACID with
- * the ACID pattern */
-static const uint8_t TRK_DEF[NPART][3] = {{ENGI_OBX, 0, 0}, {ENGI_WAVE, 0, 0}, {ENGI_ACID, 0, 1}, {ENGI_DRIFT, 0, 0}};
+/* the parts at power-on (engine, preset, PATTERNS[n - 1] in the sequencer, 0 = empty): OB-Z, WAVE, ACID with the ACID
+ * pattern, and (WaveLoop) DRUM's 808 on track 4, where the Oxygen's pads play (channel 4); DRIFT is a machine away */
+static const uint8_t TRK_DEF[NPART][3] = {{ENGI_OBX, 0, 0}, {ENGI_WAVE, 0, 0}, {ENGI_ACID, 0, 1}, {ENGI_DRUM, 0, 0}};
 static uint32_t trk_def_engine(uint32_t i) { return TRK_DEF[i % NPART][0]; }

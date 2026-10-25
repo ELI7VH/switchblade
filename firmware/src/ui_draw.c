@@ -345,7 +345,7 @@ static void draw_head(void)
     if (!ui.msg_t && !ui.layer && !ui.bpm_t && big_page()) {   /* EDIT: the machine and the sound */
         char pn[16];
         sound_name(TSEL, pn);
-        sig = str_hash(sig + 0xB16u + TSEL->eng_req * 7u, pn);
+        sig = str_hash(sig + 0xB16u + TSEL->eng_req * 7u + drum_st[song.sel].focus * 104729u, pn);   /* (WaveLoop: DRUM's drum) */
     }
     int msg = ui.msg_t || ui.layer;
     int big = !msg && !ui.bpm_t && big_page();         /* EDIT (ui_big.c): the machine and the sound (the BPM turned:
@@ -1031,6 +1031,8 @@ static void draw_columns(void)
         else str_cpy(val, "--", 8);
         str_cpy(u, "/", 8);
         fmt_int(u + 1, (int32_t)total);
+        if (cur < total && cur + 1u >= 100u)
+            u[0] = 0;                                   /* (WaveLoop: past 128 sounds, DRUM's: three figures fill the card) */
         draw_column(0, "No.", val, u, VAL(0u), -1, ICON_NONE);
         draw_column(1, "ENG", ENGINES[TSEL->eng_req]->name, "", VAL(1u), -1, engine_icon(ENGINES[TSEL->eng_req]->name));
         draw_column(2, "FAV", preset_favorite() ? "ON" : "OFF", "", VAL(2u), -1, ICON_X_STAR);
@@ -1456,7 +1458,7 @@ static void draw_knob_card(void)
     const track_t *t = &trk[ui.wl.trk % NTRK];
     const aafont_t *vf = &AF_L, *nf = &AF_M;
     const char *unit = "", *name;
-    char head[24], val[16];
+    char head[24], val[16], dn[24];
     int32_t lo = 0, hi = 127, v = ui.wl.v, w, x, bw = KCARD_W - 24, f0, f1;
     if (!ui.wl.on || fm1_ms - ui.wl.t >= KCARD_MS)
         return;
@@ -1473,6 +1475,12 @@ static void draw_knob_card(void)
     } else if (ui.wl.id < P_COUNT) {
         const param_desc_t *d = track_desc(t, ui.wl.id);
         name = kc_name(t, ui.wl.id);
+        if (t->eng_req % NENGINES == ENGI_DRUM && ui.wl.id >= P_E1 && ui.wl.id <= P_E7) {   /* WaveLoop: DRUM, the picked */
+            str_cpy(dn, drum_lane_name(t, drum_st[ui.wl.trk % NTRK].focus), sizeof dn);   /* drum's: "KICK PITCH" */
+            str_cpy(dn + str_len(dn), " ", 2);
+            str_cpy(dn + str_len(dn), name, sizeof dn - str_len(dn));
+            name = dn;
+        }
         param_format(d, v, val, &unit);
         lo = d->min;
         hi = d->max;

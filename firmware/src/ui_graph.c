@@ -738,6 +738,8 @@ static void page_title(char *ti)
     uint32_t i, n = 0, k = 0;
     const char *pt = pg->scope == SC_ENGINE && pg->graph != GR_BIG ? e->page_title[pg->id[0] != P_E0] : 0;   /* MACHINE
                                                                           * 1 / 2: the engine's names; EDIT its own */
+    if (pt && t->eng_req % NENGINES == ENGI_DRUM)       /* WaveLoop: DRUM, the drum the page shapes (eng_drum.c) */
+        pt = drum_lane_name(t, drum_st[song.sel].focus);
     for (i = 0; i < NPAGES; i++)
         if (PAGES[i].fam == pg->fam && page_visible(i)) {
             n++;

@@ -890,6 +890,31 @@ static __attribute__((noinline)) void mix_stereo(track_t *t, const int32_t *b, c
     t->peak = pk;
 }
 
+/* WaveLoop: DRUM's engine_t.part_fx (eng_drum.c): the drums with a PAN or a SEND of their own this block (drum_place). b,
+ * the kit's sum, went through DIST, INSERT and the SLICER as every part does and stays the mid; z := the side their pans
+ * make (mix_stereo places the pair with the track's PAN, SPREAD's side too); their sends go into the reverb bus at the
+ * track's LEVEL (as the mix's sends: ((x >> 2) LEVEL) >> 10), beside what the track's REV sends of b. The FX layer's mute
+ * key on the track: the sum fades as it does, the drums' own places are left out. Nothing set: 0, the part's path as on
+ * every machine */
+static int drum_part_fx(track_t *t, int32_t *b, int32_t *z, uint32_t n)
+{
+    uint32_t i, f = drum_bus, k = (uint32_t)(t - trk);
+    (void)b;
+    drum_bus = 0;
+    if (!f || ((pf.mute >> k) & 1u))
+        return 0;
+    if (f & 2u) {
+        int32_t lvl = LEVEL_Q12[t->p[P_LEVEL] & 127];
+        for (i = 0; i < n; i++)
+            send_r[i] += ((drum_rs[i] >> 2) * lvl) >> 10;
+    }
+    if (!(f & 1u))
+        return 0;
+    for (i = 0; i < n; i++)
+        z[i] = drum_side[i];
+    return 1;
+}
+
 /* SPREAD (#148): a POLY or UNISON part whose SPRD is above 0. Its voices start left and right of PAN in turn (voice.c
  * voice_start; UNISON's detuned voices alternate), at PAN -/+ SPRD / 2 (SPRD 127: hard left and right), with the pan
  * law PAN has (the far side down, the near one as it is). track_render gives every voice (b, as always) and the left

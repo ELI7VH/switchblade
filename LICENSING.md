@@ -18,8 +18,8 @@ Every file in this tree that carries an `SPDX-License-Identifier: GPL-3.0-only` 
 
 Three source files are ports and keep the licence of their originals:
 `firmware/src/phys_dsp.c` (DaisySP, MIT), `firmware/src/phys_symp.c` (Rings, MIT) and
-`firmware/src/fm6_core.c` (msfa, Apache-2.0). The firmware built with them is GPL-3.0-only as
-a whole.
+`firmware/src/fm6_core.c` (msfa, Apache-2.0); the WaveLoop build adds `firmware/src/drum_yama.c`
+(Yama-bruh, MIT). The firmware built with them is GPL-3.0-only as a whole.
 
 You may use, study, change and share Felucca under the GPL. If you distribute Felucca, or
 firmware derived from it, you must also give your recipients its complete corresponding
@@ -47,6 +47,7 @@ All by Hügelton Instruments (Leo Kuroshita), in this tree:
 | Instrument samples (Versilian Studios VSCO-2 Community Edition, VCSL): the SAMPLE sets, also the SLICE engine's PIANO (the PIANO set's middle C) | CC0 1.0 | `assets/samples-cc0/`, provenance in `ATTRIBUTION.txt` there |
 | DaisySP by Electrosmith, Corp and Emilie Gillet (<https://github.com/electro-smith/DaisySP>): the PHYS engine's modal and string models and the resonator, ported to fixed point | MIT | `firmware/src/phys_dsp.c`, `LICENSES/MIT-DaisySP.txt` |
 | Rings by Emilie Gillet (<https://github.com/pichenettes/eurorack>): the PHYS engine's sympathetic strings, ported to fixed point | MIT | `firmware/src/phys_symp.c`, `LICENSES/MIT-Rings.txt` |
+| Yama-bruh by Lucian Labs (<https://github.com/lucian-labs/yama-bruh>): WaveLoop build, the DRUM machine's eight FM kits, ported to fixed point from `www/drum-worklet.js` at commit `3eca861383e63e6c507c30402a204499faf79887` (by way of the WaveLoop Kit, the Felucca fork) | MIT | `firmware/src/drum_yama.c`, `LICENSES/MIT-YamaBruh.txt` |
 | Open303 by Robin Schmidt (RS-MET) (<https://github.com/RobinSchmidt/Open303>): the NANO machine's 303 voice (the ACID engine's; signal path, filter, envelopes), as a float / no-libm C port by way of fm1-x0x's `dsp/bass303` (GPL-3.0; itself after schwung-303, GPL-3.0, Devilfish ranges after jc303 by midilab) | MIT (Open303 parts); the port and the RAT drive model (after davemollen/dm-Rat, GPL-3.0) are GPL-3.0 | `firmware/src/bass303.c`, `firmware/src/bass303.h`, `firmware/src/fastmath.h`, `LICENSES/MIT-Open303.txt` |
 | Ultramaster KR-106 by Karl LaRocca (kayrockscreenprinting) (<https://github.com/kayrockscreenprinting/ultramaster_kr106>): the DRIFT engine's Juno voice (the OTA ladder, the polyBLEP DCO, drift and variance, the HPF, the half-band resampler), as a float / no-libm C port; the half-band's coefficients are Laurent de Soras' HIIR (WTFPL) | GPL-3.0 (compatible with, and part of, Felucca's GPL-3.0-only) | `firmware/src/dsp_va.c`, `firmware/src/eng_drift.c`, `LICENSES/GPL-3-KR106.txt` |
 | msfa by Google Inc. and Pascal Gauthier, from Dexed (<https://github.com/asb2m10/dexed>): the FM6 engine's synthesis, ported to integer C (Dexed itself is GPL-3.0; only msfa is used; the FM6 factory patches are Felucca's own) | Apache-2.0 | `firmware/src/fm6_core.c`, `LICENSES/Apache-2.0-msfa.txt` |

@@ -42,11 +42,12 @@ int main(int argc, char **argv)
     static const uint8_t pd[] = {0x08, 0xf0};
     const aafont_t probe = {1, 1, 'A', 'A', 0, 0, pg, pd, 0, 0, 0};
     double worst = 100;
-    /* Switch Blade has one colour scheme: the four machines' palettes (UI_MACHINE_PALS, engine order; the fixed palettes and
+    /* Switch Blade has one colour scheme: the machines' palettes (WaveLoop: five) (UI_MACHINE_PALS, engine order; the fixed palettes and
      * CUSTOM are gone). Each one: the contrast of text, labels, values, selection and keycaps (DRIFT's tan keys), the light
      * ACID's derived tokens, the trim, the alpha blend (no halo), the sheet */
-    assert(NPALETTES == 4u && UI_NMACHINE == 4u && !strcmp(UI_MACHINE_PALS[0].name, "OB-Z") && !strcmp(UI_MACHINE_PALS[1].name, "WAVE") &&
-           !strcmp(UI_MACHINE_PALS[2].name, "ACID") && !strcmp(UI_MACHINE_PALS[3].name, "DRIFT"));
+    assert(NPALETTES == 5u && UI_NMACHINE == 5u && !strcmp(UI_MACHINE_PALS[0].name, "OB-Z") && !strcmp(UI_MACHINE_PALS[1].name, "WAVE") &&
+           !strcmp(UI_MACHINE_PALS[2].name, "ACID") && !strcmp(UI_MACHINE_PALS[3].name, "DRIFT") &&
+           !strcmp(UI_MACHINE_PALS[4].name, "DRUM"));   /* (WaveLoop: DRUM, the fifth machine) */
     for (unsigned st = ST_FLAT; st <= ST_LINE; st++) {
         ux.style = (uint8_t)st;
         for (unsigned m = 0; m < UI_NMACHINE; m++) {

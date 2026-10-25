@@ -176,6 +176,8 @@ static uint32_t kb_pitch(const track_t *t, uint32_t k, int32_t oct)
 
 static uint32_t kb_map(const track_t *t, uint32_t k)
 {
+    if (t->eng_req == ENGI_DRUM)                    /* WaveLoop: a DRUM track's keys are the GM drum map (eng_drum.c) */
+        return drum_key(k, song.octave);
     return kb_pitch(t, k, song.octave);
 }
 
@@ -1006,7 +1008,7 @@ static __attribute__((noinline)) void seq_step(track_t *t, const step_t *s, uint
     uint32_t m = 0, sk = 0;
     /* QNT SEQ: the step's notes snap to the scale as they play. SEQ+T (#218): moved by TRN first, as the keys are.
      * seq_notes keeps the notes that sound: their note-offs match */
-    uint32_t qseq = t->p[P_QUANT] >= QN_SEQ;
+    uint32_t qseq = t->p[P_QUANT] >= QN_SEQ && t->engine != ENGI_DRUM;   /* (never a drum kit's notes: they name drums) */
     int32_t qtrn = qseq && t->p[P_QUANT] == QN_SEQT ? t->p[P_TRANS] : 0;
     if (!(skip & SEQ_REP)) {
         t->rat_left = 0;
@@ -1056,9 +1058,11 @@ static __attribute__((noinline)) void seq_step(track_t *t, const step_t *s, uint
     t->slide_glide = (uint8_t)slide_in;
     if (!slide_in)
         seq_release(t);
+    drum_seq = 1;                                   /* (WaveLoop: the sequencer's drum hits pick no drum, eng_drum.c) */
     for (i = 0; i < m; i++)
         if (!((sk >> i) & 1u))
             trk_note_on(t, nn[i], vv[i]);
+    drum_seq = 0;
     if (slide_in)                                   /* release what is not held over */
         for (i = 0; i < t->seq_n; i++) {
             for (j = 0; j < m && nn[j] != t->seq_notes[i]; j++)
@@ -1434,6 +1438,8 @@ static void events_block(uint32_t n)
             arp_forget(t);
         }
         engine_block(t);                              /* engine switch: fade, then switch (voice.c) */
+        if (t->eng_req == ENGI_DRUM)
+            t->p[P_AMODE] = 0;                        /* WaveLoop: the ARP does not play a DRUM track (off, as below) */
         if (t->armp != t->p[P_AMODE] && t->seq_n)
             seq_release(t);                           /* WaveLoop: the sequencer's notes were voices or the arp's
                                                        * chord: the next step plays them the other way */

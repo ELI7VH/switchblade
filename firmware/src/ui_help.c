@@ -66,6 +66,8 @@ static const char *help_page(void)
     if (ui.home)
         return H_HOME;
     t = cur_page()->title;
+    if (TSEL->eng_req % NENGINES == ENGI_DRUM && cur_page()->fam == FAM_EDIT && cur_page()->scope == SC_ENGINE)
+        return "[KEYS]HIT: PICK A DRUM[K1-4]SHAPE IT";   /* (WaveLoop: DRUM, eng_drum.c) */
     for (i = 0; i < NELEM(HELP_PAGE); i++)
         if (str_eq(HELP_PAGE[i].title, t))
             return HELP_PAGE[i].hint;

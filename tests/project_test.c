@@ -13,6 +13,7 @@
 #define PROJ_HOST 1                             /* (trk_def_engine: engines.c, through hostsim.c) */
 #include "../firmware/src/project.c"
 
+static uint32_t DEFAULT_PATTERN_N(void) { arp_pat_t p; ash_load(&p, 0); return p.n; }
 static int check(const char *what, int ok)
 {
     printf("%-72s %s\n", what, ok ? "ok" : "FAIL");
@@ -58,8 +59,8 @@ int main(void)
                  !memcmp("FOR4", &(uint32_t){PROJ_MAGIC}, 4));
     bad += check("FOR4 fits one flash object, the retained cache in NOINIT", sizeof(project_store_t) <= 4096u - 256u &&
                  sizeof(project_store_t) == 3840u && 0xC8u + 4u * sizeof(project_store_t) <= 0x3D50u);
-    bad += check("four machines: NENGINES 4, P_COUNT 112 (P_MOUT just before P_E0)", NENGINES == 4u && P_COUNT == 112u &&
-                 P_MOUT + 1u == P_E0);
+    bad += check("five machines (WaveLoop: DRUM the fifth): NENGINES 5, P_COUNT 112 (P_MOUT just before P_E0)",
+                 NENGINES == 5u && ENGI_DRUM == 4u && P_COUNT == 112u && P_MOUT + 1u == P_E0);
     bad += check("name / FM6 area / MIDI offsets, 12 spare bytes before the retired area (MIDI IN's 3 among them)",
                  PROJ_NAME_OFF == 3824u && PROJ_FM6_OFF == 3312u && 68u + NTRK * (P_COUNT + 2u + NSTEP * 9u) +
                  sizeof(chain_config_t) + sizeof(motion_store_t) + 12u == PROJ_FM6_OFF);
@@ -85,6 +86,44 @@ int main(void)
                  !memcmp(st.raw + PROJ_NAME_OFF, "LOFI JAM\0\0\0\0", 12));
     bad += check("  the project_t form (a restored runtime copy) imports too", proj_import(&c, &a, sizeof a) &&
                  !memcmp(&c, &a, sizeof c));
+
+    /* WaveLoop: a DRUM track keeps its drums' own values ('D', eng_drum.c drum_pack) where a synth track keeps its ARP
+     * pattern; it loads with the DEFAULT_PATTERN and its ARP settings as they were (no mapping) */
+    {
+        static project_t m;
+        static project_store_t sm;
+        drum_st_t d, e;
+        uint32_t l;
+        m = a;
+        m.t[3].engine = ENGI_DRUM;
+        m.t[3].preset = 1;
+        m.t[3].p[P_ARATE] = 5;
+        m.t[3].p[P_AOCT] = AD_WYNDO;
+        memset(&d, 0, sizeof d);
+        d.focus = 1;
+        for (l = 0; l < DV_NLANE; l++)
+            for (k = 0; k < DC_N; k++) {
+                d.v[l][k] = (int8_t)(l * 7u + k - 20);
+                if ((l + k) % 3u == 0u && l != d.focus)
+                    d.mask[l] |= (uint8_t)(1u << k);
+            }
+        for (k = 0; k < DC_N; k++)
+            d.kit[k] = (int8_t)(k * 9u);
+        drum_pack(&d, m.t[3].drum);
+        m.sum = proj_sum(&m);
+        ok = proj_pack(&sm, &m) && sm.raw[PROJ_ARP_OFF + 3u * PROJ_FM6_PACKED] == 'D' &&
+             sm.raw[PROJ_ARP_OFF + 2u * PROJ_FM6_PACKED] == 'S' && proj_import(&c, &sm, sizeof sm);
+        ok &= !memcmp(c.t[3].drum, m.t[3].drum, DRUM_PACKED) && drum_unpack(&e, c.t[3].drum) && e.focus == 1u;
+        for (l = 0; l < DV_NLANE; l++)
+            ok &= e.mask[l] == d.mask[l] && !memcmp(e.v[l], d.v[l], DC_N);
+        ok &= !memcmp(e.kit, d.kit, DC_N) && c.t[3].arp.n == DEFAULT_PATTERN_N() && c.t[3].p[P_ARATE] == 5 &&
+              c.t[3].p[P_AOCT] == AD_WYNDO && c.t[2].arp.n == a.t[2].arp.n;
+        bad += check("DRUM: a drum track's drums round trip ('D' in its ARP area), ARP settings kept, SHAYPE's pattern", ok);
+        ok = 1;
+        for (k = 0; k < NTRK; k++)
+            ok &= c.t[k].drum[0] == (k == 3u ? 'D' : 0u);
+        bad += check("  synth tracks keep their ARP patterns there, no drums", ok);
+    }
 
     /* MIDI OUT: each track's MOUT (a parameter byte) and CLOCK OUT (header byte 65) round trip; the globals before keep
      * their bytes */

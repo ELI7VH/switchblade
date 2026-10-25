@@ -110,7 +110,12 @@
 #                   responses around the cutoff, RES, bounded at the corners), ENV SYNC (OFF bit for bit, the note values
 #                   on the knob, attack / decay / release times at 60 / 120 / 173 BPM and on the external clock), the cost;
 #                   demos in build/sound15_demo/ (analog_bp, analog_hp, env_sync).
-# FOUR (tests/four_test.c): the four-machine contract: ENGINES[] is OB-Z WAVE ACID DRIFT, their HOME knobs, ACID mono.
+# FOUR (tests/four_test.c): the four-machine contract: ENGINES[] is OB-Z WAVE ACID DRIFT, their HOME knobs, ACID mono;
+#                   WaveLoop's fifth, DRUM: its knobs, presets (808 first), a new project's T4, its state in DRIFT's room.
+# DRUM (tests/drum_test.c, WaveLoop): DRUM (eng_drum.c, drum_voice.c, drum_yama.c) through the voice and mix paths: every
+#                   kit's drums sound and end, 808 vs CR78, the GM map and the FM-1's keys, each drum shaped on its own (a
+#                   live hit picks it, the sequencer's do not; stored only where edited), a drum's PAN and SEND, no ARP on
+#                   a DRUM track, drums and synths sharing the eight voices.
 # OB-Z (tests/obx_test.c, tests/dspfft.h): the SEM-style filter morph on one voice (spectra through a plain FFT):
 #                   MODE 0 is the low-pass of before the morph bit for bit, MODE 32 notches at the cutoff, 64 passes
 #                   the highs, 96 is the band-pass, 120 the low-pass again and 127 the 4-pole; the crossfade between
@@ -363,6 +368,8 @@ if [ -f build/gen/felucca_tables.h ]; then
         -o "$OUT/void_instr" tests/void_test.c -lm
     run "VOID instrumented: no table read out of range on a TYPE switch, no int32 overflow at the corners (VOWEL, LP24, WARP)" "$OUT/void_instr"
     $CC -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/four_test" tests/four_test.c -lm && "$OUT/four_test" || fail=1
+    echo "== DRUM (WaveLoop): every kit's drums, the GM map and the keys, each drum its own, PAN / SEND, no ARP, the voice pool"
+    $CC -O2 -w -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/drum_test" tests/drum_test.c -lm && "$OUT/drum_test" || fail=1
     $CC -O1 -w -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/obx_test" tests/obx_test.c -lm
     run "OB-Z: MODE 0 the legacy low-pass bit for bit, the LP / NOTCH / HP / BP morph, the 4-pole, SLOP, DTN" "$OUT/obx_test"
     $CC -O2 -w -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/acid_test" tests/acid_test.c -lm

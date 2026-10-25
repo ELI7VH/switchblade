@@ -32,7 +32,7 @@
 #define BIG_FIT (KNOB_XL_R - KNOB_XL_W - 2)             /* the value's ink inside this radius: 2 px clear of the ring */
 #define BIG_UY 76                                       /* the unit's line (S capitals rows 79 .. 87) */
 
-static const char *const BIG_MLABEL[NENGINES] = {"DETUNE", "POSITION", "DECAY", "DRIVE"};   /* knob[3] spelled out
+static const char *const BIG_MLABEL[NENGINES] = {"DETUNE", "POSITION", "DECAY", "DRIVE", "SNAP"};   /* knob[3] spelled out
                                                          * (the 4-letter edit[].label stays the MACHINE pages') */
 static uint32_t big_sig[2];
 
@@ -45,7 +45,8 @@ static const char *big_mlabel(const track_t *t)
 static const char *big_label(const track_t *t, uint32_t k)
 {
     static const char *const L[3] = {"CUTOFF", "RESONANCE", "ENV"};
-    return k < 3u ? L[k] : big_mlabel(t);
+    static const char *const LD[3] = {"PITCH", "TONE", "DECAY"};   /* WaveLoop: DRUM, the picked drum's (eng_drum.c) */
+    return k >= 3u ? big_mlabel(t) : t->eng_req % NENGINES == ENGI_DRUM ? LD[k] : L[k];
 }
 
 /* s in f, its ink centred across and its capitals' band (cap_y .. + cap_h of the line) up and down on a point: every
@@ -455,7 +456,9 @@ static void head_big(int32_t x, int32_t r)
 {
     char pn[16];
     const engine_t *e = ENGINES[TSEL->eng_req % NENGINES];
-    int32_t ew = text_w(&AF_S, "EDIT");
+    int dr = TSEL->eng_req % NENGINES == ENGI_DRUM;     /* (WaveLoop: DRUM names the drum its knobs shape) */
+    const char *rw = dr ? drum_lane_name(TSEL, drum_st[song.sel].focus) : "EDIT";
+    int32_t ew = text_w(&AF_S, rw);
     sound_name(TSEL, pn);
     GFX_HOOK_ALIGN(0, 0, 0, H_HEAD, AL_V, "header text on its middle");
     x = cv_text(x, HEAD_MY, &AF_M, e->name, T_THEME) + 7;
@@ -464,7 +467,7 @@ static void head_big(int32_t x, int32_t r)
         cv_free_text(x, HEAD_MY, &AF_M, pn, T_TEXT, T_BG, r - ew - 8 - x);
     }
     GFX_HOOK_ALIGN(0, 0, 0, H_HEAD, AL_V, "header text on its middle");
-    cv_text(r - ew, HEAD_SY, &AF_S, "EDIT", T_MID);
+    cv_text(r - ew, HEAD_SY, &AF_S, rw, dr ? T_THEME : T_MID);
 }
 
 /* ------------------------------------------------------------------ HOME --- */
@@ -578,6 +581,12 @@ static void home_unit(uint32_t c)
         cv_rect(HU_FX + 2, 36, HU_FW - 4, 1, p->theme);
     } else if (e == ENGI_DRIFT) {                       /* the Juno: a red band across the top */
         cv_rect(HU_FX + 2, 2, HU_FW - 4, 3, p->theme);
+    } else if (e == ENGI_DRUM) {                        /* WaveLoop: the 808, its step keys' four colours along the bottom */
+        static const uint16_t K808[4] = {RGB(0xd8, 0x3a, 0x22), RGB(0xff, 0x70, 0x2c), RGB(0xff, 0xd2, 0x40),
+                                         RGB(0xe8, 0xe0, 0xc8)};
+        int32_t q = (HU_FW - 4) / 4, j;
+        for (j = 0; j < 4; j++)
+            cv_rect(HU_FX + 2 + j * q, 36, q - 1, 2, K808[j]);
     }
     cv_led(HU_LX, HU_LY, LED_L, 1u, d, p->bg, LED_ON);  /* the track's number */
     bw = ink_w(&AF_S, ENGINES[e]->name) + 14;           /* the badge */
@@ -608,7 +617,7 @@ static void home_unit(uint32_t c)
 static const char *home_label(const track_t *t, uint32_t k)
 {
     static const char *const L[3] = {"CUTOFF", "RES", "ENV"};
-    return k < 3u ? L[k] : big_mlabel(t);
+    return k < 3u && t->eng_req % NENGINES != ENGI_DRUM ? L[k] : big_label(t, k);   /* (WaveLoop: DRUM's PITCH TONE DECAY) */
 }
 /* what card k shows: its value, unit, the value's colour (the EDIT page's KNOB k, ui.c home_param) */
 static void home_card_of(uint32_t k, char *val, const char **unit, uint16_t *vc)

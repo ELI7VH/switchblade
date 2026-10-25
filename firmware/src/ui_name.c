@@ -224,7 +224,7 @@ static void nm_knob(uint32_t k, int32_t s)             /* KNOB 1 the cursor, KNO
     nm_commit();
     if (k == 2u) {                                     /* USER: the category (no wrap); PROJECT: a random name */
         if (nm.kind <= NK_USER_RENAME)
-            nm.cat = (uint8_t)clamp((int32_t)nm.cat + s, CAT_BASS, CAT_ACID);
+            nm.cat = (uint8_t)clamp((int32_t)nm.cat + s, CAT_BASS, NCAT - 1);
         else
             nm_random();
         return;

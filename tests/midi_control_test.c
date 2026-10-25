@@ -607,8 +607,8 @@ static int cc_map_test(void)
     };
     int bad = 0, ok = 1; uint32_t i, e; int16_t before[P_COUNT];
     midi_test_reset();
-    bad += check("power-on parts: OB-Z, WAVE, ACID, DRIFT", trk[0].eng_req == ENGI_OBX && trk[1].eng_req == ENGI_WAVE &&
-                 trk[2].eng_req == ENGI_ACID && trk[3].eng_req == ENGI_DRIFT);
+    bad += check("power-on parts: OB-Z, WAVE, ACID, DRUM (WaveLoop: T4 the drums, the Oxygen's pads)", trk[0].eng_req == ENGI_OBX &&
+                 trk[1].eng_req == ENGI_WAVE && trk[2].eng_req == ENGI_ACID && trk[3].eng_req == ENGI_DRUM);
     for (i = 0; i < NELEM(COMMON); i++) {
         queued(0xB0, COMMON[i].cc, 127, 1);
         ok &= trk[0].p[COMMON[i].id] == TP[COMMON[i].id].max;
@@ -629,12 +629,36 @@ static int cc_map_test(void)
     bad += check("CC10 PAN: 0 left, 64 centre, 127 right", ok);
     queued(0xB0, 74, 127, 1); queued(0xB0, 71, 0, 1);
     bad += check("CC74 / CC71 on OB-Z: CUT / RES", trk[0].p[P_E4] == 127 && trk[0].p[P_E5] == 0);
-    for (e = 1, ok = 1; e < NTRK; e++) {             /* WAVE ACID DRIFT on channels 2..4: the same E5 / E6 */
+    for (e = 1, ok = 1; e < 3u; e++) {               /* WAVE ACID on channels 2..3: the same E5 / E6 */
         const engine_t *en = ENGINES[trk[e].eng_req];
         queued(0xB0 + e, 74, 127, 1); queued(0xB0 + e, 71, 0, 1);
         ok &= trk[e].p[P_E4] == en->edit[4].max && trk[e].p[P_E5] == en->edit[5].min;
     }
+    trk[3].engine = trk[3].eng_req = ENGI_DRIFT;
+    queued(0xB3, 74, 127, 1); queued(0xB3, 71, 0, 1);
+    ok &= trk[3].p[P_E4] == ENGINES[ENGI_DRIFT]->edit[4].max && trk[3].p[P_E5] == ENGINES[ENGI_DRIFT]->edit[5].min;
     bad += check("CC74 / CC71 on WAVE, ACID, DRIFT (channels 2..4): CUT / RES (E5 / E6) as on OB-Z", ok);
+    {   /* WaveLoop: a DRUM track: the Oxygen's knobs shape the picked drum (E1..E7); LFO > AMP and the envelope do nothing */
+        static const struct { uint8_t cc, id; } DR[] = {{74, P_E1}, {71, P_E2}, {5, P_E3}, {70, P_E4}, {77, P_E5},
+                                                        {10, P_E6}, {76, P_E7}};
+        static const uint8_t NONE[] = {78, 72, 73, 75, 79};
+        track_t *t = &trk[3];
+        int16_t b2[P_COUNT];
+        t->engine = t->eng_req = ENGI_DRUM;
+        for (i = 0, ok = 1; i < NELEM(DR); i++) {
+            const param_desc_t *d = track_desc(t, DR[i].id);
+            queued(0xB3, DR[i].cc, 127, 1);
+            ok &= t->p[DR[i].id] == d->max;
+            queued(0xB3, DR[i].cc, 0, 1);
+            ok &= t->p[DR[i].id] == d->min;
+        }
+        bad += check("DRUM (channel 4): CC74 PITCH, 71 TONE, 5 DECAY, 70 SNAP, 77 LEVEL, 10 PAN, 76 SEND (the picked drum's)", ok);
+        memcpy(b2, t->p, sizeof b2);
+        for (i = 0; i < NELEM(NONE); i++)
+            queued(0xB3, NONE[i], 99, 1);
+        bad += check("  CC78 (LFO > AMP) and faders 5..8 (the envelope: 73 75 79 72) change nothing there", !memcmp(b2, t->p, sizeof b2));
+        t->engine = t->eng_req = ENGI_DRIFT;
+    }
     for (e = 0, ok = 1; e < NENGINES; e++) {   /* the four controls name continuous values of every engine */
         uint32_t k;
         for (k = 0; k < 4u; k++) {
@@ -679,7 +703,7 @@ static int test_cc_contract(void)
     int bad = 0; uint32_t e, k; char b[64];
     midi_test_reset();
     for (e = 0; e < NENGINES; e++) {
-        track_t *t = &trk[e];
+        track_t *t = &trk[e % NTRK];                     /* (WaveLoop's fifth, DRUM: on track 1 again) */
         t->engine = t->eng_req = (uint8_t)e;
         for (k = 0; k < 4; k++) {
             snprintf(b, sizeof b, "%s CC%u", ENGINES[e]->name, CC_KNOB[k]);
@@ -688,10 +712,10 @@ static int test_cc_contract(void)
             bad += check(b, param_cc(t, ENGINES[e]->knob[k]) == CC_KNOB[k]);
         }
         bad += check("CC7", cc_param(t, CC_VOL) == P_LEVEL);
-        /* end to end: CC74 = 127 on channel e+1 puts CUT at its max */
-        midi_event(0xB0u, e, CC_CUT, 127);
+        /* end to end: CC74 = 127 on channel e+1 puts K1 (CUT; DRUM's PITCH) at its max */
+        midi_event(0xB0u, e % NTRK, CC_CUT, 127);
         snprintf(b, sizeof b, "%s CC74 127", ENGINES[e]->name);
-        bad += check(b, t->p[P_E4] == track_desc(t, P_E4)->max);
+        bad += check(b, t->p[ENGINES[e]->knob[0]] == track_desc(t, ENGINES[e]->knob[0])->max);
     }
     return bad;
 }

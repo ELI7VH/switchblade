@@ -38,12 +38,45 @@ synth from an **M-Audio Oxygen Pro 61** set to the preset of the WaveLoop Melode
 | Encoder turn | CC114 (relative) | next / previous sound on the selected track, on into the next machine's sounds after the last (PRESETS' list) |
 | Fader buttons 1 / 2 | CC112 (63 / 65) | previous / next machine on the selected track (its first sound) |
 | Encoder press | CC115 | next track (after T4, T1) |
-| Pads | notes, channel 4 | track 4 |
+| Pads | notes, channel 4 | track 4 (a new project's DRUM: the GM drum notes play the kit) |
 | Mod wheel | CC1 | vibrato |
 | Aftertouch | channel / poly pressure | vibrato and a little more cutoff |
 
 EDIT's knob 3 (ENV) and knob 4 (the machine's own control) moved from CC79 / CC70 to CC16 / CC17, in and out
 ([docs/MIDI.md](docs/MIDI.md)). Nothing new is stored: the card, the wheel and the encoder are live controls.
+
+On a DRUM track the knobs shape the drum you last hit (below): knob 1 (CC74) PITCH, 2 (CC71) TONE, 3 (CC5) DECAY,
+4 (CC10) PAN, 5 (CC76) SEND, 6 (CC77) LEVEL, 8 (CC70) SNAP. Knob 7 (CC78) and faders 5-8 do nothing there: a drum is its
+own envelope. The faders 1-4 and the encoder are as on every track.
+
+### DRUM, the fifth machine
+
+Switch Blade's four synths gain a drum machine: DRUM, the WaveLoop Kit's drums (the Felucca fork's), selectable on any
+track like the others (the fader buttons, the encoder, PRESETS, EDIT + the fifth white key). A new project has DRUM on
+track 4 with the 808 kit, so the Oxygen's pads (channel 4) play drums at once. Projects saved before keep their machines.
+
+- **The kits** (PRESETS, or KNOB 1 KIT on MACHINE 1): 808 (the revoiced one, with a deeper kick and a fuller snare and
+  clap), CR78 (dry and woody: maracas, conga, claves), the eight Yama-bruh FM kits (YB STANDARD, ELECTRO, POWER, BRUSH,
+  ORCH, SYNTH, LATIN, LOFI), Felucca's own kit and the model kits 10, 66, 55 and 77.
+- **Eight drums:** KICK SNARE CLAP HATCL HATOP TOM RIM BELL (a kit may play another piece in a place: CR78's maracas on
+  CLAP, congas, claves, a cymbal). A note plays its General MIDI drum: 36 kick, 38 snare, 39 clap, 42 closed hat, 46 open
+  hat, the toms, 37 rim, 56 cowbell, cymbals, congas and claves too. On the FM-1's keys the first C is the kick (C KICK,
+  C# RIM, D SNARE, D# CLAP, F# HAT, A# OPEN HAT); OCT- / OCT+ move the map. A closed hat chokes the open one. Each drum
+  rings until it is done; letting go of the key does not cut it.
+- **Each drum its own sound.** Hit a drum (a key, a pad, a MIDI note) and it is the picked drum: the knobs, the EDIT
+  page (PITCH TONE DECAY SNAP; its header names the drum), MACHINE 1 and 2 (titled with the drum) and the knob card
+  ("T4 DRUM / SNARE PITCH") shape it, and only it. PITCH moves it by semitones (+-12), TONE and DECAY from its design,
+  SNAP is its extra (the snare's snappiness, the hats' sizzle, the clap's spread, the toms' bend), LEVEL its loudness (100
+  as designed), PAN its place, SEND its own reverb on top of the track's REV. The sequencer's hits pick nothing. A drum's
+  values are kept only where you changed them; loading a kit gives every drum that kit's values. They are saved with the
+  project and the autosave, and SAVE held undoes a kit load with them. A user preset keeps the kit, not each drum.
+- **PAN and SEND** put that drum beside the kit: the kit's sum goes through the track's DIST, INSERT and SLICER as any
+  track's does, a drum's pan and its own reverb pass them by.
+- **No ARP on a DRUM track.** ARP stays off there (the screen says NO ARP ON DRUMS); keys and the sequence hit the drums
+  directly. Recording, the sequencer, locks and automation work as on every track (a step holds up to four drums).
+- **Voices:** drums share the eight voices with the synths, a voice per drum sounding. A drum is let go at once, so a
+  synth's new note takes a ringing drum's voice before any held note's. A drum voice costs a fraction of a synth voice
+  (the audio interrupt's code did not grow: `tests/target_budget.py`).
 
 ### The ARP is SHAYPE
 
@@ -181,7 +214,7 @@ starts at the defaults. The core is a port of the web toy's `sequence.mjs`. `tes
 
 Free firmware for the **M-VAVE FM-1** that packs four synth machines into the box: one per track, eight voices shared.
 No drums, on purpose: it is built to be a synth expansion, for example for an Elektron Syntakt with MIDI channels 1-4
-playing the four machines.
+playing the four machines. (The WaveLoop build above adds DRUM, a fifth machine.)
 
 - **OB-Z**: a big, brassy poly
 - **WAVE**: the voice of [Void Wave](https://ollienicklin.com/projects/void-synth.html), a wavetable synth

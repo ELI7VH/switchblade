@@ -20,6 +20,7 @@ typedef struct {                               /* one track */
     uint8_t engine, preset;
     step_t step[NSTEP];
     arp_pat_t arp;                             /* WaveLoop: the ARP's pattern (SHAYPE, PROJ_ARP_OFF) */
+    uint8_t drum[DRUM_PACKED];                 /* WaveLoop: a DRUM track's drums (eng_drum.c drum_pack), in the ARP's place */
 } proj_trk_t;
 typedef struct {
     uint32_t magic, size;
@@ -54,10 +55,13 @@ typedef struct {
 /* WaveLoop: the ARP's pattern (SHAYPE, seq.c arp_pat) lives in the retired FM6 area, track k's at PROJ_ARP_OFF + 128 k:
  * 'S', version 1, the notes' count (0..ARP_NMAX), 0, then the notes, 16 bits LE each (arp_shape.c ARP_NOTE). A project
  * without it (all 0: saved before, or by Switch Blade without the WaveLoop build, which never reads it) gets the toy's
- * DEFAULT_PATTERN (SHAYPE), and its ARP settings, which meant other things then, are mapped (proj_arp_migrate) */
+ * DEFAULT_PATTERN (SHAYPE), and its ARP settings, which meant other things then, are mapped (proj_arp_migrate).
+ * A DRUM track (WaveLoop) plays no ARP: its 128 bytes hold its drums' own values instead ('D', eng_drum.c drum_pack); it
+ * loads with the DEFAULT_PATTERN and its ARP settings as saved (no mapping) */
 #define PROJ_ARP_OFF PROJ_FM6_OFF
 #define PROJ_ARP_MAGIC 'S'
 _Static_assert(4u + 2u * ARP_NMAX <= PROJ_FM6_PACKED, "the ARP's pattern fits a track's retired FM6 area");
+_Static_assert(DRUM_PACKED <= PROJ_FM6_PACKED, "a DRUM track's drums fit its retired FM6 area");
 typedef union { uint32_t align; uint8_t raw[PROJ_STORE_SIZE]; } project_store_t;
 /* the header holds the first PROJ_NG globals (bytes 8..61, the original ids); G_CLKOUT (FM1-Four), the one after them, is
  * header byte 65 (0 OFF, 1 ON) */
@@ -168,6 +172,11 @@ static void proj_arp_migrate(int16_t *p)
 static void proj_arp_unpack(proj_trk_t *t, const uint8_t *a)   /* a track's stored pattern (PROJ_ARP_OFF) */
 {
     uint32_t i;
+    if (a[0] == DRUM_MAGIC) {                           /* WaveLoop: a DRUM track's drums; the ARP's pattern the default */
+        memcpy(t->drum, a, DRUM_PACKED);
+        ash_load(&t->arp, 0);
+        return;
+    }
     if (a[0] == PROJ_ARP_MAGIC && a[1] == 1u && a[2] <= ARP_NMAX) {
         t->arp.n = a[2];
         for (i = 0; i < a[2]; i++)
@@ -217,6 +226,10 @@ static int proj_pack(project_store_t *out, const project_t *q)
     for (t = 0; t < NTRK; t++) {                        /* WaveLoop: the ARP's patterns (PROJ_ARP_OFF) */
         uint8_t *a = b + PROJ_ARP_OFF + t * PROJ_FM6_PACKED;
         const arp_pat_t *ap = &q->t[t].arp;
+        if (q->t[t].engine == ENGI_DRUM && q->t[t].drum[0] == DRUM_MAGIC) {   /* WaveLoop: a DRUM track: its drums */
+            memcpy(a, q->t[t].drum, DRUM_PACKED);
+            continue;
+        }
         if (!ash_valid(ap)) return 0;
         a[0] = PROJ_ARP_MAGIC; a[1] = 1u; a[2] = ap->n;
         for (i = 0; i < ap->n; i++) { a[4u + 2u * i] = (uint8_t)ap->note[i]; a[5u + 2u * i] = (uint8_t)(ap->note[i] >> 8); }
@@ -359,6 +372,11 @@ static void project_capture(project_t *p)
         memcpy(p->t[i].step, trk[i].step, sizeof trk[i].step);
         p->t[i].arp.n = arp_pat[i].n < ARP_NMAX ? arp_pat[i].n : (uint8_t)ARP_NMAX;   /* WaveLoop: the ARP's pattern (its */
         memcpy(p->t[i].arp.note, arp_pat[i].note, 2u * p->t[i].arp.n);              /* notes; the rest 0, as unpacked) */
+        if (trk[i].eng_req == ENGI_DRUM) {              /* WaveLoop: a DRUM track's drums, each its own */
+            drum_st_t d;
+            drum_state_fold(i, p->t[i].p, &d);
+            drum_pack(&d, p->t[i].drum);
+        }
     }
     p->motion = motion;
     memcpy(p->mch, song.mch, sizeof p->mch);
@@ -575,6 +593,13 @@ static int project_restore_runtime(const project_t *input)
             arp_pat[k] = s->arp;
         else
             ash_load(&arp_pat[k], 0);
+        {   /* WaveLoop: a DRUM track's drums (saved before: every drum the kit's, the values saved) */
+            drum_st_t d;
+            if (e == ENGI_DRUM && drum_unpack(&d, s->drum))
+                drum_state_set(t, &d);
+            else
+                drum_track_loaded(t);
+        }
         t->arp_n = 0;                                   /* (its notes ended: transport_req, panic_req) */
     }
     song.sel = (uint8_t)(p->sel < NTRK ? p->sel : 0u);
@@ -777,6 +802,7 @@ static uint32_t autosave_sig(void)
         h = as_mix(h, &t->preset, 1);
         h = as_mix(h, t->step, sizeof t->step);
         h = as_mix(h, &arp_pat[i], sizeof arp_pat[i]);  /* (WaveLoop: the ARP's pattern) */
+        h = as_mix(h, &drum_st[i], sizeof drum_st[i]);  /* (WaveLoop: a DRUM track's drums, each its own) */
     }
     for (i = 0; i < G_COUNT; i++)
         if (i != G_SLOT && i != G_NAME && i != G_LOAD && i != G_SAVE)

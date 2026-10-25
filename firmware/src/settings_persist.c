@@ -42,7 +42,7 @@ static int settings_import(persist_t *p, int n)
     }
     if (p->favorites.factory[15][27] > 7u)         /* SCREEN OFF (1.1.5, ui.c SCR_CODE): unknown = 0 (NEVER since 1.1.5.1) */
         p->favorites.factory[15][27] = 0;
-    if (p->favorites.factory[15][11] >= 8u)         /* PRESETS LIST's category (1.2, ui.c ui_lcat, CAT_*, below category.c NCAT = 8): unknown = none */
+    if (p->favorites.factory[15][11] >= 9u)         /* PRESETS LIST's category (1.2, ui.c ui_lcat, CAT_*, category.c NCAT: 9 with DRUMS): unknown = none */
         p->favorites.factory[15][11] = 0;
     /* [15][26] Felucca's HOME view (1.3): nothing reads it in VOID FOUR; kept as saved */
     {   /* CUSTOM (1.6, #244, favorites.c ui_cpal): [15][0..9] five RGB565 colours, [12] bit 0 stored, bit 1 in use. Anything else

@@ -1,4 +1,4 @@
-/* four_test.c: the four-machine contract */
+/* four_test.c: the four-machine contract (the synths), and WaveLoop's fifth machine, DRUM */
 #define ENGINES_QUAL
 #define main hostsim_main
 #include "hostsim.c"
@@ -10,8 +10,15 @@ static void test_engine_table(void)
 {
     static const char *const NAME[4] = {"OB-Z", "WAVE", "NANO", "JUNO"};
     uint32_t e;
-    CHECK(NENGINES == 4u, "NENGINES %u", (unsigned)NENGINES);
-    for (e = 0; e < NENGINES; e++) {
+    CHECK(NENGINES == 5u, "NENGINES %u", (unsigned)NENGINES);
+    CHECK(strcmp(ENGINES[ENGI_DRUM]->name, "DRUM") == 0, "engine 4 is %s", ENGINES[ENGI_DRUM]->name);
+    CHECK(ENGINES[ENGI_DRUM]->knob[0] == P_E1 && ENGINES[ENGI_DRUM]->knob[1] == P_E2 && ENGINES[ENGI_DRUM]->knob[2] == P_E3 &&
+          ENGINES[ENGI_DRUM]->knob[3] == P_E4, "DRUM K1..K4: PITCH TONE DECAY SNAP");
+    CHECK(ENGINES[ENGI_DRUM]->ownenv == 1u && ENGINES[ENGI_DRUM]->poly == 8u && ENGINES[ENGI_DRUM]->part_fx,
+          "DRUM: hits (own envelope), a voice per drum, its PAN / SEND stage");
+    CHECK(DRUM_MEM <= DRIFT_MEM, "DRUM's state %u in DRIFT's room %u (the pool does not grow)", (unsigned)DRUM_MEM,
+          (unsigned)DRIFT_MEM);
+    for (e = 0; e < 4u; e++) {
         CHECK(strcmp(ENGINES[e]->name, NAME[e]) == 0, "engine %u is %s", (unsigned)e, ENGINES[e]->name);
         CHECK(ENGINES[e]->knob[0] == P_E4, "%s K1 not CUT", NAME[e]);
         CHECK(ENGINES[e]->knob[1] == P_E5, "%s K2 not RES", NAME[e]);
@@ -37,7 +44,19 @@ static void test_engine_table(void)
 static void test_presets(void)
 {
     uint32_t e, k;
-    for (e = 0; e < NENGINES; e++) {
+    {   /* DRUM: the 808 first (a new project's T4), then CR78, the eight Yama-bruh kits, Felucca's own and the model kits */
+        static const char *const N[15] = {"808", "CR78", "YB STANDARD", "YB ELECTRO", "YB POWER", "YB BRUSH", "YB ORCH",
+                                          "YB SYNTH", "YB LATIN", "YB LOFI", "FELUCCA KIT", "KIT 10", "KIT 66", "KIT 55", "KIT 77"};
+        const engine_t *d = ENGINES[ENGI_DRUM];
+        CHECK(d->npresets == 15u, "DRUM has %u presets", d->npresets);
+        for (k = 0; k < d->npresets && k < 15u; k++) {
+            CHECK(strcmp(d->presets[k].name, N[k]) == 0 && d->presets[k].e[0] == (int8_t)k && !d->presets[k].mono,
+                  "DRUM preset %u: %s, KIT %d", (unsigned)k, d->presets[k].name, d->presets[k].e[0]);
+            CHECK(preset_cat(ENGI_DRUM, k) == CAT_DRUMS, "DRUM %s: DRUMS", d->presets[k].name);
+        }
+        CHECK(trk_def_engine(3) == ENGI_DRUM && TRK_DEF[3][1] == 0u, "a new project's T4: DRUM, 808");
+    }
+    for (e = 0; e < 4u; e++) {
         CHECK(ENGINES[e]->npresets == 32u, "%s has %u presets", ENGINES[e]->name, ENGINES[e]->npresets);
         for (k = 0; k < ENGINES[e]->npresets; k++) {
             uint32_t c = preset_cat(e, k);

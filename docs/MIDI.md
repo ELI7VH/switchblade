@@ -85,6 +85,10 @@ WaveLoop build: the map follows an M-Audio Oxygen Pro 61 (README, "WaveLoop buil
 NANO's 303 runs its own envelope: there DECAY (CC75) sets its DECY, and ATTACK, SUSTAIN and RELEASE do nothing.
 CC112, CC114 and CC115 are the Oxygen's encoder (README) and are never mapped or learned.
 
+WaveLoop build: on a DRUM track (the fifth machine, README "DRUM") the CCs shape the drum last hit: CC74 PITCH, CC71
+TONE, CC5 DECAY, CC10 PAN, CC76 SEND, CC77 LEVEL, CC70 SNAP (CC16 / CC17: DECAY / SNAP, EDIT's K3 / K4); CC78 and the
+envelope's CC73 75 79 72 do nothing there. GM drum notes (35..81) play the kit; other notes their octave of 36..47.
+
 CC values 0..127 span the parameter's whole range. For a bipolar value such as PAN, 64 is the middle.
 Program Change 0..31 picks the track machine's preset with that number, in the order the PRESETS list shows them.
 A program number past the last preset is ignored.

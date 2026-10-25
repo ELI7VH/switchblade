@@ -60,10 +60,22 @@ static const trim_t TRIM_DRIFT[] = {
     {TG_EDIT, 0, 24, 240, 3, JU_RED},                                  /* EDIT: the Juno's red band under the header */
     {TG_EDIT, 3, 211, 188, 1, JU_RED},  {TG_EDIT, 193, 211, 44, 1, JU_BLUE},
 };
-/* by engine (ENGI_OBX WAVE ACID DRIFT), the palette's trim index - 1 (gfx.c palette_set) */
+/* WaveLoop: DRUM, the TR-808: a hairline of its orange under the header, and its step keys' four colours (red, orange,
+ * yellow, cream: a group of four steps each) as the footer's bottom band */
+#define DR_RED RGB(0xd8, 0x3a, 0x22)
+#define DR_ORANGE RGB(0xff, 0x70, 0x2c)
+#define DR_YELLOW RGB(0xff, 0xd2, 0x40)
+#define DR_CREAM RGB(0xe8, 0xe0, 0xc8)
+static const trim_t TRIM_DRUM[] = {
+    {TG_HEAD, 3, 22, 234, 1, DR_ORANGE},
+    {TG_BOTH, 3, 236, 58, 3, DR_RED},     {TG_BOTH, 62, 236, 58, 3, DR_ORANGE},
+    {TG_BOTH, 121, 236, 58, 3, DR_YELLOW}, {TG_BOTH, 180, 236, 57, 3, DR_CREAM},
+};
+/* by engine (ENGI_OBX WAVE ACID DRIFT DRUM), the palette's trim index - 1 (gfx.c palette_set) */
 static const struct { const trim_t *r; uint8_t n; } TRIM[NENGINES] = {
     {TRIM_OBZ, (uint8_t)TRIM_N(TRIM_OBZ)}, {TRIM_WAVE, (uint8_t)TRIM_N(TRIM_WAVE)},
     {TRIM_ACID, (uint8_t)TRIM_N(TRIM_ACID)}, {TRIM_DRIFT, (uint8_t)TRIM_N(TRIM_DRIFT)},
+    {TRIM_DRUM, (uint8_t)TRIM_N(TRIM_DRUM)},
 };
 
 /* the trim of the pages in mask (TG_*) that lies on the canvas about to be drawn: its top left at screen (x0, y0), w x h

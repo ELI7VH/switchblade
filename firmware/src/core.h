@@ -2,8 +2,8 @@
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
 /* FELUCCA core types: tracks, voices, engines, parameters.
  * Four tracks, each a synth part: its own engine, preset, parameters, voices and 64-step
- * pattern. The parts share one budget of NVOICE sounding voices (voice.c). Four machines: OB-Z, WAVE,
- * ACID, DRIFT (engines.c).
+ * pattern. The parts share one budget of NVOICE sounding voices (voice.c). Five machines: OB-Z, WAVE,
+ * ACID, DRIFT and (WaveLoop) DRUM (engines.c).
  * Sections: sizes, parameters, voices and engines, tracks and the song, system. */
 #include <stdint.h>
 
@@ -13,12 +13,13 @@
 #define NTRK NPART               /* tracks (the formats and the protocol count these): every track is a part */
 #define NSTEP 64
 #define HALF_FRAMES 128          /* I2S half buffer: 2.9 ms at 44.1 kHz (a key waits 0..1 half, then plays 1 half later) */
-#define NENGINES 4u              /* the four machines (engines.c ENGINES[]) */
-#define NENG_SHOWN 4u            /* the engines one can pick, in engines.c ENGINE_ORDER */
+#define NENGINES 5u              /* the five machines (engines.c ENGINES[]) */
+#define NENG_SHOWN 5u            /* the engines one can pick, in engines.c ENGINE_ORDER */
 #define ENGI_OBX 0u              /* OB-Z (eng_obx.c) */
 #define ENGI_WAVE 1u             /* WAVE (eng_wave.c, the VOID WAVE plugin's voice) */
 #define ENGI_ACID 2u             /* ACID (eng_acid.c) */
 #define ENGI_DRIFT 3u            /* DRIFT (eng_drift.c) */
+#define ENGI_DRUM 4u             /* WaveLoop: DRUM (eng_drum.c, the WaveLoop Kit's drums) */
 #define UP_SLOTS 32u             /* user presets (upreset.c) */
 #define NELEM(a) (sizeof(a) / sizeof((a)[0]))
 

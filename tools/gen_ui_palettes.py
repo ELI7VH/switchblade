@@ -19,7 +19,7 @@ blends at palette_set() time (src/gfx.c, the same integer maths as mix() here):
   KEY  = mix(BG, TEXT, 78 %)    a keycap's fill (a mid-light cushion; its label INK, unavailable: a DIM fill)
   INK  = BG: text on a selection or THEME fill (GREY, MONO: a light fill, dark ink)
 Outside the palette: REC, a fixed red; the QR code's fixed black and white; the crash screen's fixed red.
-Switch Blade has one colour scheme, the four machines' palettes (OB-Z WAVE ACID DRIFT, engine order); the ten fixed
+Switch Blade has one colour scheme, the machines' palettes (OB-Z WAVE ACID DRIFT, WaveLoop's DRUM: engine order); the ten fixed
 palettes of earlier firmware (GREY GREEN AMBER ICE VIOLET ROSE PAPER HI-CON NIGHT MONO) and CUSTOM are gone. Saved settings
 name a palette by a tagged id (PAL_TAG + 10 = MACHINE is written, so earlier firmware reads it as GREY); any stored id
 loads as MACHINE.
@@ -41,6 +41,8 @@ MACHINE_PALETTES = [
     ("ACID",  (208, 218, 225), (188, 202, 213), (18, 24, 32),    (37, 38, 45),     (138, 54, 0)),
     # DRIFT's keycaps are tan, as the Juno-106's buttons (the 6th colour: a keycap fill of its own, not derived)
     ("DRIFT", (11, 13, 17),    (24, 27, 34),    (228, 230, 232), (255, 96, 90),   (61, 134, 200), (224, 197, 144)),
+    # WaveLoop: DRUM, the TR-808: its charcoal case, the orange of its step keys (THEME), their yellow (ACCENT)
+    ("DRUM",  (14, 13, 12),    (34, 31, 28),    (238, 232, 220), (255, 112, 44),  (255, 210, 64)),
 ]
 PAL_TAG = 64                       # stored id = PAL_TAG + 10 (MACHINE's id in the earlier firmware's palette list)
 PAL_STORED_MACHINE = 10

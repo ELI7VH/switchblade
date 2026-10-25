@@ -334,6 +334,9 @@ static int up_store_cat(uint32_t k, const char *name, uint32_t cat)
     up_set_name(&r, k, name);
     for (i = 0; i < P_COUNT; i++)
         up_set_value(&r, i, motion_base_value(TSEL, i));
+    if (TSEL->eng_req == ENGI_DRUM)                     /* WaveLoop: a DRUM sound is its kit: the kit's values, not the */
+        for (i = 0; i < DC_N; i++)                      /* picked drum's (each drum's own stay with the project) */
+            up_set_value(&r, P_E1 + i, drum_st[song.sel].kit[i]);
     up_pat_from(&r, TSEL->step);
     up_set_cat(&r, cat ? cat : track_cat(TSEL));
     return up_put(k, &r);
@@ -376,6 +379,7 @@ static int up_load(uint32_t k)
         if (!param_kept(i))
             t->p[i] = v[i];
     t->preset = 0;
+    drum_track_loaded(t);                               /* (WaveLoop: DRUM: every drum the kit's values) */
     fm1_irq_on();
     t->user = (uint8_t)(k + 1u);
     load_end(t);

@@ -681,6 +681,7 @@ enum { S_HOME, S_HOME_IDLE, S_MESSAGE, S_MESSAGE_KEY, S_PRESETS, S_PRESETS_NOFAV
        S_TOOLS_CLEAN, S_CONFIRM_CLEAN, S_MENU_MIDI_TRACK, S_MENU_MIDI_TCH_UNUSED, S_MENU_MIDI_AUTO,
        S_HOME_BIG_STOPPED, S_MIXER_MIDI, S_EDIT_BIG_OBX, S_EDIT_BIG_WAVE, S_EDIT_BIG_ACID, S_EDIT_BIG_DRIFT,
        S_HOME_CC, S_HOME_CC_LFO, S_HOME_CC_WAVE, S_HOME_CC_WHEEL, S_ENV_CC, S_HOME_CC_AT,
+       S_EDIT_BIG_DRUM, S_EDIT_DRUM, S_HOME_CC_DRUM,
        S_COUNT };
 static const char *const S_NAME[S_COUNT] = {"home", "home_idle", "message", "message_key", "presets",
     "presets_nofav", "user", "phrases", "project", "tools", "song_empty", "song", "step", "auto_steps",
@@ -711,7 +712,8 @@ static const char *const S_NAME[S_COUNT] = {"home", "home_idle", "message", "mes
     "auto_cond", "layer_glo_fill", "layer_seq_euclid", "layer_seq_euclid_64", "menu_select", "project_erase",
     "confirm_erase_project", "tools_clean", "confirm_clean", "menu_midi_track", "menu_midi_channels_unused",
     "menu_midi_auto_select", "home_big_stopped", "mixer_midi", "edit_big_obx", "edit_big_wave", "edit_big_acid",
-    "edit_big_drift", "home_cc", "home_cc_lfo", "home_cc_lfo_wave", "home_cc_wheel", "env_cc", "home_cc_aftertouch"};
+    "edit_big_drift", "home_cc", "home_cc_lfo", "home_cc_lfo_wave", "home_cc_wheel", "env_cc", "home_cc_aftertouch",
+    "edit_big_drum", "edit_drum", "home_cc_drum"};
 
 /* the STEP page's piano roll (ui_graph.c graph_roll) on track 1, stopped unless said: an empty pattern; ACID in
  * A minor; POLY chords (Am7 F C G, tied); a line with ties, slides and accents in C major; LEN 32 on its second
@@ -1144,6 +1146,15 @@ static void setup(int s)
     case S_HOME_CC_WHEEL: song.sel = 3; midi_control(3, 1, 100); break;
     case S_ENV_CC: go_title("ENV"); midi_control(0, 79, 64); break;
     case S_HOME_CC_AT: midi_event(0xD0, 1, 0, 0); midi_event(0xD0, 1, 96, 0); break;   /* (WaveLoop: T2 AFTERTOUCH 96) */
+    /* WaveLoop: DRUM (eng_drum.c): EDIT on the picked snare (PITCH -12, the header names it); MACHINE 2 on the clap (the
+     * title names it: SNAP LEVEL PAN SEND); the Oxygen's knob 1 on T4 with the open hat picked ("HATOP PITCH") */
+    case S_EDIT_BIG_DRUM:
+        song.sel = 3; eng(ENGI_DRUM); drum_hit[3] = 0; drum_focus_set(TSEL, DV_SNARE); TSEL->p[P_E1] = -12; TSEL->p[P_E4] = 127;
+        go_title("EDIT"); break;
+    case S_EDIT_DRUM:
+        song.sel = 3; eng(ENGI_DRUM); drum_hit[3] = 0; drum_focus_set(TSEL, DV_CLAP); TSEL->p[P_E6] = -64; TSEL->p[P_E7] = 127;
+        go_title("MACHINE 2"); break;
+    case S_HOME_CC_DRUM: song.sel = 3; eng(ENGI_DRUM); drum_hit[3] = 0; drum_focus_set(TSEL, DV_HATO); midi_control(3, 74, 127); break;
     case S_EDIT_ANALOG: go_title("MACHINE 1"); break;
     case S_EDIT_WAVE: eng(ENGI_WAVE); go_title("MACHINE 1"); break;
     case S_CONFIRM_SEQ: ui.confirm = CF_CLEAR_SEQ; ui.confirm_trk = 2; break;

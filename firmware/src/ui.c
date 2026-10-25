@@ -777,6 +777,7 @@ static struct {
     int16_t p[P_COUNT];
     step_t step[NSTEP];
     motion_store_t motion_backup; /* one track only, swaps with the shared event pool on undo */
+    drum_st_t drum;              /* WaveLoop: a DRUM track's drums, each its own (eng_drum.c drum_state_of) */
     uint32_t after;              /* track_sig right after the last load */
     uint32_t pat;                /* pat_sig[] of the copy */
     uint32_t from_h;             /* pat_from_h[], pat_from[] of the copy (the header's slot letter) */
@@ -898,6 +899,7 @@ static void load_begin(track_t *t, uint32_t what)
     undo.user = t->user;
     memcpy(undo.p, t->p, sizeof undo.p);
     memcpy(undo.step, t->step, sizeof undo.step);
+    drum_state_of(t, &undo.drum);
     undo.pat = pat_sig[i];
     undo.from = pat_from[i];
     undo.from_h = pat_from_h[i];
@@ -1009,12 +1011,18 @@ static void undo_swap(void)
         undo.eng = e;
         undo.preset = pr;
         undo.user = u;
-        for (i = 0; i < P_COUNT; i++)
-            if (!param_kept(i)) {
-                int16_t v = t->p[i];
-                t->p[i] = undo.p[i];
-                undo.p[i] = v;
-            }
+        {
+            drum_st_t d;                          /* WaveLoop: the drums' own values with the sound */
+            drum_state_of(t, &d);
+            for (i = 0; i < P_COUNT; i++)
+                if (!param_kept(i)) {
+                    int16_t v = t->p[i];
+                    t->p[i] = undo.p[i];
+                    undo.p[i] = v;
+                }
+            drum_state_set(t, &undo.drum);
+            undo.drum = d;
+        }
     }
     if (undo.what & UNDO_PAT) {
         uint32_t ps = pat_sig[trk_index(t)];
@@ -1175,6 +1183,7 @@ static void apply_preset_to(track_t *t, uint32_t pi)
     void_track_loaded(t);                             /* WAVE: its filter TYPE and LFO routing */
     drift_track_loaded(t);                            /* DRIFT: its chorus */
     acid_track_loaded(t);                             /* NANO: its model (303 / SUB) and filter TYPE */
+    drum_track_loaded(t);                             /* WaveLoop: DRUM: every drum the kit's values */
     load_end(t);
 }
 
@@ -1218,6 +1227,7 @@ static void clean_engine_of(track_t *t)
     t->p[P_ATK] = 0;
     t->p[P_SUS] = TP[P_SUS].max;
     t->p[P_REL] = CLEAN_REL;
+    drum_track_loaded(t);                             /* (WaveLoop: DRUM's drums the clean kit's) */
     fm1_irq_on();
     load_end(t);
 }
@@ -1245,6 +1255,25 @@ static void midi_pc_load(track_t *t, uint32_t n)
     if (n >= preset_shown(e))
         return;
     apply_preset_to(t, n);
+}
+/* WaveLoop: a live hit on a DRUM track picked its drum (eng_drum.c drum_hit, the audio ISR): its values into p[] (the
+ * one let go keeps its own), so the pages, the knobs, the CCs and the knob card shape it; the screen follows */
+static void drum_pick_poll(void)                     /* main loop (ui_input) */
+{
+    uint32_t k, l, moved;
+    for (k = 0; k < NTRK; k++) {
+        if (!drum_hit[k])
+            continue;
+        fm1_irq_off();
+        l = drum_hit[k] - 1u;
+        drum_hit[k] = 0;
+        moved = trk[k].eng_req == ENGI_DRUM && l != drum_st[k].focus;
+        if (moved)
+            drum_focus_set(&trk[k], l);
+        fm1_irq_on();
+        if (moved && k == song.sel)
+            ui.force = 1;
+    }
 }
 static void midi_pc_poll(void)                       /* main loop (ui_input) */
 {

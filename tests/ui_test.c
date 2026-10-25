@@ -380,10 +380,11 @@ static int test_sound_loads(void)
     ui_power_on();
     for (i = 0; i < NTRK; i++)
         empty &= (uint32_t)seq_is_empty(&trk[i]);
-    bad += check("power-on: the four sounds, T3 ACID's pattern, the others empty, no undo copy",
+    bad += check("power-on: the four sounds (WaveLoop: T4 DRUM's 808), T3 ACID's pattern, the others empty, no undo copy",
                  empty == 0 && seq_is_empty(&trk[0]) && seq_is_empty(&trk[1]) && seq_is_empty(&trk[3]) &&
                  pat_last[2] == 1u && undo.trk == 0 && undo_depth == 0 &&
-                 trk[2].eng_req == ENGI_ACID && trk[3].eng_req == ENGI_DRIFT && trk[0].preset == TRK_DEF[0][1]);
+                 trk[2].eng_req == ENGI_ACID && trk[3].eng_req == ENGI_DRUM && trk[3].preset == 0u &&
+                 trk[0].preset == TRK_DEF[0][1]);
     my_steps(t);
     t->p[P_E0 + 1] = 77;                          /* a sound edit */
     t->p[P_AMODE] = 2;                            /* and the track's own settings */
@@ -1126,8 +1127,14 @@ static int test_categories(void)
     }
     bad += check("  the PRESETS knob steps through basses only (every engine), and round", ok && preset_pos(&total) == total - 1u);
     turn(EN_K4, 20);
-    bad += check("  .. right to ACID and no further (no wrap)", list_mode() == LIST_N - 1u && str_eq(list_name(list_mode()), "ACID"));
+    bad += check("  .. right to DRUMS (WaveLoop's, after ACID) and no further (no wrap)", list_mode() == LIST_N - 1u &&
+                 str_eq(list_name(list_mode()), "DRUMS") && str_eq(list_name(list_mode() - 1u), "ACID"));
     {
+        ui.msg_t = 0;
+        turn(EN_PRESET, 1);
+        bad += check("  DRUMS holds DRUM's kits only: the PRESETS knob lands on that machine",
+                     TSEL->eng_req == ENGI_DRUM && track_cat(TSEL) == CAT_DRUMS);
+        turn(EN_K4, -1);
         ui.msg_t = 0;
         turn(EN_PRESET, 1);
         bad += check("  ACID holds ACID's sounds only: the PRESETS knob lands on that machine",
@@ -1240,10 +1247,10 @@ static int test_machine_palette(void)
     for (e = 0; e < NENGINES; e++)                       /* the machines' palettes differ, and carry the machine's name */
         for (t = 0; t < e; t++)
             ok &= UI_MACHINE_PALS[e].bg != UI_MACHINE_PALS[t].bg || UI_MACHINE_PALS[e].theme != UI_MACHINE_PALS[t].theme;
-    bad += check("the four machine palettes are four looks (OB-Z WAVE ACID DRIFT, in engine order)",
+    bad += check("the five machine palettes are five looks (OB-Z WAVE ACID DRIFT, WaveLoop's DRUM: in engine order)",
                  ok && UI_NMACHINE == NENGINES && str_eq(UI_MACHINE_PALS[ENGI_OBX].name, "OB-Z") &&
                  str_eq(UI_MACHINE_PALS[ENGI_WAVE].name, "WAVE") && str_eq(UI_MACHINE_PALS[ENGI_ACID].name, "ACID") &&
-                 str_eq(UI_MACHINE_PALS[ENGI_DRIFT].name, "DRIFT"));
+                 str_eq(UI_MACHINE_PALS[ENGI_DRIFT].name, "DRIFT") && str_eq(UI_MACHINE_PALS[ENGI_DRUM].name, "DRUM"));
     for (t = 0; t < NTRK; t++)                           /* a machine per track */
         set_engine_of(&trk[t], t);
     ui.menu = 0; ui.home = 1; ui.force = 1;
@@ -1263,7 +1270,7 @@ static int test_machine_palette(void)
         set_engine_of(TSEL, e);
         ui.force = 0;
         ui_draw();
-        ok &= ux.trim == 1u + e && T_BG == bg[e];
+        ok &= ux.trim == 1u + e && T_BG == (e < NTRK ? bg[e] : UI_MACHINE_PALS[e].bg);   /* (DRUM: no track had it above) */
     }
     bad += check("MACHINE mode: changing the selected track's machine sets that machine's palette", ok);
     {   /* the change is one full redraw (ui.force): no pixel of the old machine's background is left on the screen */
@@ -3444,10 +3451,33 @@ static int screen_has_text(const char *s)            /* a big card drew s as its
 }
 static int test_edit_big(void)
 {
-    static const char *const MLBL[NENGINES] = {"DETUNE", "POSITION", "DECAY", "DRIVE"};
+    static const char *const MLBL[NENGINES] = {"DETUNE", "POSITION", "DECAY", "DRIVE", "SNAP"};
     int bad = 0;
     uint32_t e;
-    for (e = 0; e < NENGINES; e++) {
+    {   /* WaveLoop: DRUM's EDIT: PITCH TONE DECAY SNAP of the picked drum, named in the header; a hit picks another */
+        int ok;
+        ui_power_on(); song.sel = 3; set_engine_of(TSEL, ENGI_DRUM); frame();
+        memset(big_lbl, 0, sizeof big_lbl);
+        press(B_EDIT); frame();
+        ok = str_eq(PAGES[ui.page].title, "EDIT") && str_eq(big_lbl[0], "PITCH") && str_eq(big_lbl[1], "TONE") &&
+             str_eq(big_lbl[2], "DECAY") && str_eq(big_lbl[3], "SNAP");
+        bad += check("EDIT on a DRUM track: PITCH TONE DECAY SNAP (the picked drum's)", ok);
+        drum_focus_set(TSEL, DV_KICK); frame();
+        turn(EN_K1, 3); frame();
+        ok = TSEL->p[P_E1] > 0 && drum_st[3].focus == DV_KICK;
+        TSEL->engine = ENGI_DRUM;                        /* (no audio blocks here: the switch engine_block makes) */
+        eng_mem_claim(TSEL);
+        input_on(TSEL, 38, 100);                         /* a hit on the snare (a key, a pad): it is picked */
+        frame();
+        ok &= drum_st[3].focus == DV_SNARE && TSEL->p[P_E1] == 0 && drum_st[3].v[DV_KICK][DC_PITCH] > 0;
+        turn(EN_K1, -2); frame();
+        ok &= TSEL->p[P_E1] < 0 && drum_val(TSEL, DV_KICK, DC_PITCH) > 0;
+        bad += check("  K1 the kick's PITCH; a hit on the snare picks it: K1 its PITCH, the kick keeps its own", ok);
+        ml_toggle(); turn(EN_K2, 1); frame();
+        bad += check("  MIDI LEARN: K2 picks TONE (P_E2)", ui.ml.on && ui.ml.id == P_E2);
+        ml_off();
+    }
+    for (e = 0; e < 4u; e++) {                           /* (the four synths) */
         int16_t cut0, k4, env0;
         int ok;
         ui_power_on(); song.sel = (uint8_t)e; set_engine_of(TSEL, e); frame();
@@ -3524,7 +3554,7 @@ static int test_edit_controls(void)
 {
     int bad = 0, ok;
     uint32_t e, k, i;
-    for (e = 0; e < NENGINES; e++) {
+    for (e = 0; e < 4u; e++) {                           /* (the four synths' panels; DRUM's cards are OB-Z's: test_edit_big) */
         ui_power_on(); song.sel = (uint8_t)e; set_engine_of(TSEL, e); frame();
         press(B_EDIT); frames(320);
         TSEL->p[P_E4] = 40; TSEL->p[P_E5] = 100; TSEL->p[P_ED_FLT] = 0; TSEL->p[ENGINES[e]->knob[3]] = 64; ui.force = 1; frame();
@@ -3846,9 +3876,9 @@ static int test_edit_layer_four(void)
     int bad = 0, ok;
     uint32_t i, seen = 0, e;
     ui_power_on(); go_home(); frame();
-    ok = NENG_SHOWN == 4u && NENGINES == 4u && LY_INIT == 4u;
+    ok = NENG_SHOWN == 5u && NENGINES == 5u && LY_INIT == 5u;   /* (WaveLoop: DRUM the fifth, INIT on the sixth key) */
     btn_down(B_EDIT); frames(480);
-    for (i = 0; i < 4u; i++) {
+    for (i = 0; i < 5u; i++) {
         key_down(white(i)); key_up(white(i)); frame();
         seen |= 1u << TSEL->eng_req;
     }
@@ -3856,13 +3886,13 @@ static int test_edit_layer_four(void)
     for (i = 0; i < 5u; i++) {                         /* the black keys: nothing */
         key_down(key_at(1, i)); key_up(key_at(1, i)); frame();
     }
-    ok &= seen == 15u && TSEL->eng_req == e;
+    ok &= seen == 31u && TSEL->eng_req == e;
     btn_up(B_EDIT); frame();
     e = TSEL->eng_req;
-    for (i = 0; i < 4u; i++)
+    for (i = 0; i < 5u; i++)
         e = eng_step(e, 1);
     ok &= e == TSEL->eng_req;
-    bad += check("EDIT layer: white keys 1..4 the four machines (all four, nothing else), KNOB 1 round four", ok);
+    bad += check("EDIT layer: white keys 1..5 the five machines (WaveLoop: DRUM 5th; nothing else), KNOB 1 round five", ok);
     return bad;
 }
 
@@ -4016,12 +4046,14 @@ static int test_quick_layers(void)
     key_up(white(eng_rank(2))); frame();
     key_down(white(1)); key_up(white(1)); frame();
     ok &= TSEL->eng_req == ENGI_WAVE;                   /* (G3: WAVE, second in ENGINE_ORDER) */
+    key_down(white(NENG_SHOWN - 2u)); key_up(white(NENG_SHOWN - 2u)); frame();
+    ok &= TSEL->eng_req == ENGI_DRIFT;                  /* (the key before the last: DRIFT) */
     key_down(white(NENG_SHOWN - 1u)); key_up(white(NENG_SHOWN - 1u)); frame();
-    ok &= TSEL->eng_req == ENGI_DRIFT;                  /* (the last key: DRIFT) */
+    ok &= TSEL->eng_req == ENGI_DRUM;                   /* (the last key: WaveLoop's DRUM) */
     ok &= !memcmp(TSEL->step, before.step, sizeof before.step) && TSEL->p[P_SLEN] == before.p[P_SLEN] &&
           TSEL->p[P_SLCR] == SL_STUT;
     btn_up(B_EDIT); frame();
-    bad += check("EDIT + white key n: the n-th engine shown (WAVE 2nd, DRIFT last), while playing; steps, LEN, SLICER stay", ok);
+    bad += check("EDIT + white key n: the n-th engine shown (WAVE 2nd, DRIFT 4th, DRUM last), while playing; steps, LEN, SLICER stay", ok);
     hold(B_SAVE);
     bad += check("  SAVE held: UNDO back to before the layer's loads, the steps untouched",
                  TSEL->eng_req == 0u && TSEL->preset == before.preset && !memcmp(TSEL->step, before.step, sizeof before.step));
