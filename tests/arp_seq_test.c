@@ -7,7 +7,9 @@
  *   edges                ARP off as before; live notes join the sequenced chord; HOLD; the chord's end and STOP leave
  *                        nothing sounding; ARP switched while a chord plays; the external clock's grid
  *   recording            ARP on: the chord played is recorded, not the arp's notes; MIDI live recording on the routed
- *                        track (CH1-4, channel 16 = the selected track, SEL); MIDI step recording on SEQ > STEP */
+ *                        track (CH1-4, channel 16 = the selected track, SEL); MIDI step recording on SEQ > STEP
+ *   stability            a random soak over all of it (MIDI on every routed channel, keys, ARP / HOLD / transport /
+ *                        track switches, CC123): every note-off balanced, nothing left sounding or held */
 #define UI_TEST_NO_MAIN 1
 #include "ui_test.c"
 #include "arp_chords_vectors.h"
@@ -521,6 +523,112 @@ static void step_rec(void)
     song.rec = 0;
 }
 
+/* ------------------------------------------------------------------- soak --- */
+static uint32_t rs = 0x2545F491u;
+static uint32_t rnd(uint32_t n)
+{
+    rs ^= rs << 13;
+    rs ^= rs >> 17;
+    rs ^= rs << 5;
+    return rs % n;
+}
+/* about 40 s of random play: MIDI notes on channels 1..4, 16 and 9 (bursts too), keys, the selected track, ARP / HOLD /
+ * DIR / PAT switched, PLAY / STOP, ROUT CH1-4 / SEL, CC123, every track sequencing chords into its arp. Then every
+ * note let go, HOLD and ARP off, the transport stopped: no gate on, MIDI OUT holding nothing, every note-on ended */
+static void soak(void)
+{
+    static const uint8_t CHS[6] = {0, 1, 2, 3, 15, 8};
+    static uint8_t on[6][128];
+    uint32_t k, i, c, ev = 0, keys = 0;
+    int ok;
+    track_t *t;
+    ui_power_on();
+    memset(on, 0, sizeof on);
+    cap_reset();
+    for (k = 0; k < NTRK; k++) {
+        t = &trk[k];
+        t->p[P_MOUT] = k == 0u ? MOUT_BOTH : MOUT_INT;
+        t->p[P_SUS] = 127;
+        t->p[P_SLEN] = 16;
+        t->p[P_AMODE] = (int16_t)(k & 1u);
+        for (i = 0; i < 16u; i += 4u)
+            chord_steps(t, (const uint8_t[]){(uint8_t)(48 + rnd(24)), (uint8_t)(60 + rnd(12)), (uint8_t)(64 + rnd(12))}, 3,
+                        i, i + 1u + rnd(4), 60 + rnd(60));
+    }
+    for (k = 0; k < 40u * FS / CTL; k++) {
+        uint32_t r = rnd(64);
+        if (r < 10u) {                               /* MIDI */
+            uint32_t ci = rnd(6), note = 36u + rnd(48);
+            if (on[ci][note]) {
+                mi(rnd(2) ? 0x80u | CHS[ci] : 0x90u | CHS[ci], note, 0);
+                on[ci][note] = 0;
+            } else {
+                mi(0x90u | CHS[ci], note, 1u + rnd(127));
+                on[ci][note] = 1;
+            }
+            ev++;
+        } else if (r < 13u) {
+            keys ^= 1u << rnd(27);
+            fm1_in.notes = keys;
+        } else if (r == 13u && !rnd(8)) {
+            song.sel = (uint8_t)rnd(NTRK);
+        } else if (r == 14u && !rnd(16)) {
+            trk[rnd(NTRK)].p[P_AMODE] ^= 1;
+        } else if (r == 15u && !rnd(16)) {
+            trk[rnd(NTRK)].p[P_AHOLD] ^= 1;
+        } else if (r == 16u && !rnd(32)) {
+            transport_req = song.playing ? 2u : 1u;
+        } else if (r == 17u && !rnd(64)) {
+            song.g[G_ROUTE] ^= 1;
+        } else if (r == 18u && !rnd(64)) {
+            mi(0xB0u | CHS[rnd(6)], 123, 0);         /* All Notes Off (the notes stay "held" here: their offs come later) */
+        } else if (r == 19u && !rnd(16)) {
+            t = &trk[rnd(NTRK)];
+            t->p[P_AOCT] = (int16_t)rnd(4);
+            ash_load(&arp_pat[trk_index(t)], rnd(ARP_NFACTORY));
+            t->p[P_APROB] = (int16_t)(1 + rnd(8));
+        } else if (r == 20u && !rnd(8)) {
+            for (i = 0; i < 12u; i++) {              /* a burst: a chord's worth at once */
+                uint32_t ci = rnd(6), note = 36u + rnd(48);
+                mi(on[ci][note] ? 0x80u | CHS[ci] : 0x90u | CHS[ci], note, on[ci][note] ? 0 : 90);
+                on[ci][note] ^= 1;
+            }
+        }
+        fm1_ms = k * CTL * 1000u / FS;
+        blk1();
+        if (ncap > CAP_N - 64u) {                    /* (keep the capture short: ended notes out) */
+            uint32_t j = 0;
+            for (i = 0; i < ncap; i++)
+                if (cap[i].off == ~0u)
+                    cap[j++] = cap[i];
+            ncap = j;
+        }
+    }
+    fm1_in.notes = 0;
+    for (c = 0; c < 6u; c++)
+        for (k = 0; k < 128u; k++)
+            if (on[c][k]) {
+                mi(0x80u | CHS[c], k, 0);
+                on[c][k] = 0;
+                blk1();
+            }
+    for (k = 0; k < NTRK; k++)
+        trk[k].p[P_AHOLD] = 0;
+    blks(2);
+    for (k = 0; k < NTRK; k++)
+        trk[k].p[P_AMODE] = 0;
+    transport_req = 2;
+    blks(FS / CTL);                                  /* (a second: every release over) */
+    ok = !gates() && !mout_holding() && !cap_hanging() && !cap_open_offs && !midi_in_overflow;
+    for (k = 0; k < NTRK; k++)
+        ok &= !trk[k].nheld && !trk[k].arp_n && !trk[k].seq_n && !midi_owners[k];
+    if (!ok)
+        printf("    gates %u, MIDI OUT holding %u, hanging %u, offs for nothing %u\n", (unsigned)gates(),
+               (unsigned)mout_holding(), (unsigned)cap_hanging(), (unsigned)cap_open_offs);
+    bad += check("soak: 40 s of MIDI / keys / ARP / HOLD / transport / CC123 with the sequence feeding the arps: nothing hangs",
+                 ok && ev > 1000u);
+}
+
 int main(void)
 {
     parity();
@@ -529,10 +637,11 @@ int main(void)
     ext_clock(1);
     recording();
     step_rec();
+    soak();
     if (bad) {
         printf("ARP SEQ TEST FAILED (%d)\n", bad);
         return 1;
     }
-    puts("SEQ > ARP and MIDI recording: ok");
+    puts("SEQ > ARP, MIDI recording and the soak: ok");
     return 0;
 }

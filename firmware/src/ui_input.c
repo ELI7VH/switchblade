@@ -298,7 +298,7 @@ static uint32_t key_leds(uint32_t *br)                 /* (*br: a layer's keys t
     if (br)
         *br = 0;
     c = name_on() && !ui.menu ? name_leds() : ui.layer ? layer_leds(br) :
-        arp_keys_on() ? ((fm1_in.notes & ~kb_layer) | play_leds()) & ~ARP_KEYS | arp_leds() :   /* (ui_arp.c) */
+        arp_keys_on() ? (((fm1_in.notes & ~kb_layer) | play_leds()) & ~ARP_KEYS) | arp_leds() :   /* (ui_arp.c) */
                  (fm1_in.notes & ~kb_layer) | play_leds() | step_leds() | (song_keys_on() ? song_leds() : 0u);
     return c;
 }
