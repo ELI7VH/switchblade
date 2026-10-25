@@ -1,11 +1,13 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* WaveLoop: the sequencer feeds the ARP (seq.c seq_chord, arp_block). The real sources (ui_test.c's harness), the transport and the queues as the firmware runs them:
+/* WaveLoop: the sequencer feeds the ARP, and MIDI IN records like the keys (seq.c seq_chord, arp_block; ui_input.c
+ * seq_entry). The real sources (ui_test.c's harness), the transport and the queues as the firmware runs them:
  *   shapeChords parity   chords on the sequencer's steps, played through the arp: every note (its step, pitch, end,
  *                        velocity) as the toy's offline form shapeChords gives it for the same chords
  *                        (tests/arp_chords_vectors.h, tools/arp_vectors.mjs --chords); the arp lets go with the chord
  *   edges                ARP off as before; live notes join the sequenced chord; HOLD; the chord's end and STOP leave
  *                        nothing sounding; ARP switched while a chord plays; the external clock's grid
- *   recording            ARP on: the chord played is recorded, not the arp's notes */
+ *   recording            ARP on: the chord played is recorded, not the arp's notes; MIDI live recording on the routed
+ *                        track (CH1-4, channel 16 = the selected track, SEL); MIDI step recording on SEQ > STEP */
 #define UI_TEST_NO_MAIN 1
 #include "ui_test.c"
 #include "arp_chords_vectors.h"
@@ -433,6 +435,90 @@ static void recording(void)
     blks(2);
     bad += check("REC with the ARP on: the MIDI chord played is written (one step, a TIE), not the arp's notes; it plays back "
                  "through the arp", ok && !cap_hanging());
+
+    /* MIDI live recording on the track the channel plays: CH1-4 channel 2 -> track 2; channel 16 -> the selected track;
+     * SEL: any channel -> the selected track. Quantised to the step as the keys are */
+    t = setup(0, AD_UP, 3, 75, 16);
+    trk[0].p[P_AMODE] = 0;
+    trk[1].p[P_SLEN] = trk[2].p[P_SLEN] = 16;
+    trk[1].p[P_VOICE] = trk[2].p[P_VOICE] = V_POLY;
+    song.sel = 2;
+    song.rec = 0xF;
+    transport_req = 1;
+    while (nblk * CTL < 5u * p + p / 8u)            /* just after step 6 starts */
+        blk1();
+    mi(0x91, 62, 100);
+    mi(0x9F, 65, 100);
+    blk1();
+    mi(0x81, 62, 0);
+    mi(0x8F, 65, 0);
+    blk1();
+    ok = trk[1].step[5].n == 1u && trk[1].step[5].note[0] == 62 && trk[2].step[5].n == 1u && trk[2].step[5].note[0] == 65 &&
+         notes_written(&trk[0]) == 0u && notes_written(&trk[3]) == 0u;
+    song.g[G_ROUTE] = ROUTE_SEL;
+    while (nblk * CTL < 8u * p - p / 8u)            /* just before step 9: into step 9 (the nearest) */
+        blk1();
+    mi(0x98, 69, 100);
+    blk1();
+    mi(0x88, 69, 0);
+    blk1();
+    ok &= trk[2].step[8].n == 1u && trk[2].step[8].note[0] == 69 && notes_written(&trk[1]) == 1u;
+    transport_req = 2;
+    blks(2);
+    song.rec = 0;
+    song.g[G_ROUTE] = 0;
+    bad += check("MIDI live recording: CH1-4 ch 2 -> T2, ch 16 -> the selected T3, SEL any channel -> T3, to the nearest step",
+                 ok);
+}
+
+/* MIDI step recording on SEQ > STEP (armed, stopped): a MIDI note is a key; held together a chord, all let go moves on */
+static void step_rec(void)
+{
+    track_t *t;
+    uint32_t ok;
+    ui_power_on();
+    t = TSEL;
+    t->p[P_VOICE] = V_POLY;
+    t->p[P_AMODE] = 1;                               /* (the ARP on: the chord is written, as played) */
+    track_defaults_steps(t);
+    go_page(GR_ROLL);
+    cursor_set(2);
+    frame();
+    press(B_REC);
+    ok = song.rec == 1u && !song.playing && msg_is("KEYS WRITE STEPS");
+    mi(0x9F, 60, 100);                               /* channel 16: the selected track */
+    events_block(CTL);
+    frame();
+    ok &= t->step[2].n == 1u && t->step[2].note[0] == 60 && ui.cursor == 2u;
+    mi(0x9F, 64, 100);
+    mi(0x9F, 67, 100);
+    events_block(CTL);
+    frame();
+    mi(0x8F, 60, 0);
+    events_block(CTL);
+    frame();
+    ok &= t->step[2].n == 3u && ui.cursor == 2u;   /* (two still held: the step stays open) */
+    mi(0x8F, 64, 0);
+    mi(0x8F, 67, 0);
+    events_block(CTL);
+    frame();
+    ok &= ui.cursor == 3u && t->step[2].note[1] == 64 && t->step[2].note[2] == 67;
+    mi(0x90, 72, 100);                               /* a tap within one pass (CH1-4 channel 1 = T1, selected) */
+    mi(0x80, 72, 0);
+    events_block(CTL);
+    frame();
+    ok &= t->step[3].n == 1u && t->step[3].note[0] == 72 && ui.cursor == 4u;
+    mi(0x91, 74, 100);                               /* channel 2 plays T2: not the selected track's step */
+    events_block(CTL);
+    frame();
+    mi(0x81, 74, 0);
+    events_block(CTL);
+    frame();
+    ok &= !t->step[4].n && ui.cursor == 4u;
+    bad += check("MIDI step recording on STEP: ch 16 / the track's channel write the cursor step, a chord held is one step, "
+                 "let go moves on; another track's channel does not", ok);
+    press(B_REC);
+    song.rec = 0;
 }
 
 int main(void)
@@ -442,10 +528,11 @@ int main(void)
     ext_clock(0);
     ext_clock(1);
     recording();
+    step_rec();
     if (bad) {
         printf("ARP SEQ TEST FAILED (%d)\n", bad);
         return 1;
     }
-    puts("SEQ > ARP: ok");
+    puts("SEQ > ARP and MIDI recording: ok");
     return 0;
 }

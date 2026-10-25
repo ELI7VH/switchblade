@@ -1044,47 +1044,56 @@ static void step_toggle(const track_t *t, step_t *st, const uint8_t *ch, uint32_
  * keys moves on one step (wrapping inside LEN). With CHRD on a key writes what it sounds, as live recording does:
  * POLY its chord, MONO the chord's root. MENU > CONTROL > CHORD ENTRY ADD (1.2, #155): each key adds its notes to
  * the cursor step or takes them out (step_toggle), one after another with one hand, and letting go moves nothing: the
- * cursor moves by KNOB 1 (STEP) or PRESETS only, as it always could (EDIT still clears the step and moves on) */
-static void seq_entry(uint32_t pressed)
+ * cursor moves by KNOB 1 (STEP) or PRESETS only, as it always could (EDIT still clears the step and moves on).
+ * WaveLoop: MIDI IN notes that play the selected track (mn: seq.c mst_take; any channel ROUT gives it, channel 16 too)
+ * write as the keys do, their note as it came (CHRD: its chord); the step stays open while a key or one of its MIDI
+ * notes is held (midi_owners), so a chord played on a controller is one step and letting go of it moves on */
+static void entry_note(track_t *t, step_t *st, uint32_t note, uint32_t add)
+{
+    uint8_t ch[CHORD_MAX];
+    int32_t r;
+    uint16_t mask;
+    uint32_t n, i, j;
+    if (!ui.entry_open) {
+        ui.entry_open = 1;
+        follow_hold();                                /* (1.6, #242) */
+        if (!add) {
+            st->n = 0;
+            st->time = ST_NOTE;
+        }
+    }
+    n = chord_make(t, note, ch, &r, &mask);        /* (CHRD OFF: the note alone; MONO: the root) */
+    if (add)
+        step_toggle(t, st, ch, n);
+    else if (t->p[P_VOICE]) {
+        st->note[0] = ch[0];
+        st->n = 1;
+    } else {
+        for (i = 0; i < n && st->n < 4u; i++) {
+            for (j = 0; j < st->n && st->note[j] != ch[i]; j++)
+                ;
+            if (j == st->n)
+                st->note[st->n++] = ch[i];
+        }
+    }
+    last_note = (uint8_t)note;
+}
+static void seq_entry(uint32_t pressed, const uint8_t *mn, uint32_t mk)
 {
     track_t *t = TSEL;
     step_t *st = &t->step[ui.cursor];
-    uint32_t k, add = (ui_prefs2 & (PREF_CHORD_ADD >> 16)) != 0u;
+    uint32_t k, note, add = (ui_prefs2 & (PREF_CHORD_ADD >> 16)) != 0u;
     for (k = 0; k < 27u; k++) {
-        uint8_t ch[CHORD_MAX];
-        int32_t r;
-        uint16_t mask;
-        uint32_t note, n, i, j;
         if (!((pressed >> k) & 1u))
             continue;
         note = kb_map(t, k);
         if (note == KB_SILENT)
             continue;
-        if (!ui.entry_open) {
-            ui.entry_open = 1;
-            follow_hold();                                /* (1.6, #242) */
-            if (!add) {
-                st->n = 0;
-                st->time = ST_NOTE;
-            }
-        }
-        n = chord_make(t, note, ch, &r, &mask);        /* (CHRD OFF: the note alone; MONO: the root) */
-        if (add)
-            step_toggle(t, st, ch, n);
-        else if (t->p[P_VOICE]) {
-            st->note[0] = ch[0];
-            st->n = 1;
-        } else {
-            for (i = 0; i < n && st->n < 4u; i++) {
-                for (j = 0; j < st->n && st->note[j] != ch[i]; j++)
-                    ;
-                if (j == st->n)
-                    st->note[st->n++] = ch[i];
-            }
-        }
-        last_note = (uint8_t)note;
+        entry_note(t, st, note, add);
     }
-    if (ui.entry_open && !(fm1_in.notes & ~kb_layer)) {
+    for (k = 0; k < mk; k++)
+        entry_note(t, st, mn[k], add);
+    if (ui.entry_open && !(fm1_in.notes & ~kb_layer) && !midi_owners[song.sel]) {
         if (add)
             ui.entry_open = 0;                          /* (ADD: the cursor stays) */
         else
@@ -1336,6 +1345,8 @@ static void ui_input(void)
     uint32_t oct;
     uint32_t lay, combo = 0, lytap, lkeys, glo, kq = 0;
     int32_t s, sel = 0, ks[4] = {0, 0, 0, 0};
+    uint8_t mn[MST_N];
+    uint32_t mk = mst_take(mn);                         /* (WaveLoop: MIDI IN's notes for step recording, every pass) */
     midi_take();                                        /* (MIDI IN notes: lights, SCREEN WAKE, AUTO SELECT's) */
     midi_pc_poll();                                     /* MIDI Program Change */
     wl_encoder();                                       /* WaveLoop: the Oxygen's encoder */
@@ -1593,8 +1604,8 @@ static void ui_input(void)
                                                          * only play, being on STEP writes nothing */
             ui.entry_open = 0;
         else if (!chain_busy())
-            seq_entry(notes);                           /* armed and stopped: step recording at the cursor */
-        else if (notes)
+            seq_entry(notes, mn, mk);                   /* armed and stopped: step recording at the cursor */
+        else if (notes || mk)
             ui_message("STOP TO EDIT");
     }
 

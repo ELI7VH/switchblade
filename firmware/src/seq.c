@@ -55,6 +55,34 @@ static volatile uint8_t midi_hint;       /* MIDI IN played track n - 1, which is
 static volatile uint8_t midi_seen;       /* 1.5.5 (#208): bit per track, a MIDI IN note-on played it since the UI last
                                           * looked (ui_input.c midi_follow: the track's light, AUTO SELECT;
                                           * ui.c scr_input: MENU > MIDI > SCREEN WAKE +MIDI) */
+/* WaveLoop: the MIDI IN note-ons that played the selected track (any channel ROUT gives it, channel 16 too), for SEQ >
+ * STEP's step recording as the keys (ui_input.c seq_entry). The audio ISR writes (midi_control.c midi_note_event_in),
+ * the main loop takes (mst_take) every pass, so none waits for a step entry that comes later; full: dropped. In the pool,
+ * as mod.c's pressure: not loose ISR data (its layout and cost stay) */
+#define MST_N 16u
+static volatile uint8_t mst_q[MST_N] __attribute__((section(".pool")));
+static volatile uint32_t mst_w __attribute__((section(".pool"))), mst_r __attribute__((section(".pool")));
+static void mst_push(uint32_t note)              /* (the audio ISR) */
+{
+    uint32_t w = mst_w;
+    if (w - mst_r >= MST_N)
+        return;
+    mst_q[w % MST_N] = (uint8_t)note;
+    RING_PUBLISH();
+    mst_w = w + 1u;
+}
+static uint32_t mst_take(uint8_t *out)           /* (the main loop) the notes since the last take, their count */
+{
+    uint32_t n = 0, r = mst_r;
+    while (r != mst_w && n < MST_N) {
+        RING_PUBLISH();
+        out[n++] = mst_q[r % MST_N];
+        r++;
+    }
+    RING_PUBLISH();
+    mst_r = r;
+    return n;
+}
 
 static uint32_t trk_index(const track_t *t) { return (uint32_t)(t - trk); }
 
