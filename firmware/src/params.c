@@ -17,6 +17,7 @@ static const char *const N_ADIR[] = {"UP", "DOWN", "PEND", "RAND"};
 static const char *const N_ABOUND[] = {"WRAP", "OCT"};
 static const char *const N_AROOT[] = {"OFF", "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
 static const char *const N_APAT[] = {"USER", "SHAYPE", "UP 4", "UPDOWN", "STABS", "OCT RUN", "PEDAL", "DRONE"};
+static const char *const N_AXOCT[] = {"-3", "-2", "-1", "0", "+1", "+2", "+3", 0};   /* P_AXOCT (F_INT, -3..3) */
 static const char *const N_DIV[] = {"1/4", "1/8", "1/16", "1/32", "8T", "16T", "1/2", "1/1", "2BAR", "4BAR"};
 /* the delay's TIME (G_DTIME): N_DIV's ten (their values kept), then 1.5.1's dotted ones appended (stored values:
  * append-only). A list of its own: ARP RATE, SEQ DIV and LFO SYNC keep N_DIV's ten (fx.c delay_samples) */
@@ -155,9 +156,10 @@ static const param_desc_t TP[P_COUNT] = {
  * every project and user preset saved before it holds the lane's old default 127 there (param_fit) */
 #define LANE(k) [P_RSV_LN + (k)] = PD("-", F_PCT, 0, 127, 127)
     [P_RSV_LN] = PE("CHOR", N_CHOR, 0),
-    LANE(1), LANE(4), LANE(5), LANE(6), LANE(7),
+    LANE(1), LANE(5), LANE(6), LANE(7),
     [P_AROOT] = PE("ROOT", N_AROOT, 0),           /* WaveLoop: the ARP's ROOT and PAT (core.h) */
     [P_APAT] = PE("PAT", N_APAT, 1),
+    [P_AXOCT] = {"OCT", F_INT, -3, 3, 0, N_AXOCT, 0},   /* WaveLoop: the ARP's notes up / down octaves (seq.c arp_fire) */
 #undef LANE
     [P_LSYNC] = PE("SYNC", N_LSYNC, 0),
     [P_LTRIG] = PE("TRIG", N_LTRIG, 0),
@@ -260,8 +262,8 @@ static int32_t param_fit(const param_desc_t *d, int32_t v)
         return d->def;          /* WAVE's WARP, in the slot that held TBL2 (0..8) up to Task 4.5: a stored 0..8 is WARP off, not the heaviest warp */
     if (d == &TP[P_RSV_LN] && (v < d->min || v > d->max))
         return d->def;          /* CHOR: the 127 every project and user preset saved before it holds in that reserved id means OFF, not "I+II" */
-    if ((d == &TP[P_AROOT] || d == &TP[P_APAT]) && (v < d->min || v > d->max))
-        return d->def;          /* WaveLoop: the ARP's ROOT and PAT, the same 127 (ROOT OFF; PAT SHAYPE, the pattern an older project gets) */
+    if ((d == &TP[P_AROOT] || d == &TP[P_APAT] || d == &TP[P_AXOCT]) && (v < d->min || v > d->max))
+        return d->def;          /* WaveLoop: the ARP's ROOT, PAT and OCT, the same 127 (ROOT OFF; PAT SHAYPE, the pattern an older project gets; OCT 0) */
     return clamp(v, d->min, d->max);
 }
 
@@ -464,7 +466,7 @@ static const page_t PAGES[] = {
     /* WaveLoop: the ARP is SHAYPE; its pattern's grid on every page (ui_graph.c graph_arp, ui_arp.c) */
     {"ARP", FAM_ARP, SC_TRACK, GR_ARP, {P_AMODE, P_APROB, P_ARATE, P_AOCT}},
     {"ARP 2", FAM_ARP, SC_TRACK, GR_ARP, {P_AORDER, P_AGATE, P_AHOLD, P_AROOT}},
-    {"ARP 3", FAM_ARP, SC_TRACK, GR_ARP, {P_APAT, P_ASWING, 0xFF, 0xFF}},
+    {"ARP 3", FAM_ARP, SC_TRACK, GR_ARP, {P_APAT, P_ASWING, P_AXOCT, 0xFF}},
     {"STEP", FAM_SEQ, SC_STEP, GR_ROLL, {0, 1, 2, 3}},
     {"DETAIL", FAM_SEQ, SC_STEP, GR_ROLL, {0, 1, 2, 3}},   /* 1.5.1 (#199): the cursor step's CHANCE RATCH NUDGE VEL
                                                              * (ui.c detail_on, ui_input.c sd_turn) */
@@ -514,6 +516,6 @@ static const param_desc_t *page_desc(const page_t *pg, uint32_t slot, int16_t **
  * and must restore the same parameters, or one preset's settings would carry into the next one's render */
 static int param_kept(uint32_t i)
 {
-    return i == P_LEVEL || i == P_PAN || i == P_MUTE || (i >= P_AMODE && i <= P_SGATE) || i == P_AROOT || i == P_APAT ||
+    return i == P_LEVEL || i == P_PAN || i == P_MUTE || (i >= P_AMODE && i <= P_SGATE) || i == P_AROOT || i == P_APAT || i == P_AXOCT ||
            (i >= P_SLCR && i <= P_SLDEPTH) || i == P_CHRD || i == P_VOIC || i == P_SQNT || i == P_MOUT;
 }

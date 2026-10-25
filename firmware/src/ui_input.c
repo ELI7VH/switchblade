@@ -298,7 +298,7 @@ static uint32_t key_leds(uint32_t *br)                 /* (*br: a layer's keys t
     if (br)
         *br = 0;
     c = name_on() && !ui.menu ? name_leds() : ui.layer ? layer_leds(br) :
-        arp_keys_on() ? (((fm1_in.notes & ~kb_layer) | play_leds()) & ~ARP_KEYS) | arp_leds() :   /* (ui_arp.c) */
+        arp_keys_on() ? (((fm1_in.notes & ~kb_layer) | play_leds()) & ~ARP_KEYS) | arp_leds() | op_leds(br) :   /* (ui_arp.c) */
                  (fm1_in.notes & ~kb_layer) | play_leds() | step_leds() | (song_keys_on() ? song_leds() : 0u);
     return c;
 }
@@ -317,28 +317,6 @@ static uint32_t key_leds(uint32_t *br)                 /* (*br: a layer's keys t
  * rest: the root's keys lit, the scale's at the mid level, the others glowing; the keys held and playing as ever
  * (lit, INV dark). Each picture is built off-line and copied one byte per column, the
  * glow first: an LED going from lit to dim never has a dark frame */
-/* WaveLoop: the OP shift's LEDs. On an ARP page OP1 is lit (its shift is there: ZOOM); OP1 held, OCT- / OCT+ light
- * where ZOOM out / in would do something (ash_subdivide on a copy of the pattern; nothing changes). Bit 0 OCT-, 1 OCT+,
- * bit 2 the page has the shift */
-static int op_held(uint32_t n);                        /* (ui_layer.c) */
-static uint32_t op_shift_leds(void)
-{
-    arp_pat_t c;
-    uint32_t in, steps, rate, out;
-    if (ui.home || ui.menu || ui.confirm || name_on() || cur_page()->graph != GR_ARP)
-        return 0;
-    out = 4u;
-    if (!op_held(1))
-        return out;
-    for (in = 0; in < 2u; in++) {
-        c = arp_pat[song.sel];
-        steps = arp_steps(TSEL);
-        rate = (uint32_t)clamp(TSEL->p[P_ARATE], 0, 7);
-        if (ash_subdivide(&c, &steps, &rate, (int)in) == AZ_OK)
-            out |= 1u << in;
-    }
-    return out;
-}
 static void ui_leds(void)
 {
     uint8_t nl[FM1_NCOL] = {0}, nd[FM1_NCOL] = {0}, own[FM1_NCOL] = {0}, nb[FM1_NCOL] = {0};
@@ -363,11 +341,8 @@ static void ui_leds(void)
         led_put(nb, panel.btn[layer_btn()], 1);
     led_put(nl, panel.btn[B_REC], song.rec != 0u && ui.layer != LAYER_REC);   /* (its layer: it breathes) */
     k = oct_leds();
-    if ((c = op_shift_leds()) != 0u) {                  /* WaveLoop: OP1 the ARP page's shift; held, the OCTs ZOOM */
-        led_put(nl, panel.btn[B_FX], 1);
-        if (op_held(1))
-            k = c & 3u;                                 /* (only the ways ZOOM can go; no breathing) */
-    }
+    if ((c = op_cur()) != 0u)                           /* WaveLoop: an OP key held on an ARP page: OCT- / OCT+ lit */
+        k = arp_op_leds(c);                             /* only where its shift can go (ui_arp.c; no breathing) */
     led_put(nl, panel.btn[B_OCTDN], (int)(k & 1u));
     led_put(nl, panel.btn[B_OCTUP], (int)((k >> 1) & 1u));
     led_put(nb, panel.btn[B_OCTUP], (int)(k & OCT_BREATH));
@@ -1191,7 +1166,7 @@ static uint32_t btn_hold(uint32_t *t0, uint32_t label, uint32_t now, int hold_ok
 /* the quick layers: ui_layer.c (included after this file) */
 static void layer_masks(void);
 static void layer_arm(uint32_t pressed, uint32_t now);
-static uint32_t op_shift(uint32_t pressed);           /* (WaveLoop: the OP keys as SHIFT, ui_layer.c) */
+static uint32_t op_shift(uint32_t pressed);           /* (WaveLoop: the OP keys as SHIFT on the ARP pages, ui_layer.c) */
 static uint32_t layer_held(void);
 static int layer_knobs_quiet(void);
 static uint32_t layer_gesture(uint32_t now, uint32_t combo);
@@ -1403,7 +1378,7 @@ static void ui_input(void)
     save = btn_hold(&ui.save_t0, B_SAVE, now, !ui.menu && !ui.confirm);   /* held: UNDO (ui.c undo_swap) */
     layer_lock_input(pressed);                          /* (#83: a button closes a locked layer) */
     layer_arm(pressed, now);
-    pressed = op_shift(pressed);                        /* WaveLoop: an OP held + a button: SHIFT's (ui_layer.c) */
+    pressed = op_shift(pressed);                        /* WaveLoop: an OP key held + OCT: SHIFT's (ui_layer.c) */
     if (((pressed >> panel.btn[B_REC]) & 1u) && ui.ly == LAYER_REC)
         ui.rec_t0 |= 2u;                                /* (REC is its layer's button now: its tap is layer_tap's) */
     layer_oct_open(pressed);                            /* (OCT± with a SET layer's button down: it opens now) */

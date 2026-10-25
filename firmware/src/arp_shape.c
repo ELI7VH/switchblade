@@ -248,3 +248,94 @@ static uint32_t ash_subdivide(arp_pat_t *p, uint32_t *steps, uint32_t *rate, int
     *rate = j;
     return AZ_OK;
 }
+/* shift(pattern, steps, by), the toy's rotate one step left (-1) or right (+1): a note over the end carries on from step
+ * 0 (two notes, the tail on step 0). First the two halves of a note split at the end are joined (a note ending on STEPS
+ * takes the first note of its row on step 0 not taken yet, when both fit in STEPS), so shifting back and forth loses
+ * nothing. The order: the notes as they were, each in place (a split one: its head, then its tail). 0: past ARP_NMAX
+ * notes (the toy has no limit), nothing changed */
+static int ash_shift(arp_pat_t *p, uint32_t steps, int32_t by)
+{
+    uint16_t out[ARP_NMAX];
+    uint8_t len[ARP_NMAX], head[ARP_NMAX];
+    uint32_t i, j, k = 0, n = p->n, s, r;
+    if (!steps || n > ARP_NMAX)
+        return 0;
+    for (i = 0; i < n; i++) {
+        len[i] = (uint8_t)ARP_LEN(p->note[i]);
+        head[i] = 0;
+    }
+    for (i = 0; i < n; i++) {
+        if (ARP_STEP(p->note[i]) + len[i] != steps)
+            continue;
+        for (j = 0; j < n; j++)                  /* (notes.find: the first, its length checked after) */
+            if (j != i && ARP_ROW(p->note[j]) == ARP_ROW(p->note[i]) && ARP_STEP(p->note[j]) == 0u && !head[j])
+                break;
+        if (j < n && len[i] + len[j] <= steps) {
+            head[j] = 1;
+            len[i] = (uint8_t)(len[i] + len[j]);
+        }
+    }
+    for (i = 0; i < n; i++) {
+        if (head[i])
+            continue;
+        r = ARP_ROW(p->note[i]);
+        s = (uint32_t)((((int32_t)ARP_STEP(p->note[i]) + by) % (int32_t)steps + (int32_t)steps) % (int32_t)steps);
+        if (k + (s + len[i] > steps ? 2u : 1u) > ARP_NMAX)
+            return 0;
+        if (s + len[i] <= steps) {
+            out[k++] = ARP_NOTE(s, r, len[i]);
+        } else {
+            out[k++] = ARP_NOTE(s, r, steps - s);
+            out[k++] = ARP_NOTE(0u, r, s + len[i] - steps);
+        }
+    }
+    for (i = 0; i < ARP_NMAX; i++)
+        p->note[i] = i < k ? out[i] : 0u;
+    p->n = (uint8_t)k;
+    return 1;
+}
+/* MIRROR in time: a note on step s, length l, goes to steps - s - l (the pattern played backwards; its own inverse) */
+static void ash_reverse(arp_pat_t *p, uint32_t steps)
+{
+    uint32_t i, s, l;
+    for (i = 0; i < p->n; i++) {
+        s = ARP_STEP(p->note[i]);
+        l = ARP_LEN(p->note[i]);
+        if (s >= steps)                          /* (never: ash_fit keeps every note inside STEPS) */
+            continue;
+        if (s + l > steps)
+            l = steps - s;
+        p->note[i] = ARP_NOTE(steps - s - l, ARP_ROW(p->note[i]), l);
+    }
+}
+/* MIRROR upside down: the rows the pattern uses turn over inside their own span (lowest + highest - r), so the shape
+ * keeps its place in the chord (a 4-row pattern on rows 1..4 stays on rows 1..4; its own inverse) */
+static void ash_flip(arp_pat_t *p)
+{
+    uint32_t i, lo = ARP_ROWS, hi = 0, r;
+    for (i = 0; i < p->n; i++) {
+        r = ARP_ROW(p->note[i]);
+        lo = r < lo ? r : lo;
+        hi = r > hi ? r : hi;
+    }
+    for (i = 0; i < p->n; i++)
+        p->note[i] = ARP_NOTE(ARP_STEP(p->note[i]), lo + hi - ARP_ROW(p->note[i]), ARP_LEN(p->note[i]));
+}
+/* the empty cells (a row on a step no note of that row lasts over) inside STEPS; with k < that count, the k-th of them
+ * (step by step, rows up) gets a note of length 1 (MUTATE +; the caller sees there is room). Returns the count */
+static uint32_t ash_empty(arp_pat_t *p, uint32_t steps, int32_t k)
+{
+    uint64_t occ[ARP_ROWS] = {0};
+    uint32_t i, s, r, n = 0;
+    for (i = 0; i < p->n; i++)
+        for (s = ARP_STEP(p->note[i]); s < ARP_STEP(p->note[i]) + ARP_LEN(p->note[i]) && s < 64u; s++)
+            occ[ARP_ROW(p->note[i])] |= (uint64_t)1 << s;
+    for (s = 0; s < steps; s++)
+        for (r = 0; r < ARP_ROWS; r++) {
+            if ((occ[r] >> s) & 1u)
+                continue;
+            if ((int32_t)n++ == k)
+                ash_paint(p, r, s, 1);
+        }
+    return n;
+}

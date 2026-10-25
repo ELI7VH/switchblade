@@ -82,8 +82,9 @@ The ARP button opens three pages, all showing the grid: 16 steps at a time aroun
 
 - **Move the cursor** with PRESETS (it goes round the pattern's STEPS).
 - **Write a note:** tap a row key at the cursor. The row keys are the white keys F3 to F4 (F3 is row 1, F4 is row 8).
-  Tap the key again to take the note away. On these pages the row keys and the black keys between them make no sound.
-  The keys above F4 still play, so you can hold a chord there while you edit.
+  Tap the key again to take the note away. On these pages the row keys and the black keys between them (OP1 to OP5,
+  below) make no sound and record nothing. The keys above F4 still play, F#4 (OP6) included, so you can hold a chord
+  there while you edit.
 - **Set a note's length:** hold its row key and turn any knob.
 - **EDIT** clears every note that starts on the cursor step.
 
@@ -91,7 +92,7 @@ The ARP button opens three pages, all showing the grid: 16 steps at a time aroun
 | --- | --- | --- | --- | --- |
 | ARP | ARP (on / off) | STEPS (1-64) | RATE (1/2 to 1/32, triplets included) | DIR (UP, DOWN, PEND, RAND) |
 | ARP 2 | BOUND (WRAP, OCT) | GATE (10-100 %) | HOLD | ROOT (OFF, C to B) |
-| ARP 3 | PAT (factory pattern) | SWING | | |
+| ARP 3 | PAT (factory pattern) | SWING | OCT (-3 to +3) | |
 
 - **BOUND:** when a row goes past the top of the chord, WRAP starts again from its lowest note. OCT carries on an
   octave up (or down).
@@ -101,25 +102,50 @@ The ARP button opens three pages, all showing the grid: 16 steps at a time aroun
 - **PAT** loads a pattern as you turn to it, with its STEPS and BOUND: SHAYPE (the default), UP 4, UPDOWN, STABS, OCT RUN,
   PEDAL, DRONE. Editing the pattern makes it USER.
 - **STEPS** made shorter removes the notes past the new end.
-- **ZOOM:** hold OP1 and press OCT+ to zoom in: STEPS and RATE double, and every note's step and length double with
-  them, so the pattern sounds the same with twice the steps to draw in (16 steps at 1/16 become 32 at 1/32). OCT- zooms
-  out: half the steps at half the rate. The cursor stays on the same place in the music, a playing arp carries on where
-  it is, and the screen shows the result (ZOOM 32 STEPS 1/32). It works on all three ARP pages, as often as you like
-  while OP1 stays down. When it can't, nothing changes and the screen says why: 64 STEPS MAX, 1/32 IS THE FASTEST,
-  1/2 IS THE SLOWEST, NO 1/32T RATE (from 1/16T), NO 1/2T RATE (from 1/4T), STEPS ARE ODD, or NOTE BETWEEN STEPS (a
-  note starts or ends on an odd step, so joining pairs would move it). This is the toy's x2 and /2 (`subdivide`);
+- **OCT** moves everything the ARP plays up or down by octaves (a note pushed past the top or bottom of MIDI is not
+  played). OP3 + OCT+ / OCT- sets it too.
+**The OP keys are SHIFT on the ARP pages.** The FM-1 prints OP1 to OP6 on its black keys from F#3 to F#4. On the ARP
+pages the first five (F#3, G#3, A#3, C#4, D#4, the black keys among the row keys) are shift keys: hold one and press
+OCT- or OCT+. They never sound, record or write a row there; press one and the screen says what it does. OCT's own
+octave does not change while an OP key is held. Press OCT as often as you like while the OP key stays down; both OCTs at
+once do nothing; two OP keys held, the lower one counts. F#4 (OP6) is a note as always, and on every other page all six
+are notes.
+
+| Hold | OCT- | OCT+ |
+| --- | --- | --- |
+| OP1 (F#3) ZOOM | zoom out: half the steps at half the rate | zoom in: twice the steps at twice the rate |
+| OP2 (G#3) SHIFT | the pattern one step left | the pattern one step right |
+| OP3 (A#3) OCTAVE | the ARP an octave down (to -3) | an octave up (to +3) |
+| OP4 (C#4) MIRROR | flip: the rows upside down | reverse: the pattern backwards in time |
+| OP5 (D#4) MUTATE | a random note goes | a note on a random empty cell |
+
+The five OP keys glow (breathing) on the ARP pages so you can find them; the one you hold lights fully, and OCT- and OCT+
+light only where that shift can go (ZOOM where it would zoom, SHIFT and MIRROR with notes, OCTAVE inside -3 to +3,
+MUTATE+ while there is an empty cell, MUTATE- while there is a note). Every one but OCTAVE is a pattern edit (PAT
+becomes USER), destructive like any other.
+
+- **ZOOM** (OP1): STEPS and RATE double, and every note's step and length double with them, so the pattern sounds the
+  same with twice the steps to draw in (16 steps at 1/16 become 32 at 1/32); zooming out halves them. The cursor stays
+  on the same place in the music, a playing arp carries on where it is, and the screen shows the result (ZOOM 32 STEPS
+  1/32). When it can't, nothing changes and the screen says why: 64 STEPS MAX, 1/32 IS THE FASTEST, 1/2 IS THE
+  SLOWEST, NO 1/32T RATE (from 1/16T), NO 1/2T RATE (from 1/4T), STEPS ARE ODD, or NOTE BETWEEN STEPS (a note starts
+  or ends on an odd step, so joining pairs would move it). This is the toy's x2 and /2 (`subdivide`);
   `tests/arp_shape_test.c` holds it to `tests/arp_zoom_vectors.h` (`node tools/arp_vectors.mjs --zoom <sequence.mjs>`),
   the toy's refusals included. The toy goes on to 1/64; RATE here stops at 1/32.
-
-**The OP keys are SHIFT.** The stock FM-1 prints OP1 to OP4 on the four buttons Switch Blade calls FX, SCL, ENV and
-LFO (left to right), so OP1 is FX, OP2 SCL, OP3 ENV, OP4 LFO. That is an assumption from the stock panel: if yours
-differs, it is one table (`OP_BTN` in `firmware/src/ui_layer.c`). Hold an OP and press another button for a shift
-function: that press belongs to the shift, so neither the OP's own action (its page, its quick layer) nor the other
-button's (OCT's octave) happens. Tap an OP alone and it does what it always did. OP1 + OCT+ / OCT- on the ARP pages is
-ZOOM (HELP shows it on ARP 2 as FX + OCT ZOOM); OP2 to OP4 are free for more.
+- **SHIFT** (OP2): the whole pattern moves one step, wrapping round STEPS; a note pushed over the end carries on from
+  step 1. A note split that way joins up again when you shift back, so back and forth loses nothing (SHIFT < / SHIFT >).
+  This is the toy's `shift`, held to `tests/arp_shift_vectors.h` (`node tools/arp_vectors.mjs --shift <sequence.mjs>`).
+  A split that would take the pattern past 62 notes says PATTERN FULL.
+- **OCTAVE** (OP3): ARP 3's OCT, one octave a press (ARP OCT +1); at the ends +3 OCT IS THE HIGHEST / -3 OCT IS THE
+  LOWEST. A setting, saved with the track, not an edit of the pattern.
+- **MIRROR** (OP4): reverse plays the pattern backwards (a note on step s, length l, moves to STEPS - s - l: REVERSED).
+  Flip turns the rows over inside the span the pattern uses (lowest + highest - row: FLIPPED), so a shape on rows 1-4
+  stays on rows 1-4 and keeps its place in the chord. Each undoes itself.
+- **MUTATE** (OP5): OCT+ writes a one-step note on a random row and step that is empty (+ NOTE; NO EMPTY CELL or
+  PATTERN FULL when it can't), OCT- takes a random note away (- NOTE; NO NOTES).
 
 The pattern and every ARP setting are saved with the project and the autosave, and come back exactly; a zoom is an
-edit like any other (PAT becomes USER). A project saved before this gets SHAYPE on every track. Its ARP stays on or off, and its rate, gate, HOLD and SWING carry over. The rest
+edit like any other (PAT becomes USER). A project saved before this gets SHAYPE on every track (and OCT 0). Its ARP stays on or off, and its rate, gate, HOLD and SWING carry over. The rest
 starts at the defaults. The core is a port of the web toy's `sequence.mjs`. `tests/arp_shape_test.c` checks it against
 `tests/arp_vectors.h`, which `node tools/arp_vectors.mjs <path to sequence.mjs>` writes from the toy itself.
 

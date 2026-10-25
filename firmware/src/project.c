@@ -162,6 +162,7 @@ static void proj_arp_migrate(int16_t *p)
     p[P_AORDER] = AB_WRAP;
     p[P_AROOT] = 0;
     p[P_APAT] = 1;
+    p[P_AXOCT] = 0;
 }
 static void proj_arp_unpack(proj_trk_t *t, const uint8_t *a)   /* a track's stored pattern (PROJ_ARP_OFF) */
 {

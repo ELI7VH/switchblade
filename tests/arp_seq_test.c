@@ -111,6 +111,7 @@ static track_t *setup(uint32_t pat, uint32_t dir, uint32_t rate, uint32_t gate, 
     t->p[P_ASWING] = 0;
     t->p[P_AHOLD] = 0;
     t->p[P_AROOT] = 0;
+    t->p[P_AXOCT] = 0;
     events_block(CTL);                               /* (the ISR sees ARP on) */
     cap_reset();
     return t;
@@ -267,6 +268,30 @@ static void edges(void)
     blks(4u * p / CTL);
     ok &= ncap == n && !t->arp_n;                    /* (steps 5..8 are rests: the arp is silent) */
     bad += check("SEQ > ARP: the sequenced chord is the arp's from PLAY; when it ends, nothing sounds or hangs", ok);
+
+    /* OCT (P_AXOCT, OP3 on the ARP pages): what the arp plays, octaves up or down; a note past 127 is not played */
+    {
+        static const uint8_t HI[3] = {110, 115, 120};
+        static const int8_t O[3] = {1, -1, 3};
+        uint32_t j;
+        ok = 1;
+        for (j = 0; j < 3u; j++) {
+            t = setup(0, AD_UP, 5, 75, 16);
+            t->p[P_AXOCT] = O[j];
+            chord_steps(t, j < 2u ? CEG : HI, 3, 0, 4, 90);
+            transport_req = 1;
+            blk1();
+            if (j < 2u)                              /* (SHAYPE step 1: rows 1 and 3, C + G) */
+                ok &= ncap == 2u && cap[0].pitch == 60 + 12 * O[j] && cap[1].pitch == 67 + 12 * O[j];
+            else                                     /* (110 + 36 and 120 + 36: past 127, neither) */
+                ok &= ncap == 0u;
+            transport_req = 2;
+            blks(2);
+            ok &= !cap_hanging();
+        }
+        t->p[P_AXOCT] = 0;
+        bad += check("SEQ > ARP: OCT +1 / -1 moves what the arp plays an octave (C+G -> C+G up / down); past 127: silent", ok);
+    }
 
     /* live notes join it: a MIDI note held (channel 1) is one more of the chord's places, gone again when let go */
     t = setup(factory("UP 4"), AD_UP, 5, 75, 16);

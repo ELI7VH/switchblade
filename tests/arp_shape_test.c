@@ -3,12 +3,15 @@
  * (tools/arp_vectors.mjs ran sequence.mjs on them) played through the C core, tick by tick as seq.c arp_fire plays it,
  * must give exactly the notes, steps and lengths the JS core gave, in its order. Then the toy's own unit tests
  * (sequence.test.mjs) as C, and the editing helpers. ZOOM (ash_subdivide) against the toy's subdivide on every case of
- * tests/arp_zoom_vectors.h (tools/arp_vectors.mjs --zoom), its refusals included. Run by tests/run_tests.sh. */
+ * tests/arp_zoom_vectors.h (tools/arp_vectors.mjs --zoom), its refusals included; SHIFT (ash_shift) against the toy's
+ * shift on every case of tests/arp_shift_vectors.h (--shift), in its order; MIRROR and MUTATE's helpers. Run by
+ * tests/run_tests.sh. */
 #include <stdio.h>
 #include <string.h>
 #include "arp_shape.c"
 #include "arp_vectors.h"
 #include "arp_zoom_vectors.h"
+#include "arp_shift_vectors.h"
 
 static uint32_t xs;
 static uint32_t xs_next(void)
@@ -84,6 +87,31 @@ static int zoom_vec(uint32_t k, int verbose)
                (unsigned)k, (unsigned)v->steps, (unsigned)v->rate, v->in ? "in" : "out", (unsigned)code,
                (unsigned)steps, (unsigned)rate, (unsigned)want, (unsigned)v->nsteps, (unsigned)v->nrate2);
     return ok;
+}
+
+/* SHIFT case k through ash_shift: exactly the toy's notes, in its order */
+static int shift_vec(uint32_t k, int verbose)
+{
+    const asv_t *v = &ASV[k];
+    arp_pat_t p;
+    int ok;
+    memset(&p, 0, sizeof p);
+    p.n = v->npat;
+    memcpy(p.note, v->pat, sizeof p.note);
+    ok = ash_shift(&p, v->steps, v->by) && p.n == v->nout && !memcmp(p.note, v->out, sizeof p.note);
+    if (!ok && verbose)
+        printf("arp:   shift case %u (%u steps, by %d): C %u notes, JS %u\n", (unsigned)k, (unsigned)v->steps, v->by,
+               (unsigned)p.n, (unsigned)v->nout);
+    return ok;
+}
+/* a pattern as cells (row r on step s: bit s of c[r]), the notes' lengths over them */
+static void cells(const arp_pat_t *p, uint64_t *c)
+{
+    uint32_t i, s;
+    memset(c, 0, 8u * sizeof *c);
+    for (i = 0; i < p->n; i++)
+        for (s = ARP_STEP(p->note[i]); s < ARP_STEP(p->note[i]) + ARP_LEN(p->note[i]); s++)
+            c[ARP_ROW(p->note[i])] |= (uint64_t)1 << s;
 }
 
 static int same(const uint8_t *a, uint32_t n, const uint8_t *b, uint32_t m) { return n == m && !memcmp(a, b, n); }
@@ -197,6 +225,80 @@ int main(void)
         rate = 3;
         ok &= ash_subdivide(&p, &steps, &rate, 0) == AZ_BETWEEN && !memcmp(&p, &was, sizeof p) && steps == 4u;
         check("ZOOM: SHAYPE in (8 steps 1/16) and out again exactly; 64 MAX, ODD, FASTEST, SLOWEST, no 1/2T 1/32T, BETWEEN", ok);
+    }
+    {   /* SHIFT: the toy's shift, case by case; right all the way round is where it started (as cells) */
+        uint32_t sbad = 0, nsplit = 0, njoin = 0, i, ok;
+        uint64_t c0[8], c1[8];
+        arp_pat_t p, was;
+        for (k = 0; k < ASV_N; k++) {
+            nsplit += ASV[k].nout > ASV[k].npat;
+            njoin += ASV[k].nout < ASV[k].npat;
+            if (!shift_vec(k, sbad < 5u))
+                sbad++;
+        }
+        snprintf(line, sizeof line, "SHIFT parity: %u cases (%u split a note at the end, %u joined one)", (unsigned)ASV_N,
+                 (unsigned)nsplit, (unsigned)njoin);
+        check(line, !sbad && nsplit > 0u && njoin > 0u);
+        ash_load(&p, 6);                             /* DRONE: a long note */
+        cells(&p, c0);
+        ok = 1;
+        for (i = 0; i < 4u; i++)
+            ok &= ash_shift(&p, 4, 1);
+        cells(&p, c1);
+        ok &= !memcmp(c0, c1, sizeof c0);
+        ash_load(&p, 6);
+        was = p;
+        ok &= ash_shift(&p, 4, 1) && ash_shift(&p, 4, -1) && p.n == was.n;
+        cells(&p, c1);
+        ok &= !memcmp(c0, c1, sizeof c0);
+        memset(&p, 0, sizeof p);                     /* (62 notes, 8 of them over the end with nothing on step 0 to */
+        for (i = 0; i < 8u; i++)                     /* join: shifted right they split, 70) */
+            p.note[p.n++] = ARP_NOTE(62u, i, 2);
+        for (i = 0; p.n < ARP_NMAX; i++)
+            p.note[p.n++] = ARP_NOTE(1u + i / 8u, i % 8u, 1);
+        was = p;
+        ok &= !ash_shift(&p, 64, 1) && !memcmp(&p, &was, sizeof p);
+        check("SHIFT: DRONE right 4 times round is DRONE; right and left loses nothing; past 62 notes: refused", ok);
+    }
+    {   /* MIRROR: reverse and flip, each its own inverse; MUTATE's empty cells */
+        arp_pat_t p, was;
+        uint32_t i, ok = 1, n;
+        ash_load(&p, 3);                             /* STABS, 8 steps: 0 3 6(2) */
+        was = p;
+        ash_reverse(&p, 8);
+        for (i = 0; i < p.n; i++)
+            ok &= ARP_STEP(p.note[i]) == 8u - ARP_STEP(was.note[i]) - ARP_LEN(was.note[i]) &&
+                  ARP_ROW(p.note[i]) == ARP_ROW(was.note[i]) && ARP_LEN(p.note[i]) == ARP_LEN(was.note[i]);
+        ash_reverse(&p, 8);
+        ok &= !memcmp(&p, &was, sizeof p);
+        check("MIRROR reverse: step s length l -> STEPS - s - l (STABS: 0 3 6 -> 7 4 0), twice is itself", ok);
+        ok = 1;
+        ash_load(&p, 1);                             /* UP 4: rows 0..3 */
+        was = p;
+        ash_flip(&p);
+        for (i = 0; i < p.n; i++)
+            ok &= ARP_ROW(p.note[i]) == 3u - ARP_ROW(was.note[i]) && ARP_STEP(p.note[i]) == ARP_STEP(was.note[i]);
+        ash_flip(&p);
+        ok &= !memcmp(&p, &was, sizeof p);
+        memset(&p, 0, sizeof p);
+        p.note[p.n++] = ARP_NOTE(0, 2, 1);
+        p.note[p.n++] = ARP_NOTE(1, 5, 1);
+        p.note[p.n++] = ARP_NOTE(2, 3, 1);
+        ash_flip(&p);
+        ok &= ARP_ROW(p.note[0]) == 5u && ARP_ROW(p.note[1]) == 2u && ARP_ROW(p.note[2]) == 4u;
+        check("MIRROR flip: the rows turn over inside their span (UP 4: 1..4 -> 4..1; rows 3..6 stay 3..6), twice is itself",
+              ok);
+        ash_load(&p, 0);                             /* SHAYPE, 4 steps: 8 notes of 32 cells */
+        ok = ash_empty(&p, 4, -1) == 24u && p.n == 8u;
+        n = ash_empty(&p, 4, 0);                     /* (the first: step 0, row 1) */
+        ok &= n == 24u && p.n == 9u && p.note[8] == ARP_NOTE(0, 1, 1) && ash_empty(&p, 4, -1) == 23u;
+        ash_load(&p, 6);                             /* DRONE: row 0 is one note over all 4 steps */
+        ok &= ash_empty(&p, 4, -1) == 32u - 6u;
+        memset(&p, 0, sizeof p);
+        for (i = 0; i < 8u; i++)
+            p.note[p.n++] = ARP_NOTE(0, i, 2);
+        ok &= ash_empty(&p, 2, -1) == 0u;
+        check("MUTATE: empty cells counted under long notes (SHAYPE 24, DRONE 26, full 0); the k-th gets a note", ok);
     }
     printf("arp: %s\n", fails ? "FAILED" : "all ok");
     return fails != 0;

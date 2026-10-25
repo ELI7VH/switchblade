@@ -8816,9 +8816,9 @@ static int test_arp_page(void)
     return bad;
 }
 
-/* WaveLoop: ZOOM on the ARP pages (ui_arp.c arp_zoom, ui_layer.c op_shift): OP1 (FX) held + OCT+ / OCT- is the toy's x2 /
- * /2: STEPS, RATE, every note's step and length, the cursor; FX's tap and OCT's octave do not happen; FX alone still
- * taps; the refusals say why and change nothing; a playing arp keeps its place; a project keeps the zoomed pattern */
+/* WaveLoop: ZOOM on the ARP pages (ui_arp.c arp_zoom, ui_layer.c op_shift): the OP1 key (F#3) held + OCT+ / OCT- is the
+ * toy's x2 / /2: STEPS, RATE, every note's step and length, the cursor; OCT's octave does not happen; FX is FX again; the
+ * refusals say why and change nothing; a playing arp keeps its place; a project keeps the zoomed pattern */
 static int test_arp_zoom(void)
 {
     int bad = 0, ok;
@@ -8833,31 +8833,33 @@ static int test_arp_zoom(void)
     frame();
     ash_load(&keep, 0);
     press(B_FX); frames(100);
-    bad += check("ZOOM: FX tapped alone on ARP still opens its page", str_eq(cur_page()->title, "FX"));
+    bad += check("ZOOM: FX tapped on ARP opens its page (FX is FX again)", str_eq(cur_page()->title, "FX"));
     go_page(GR_ARP); frame();
     turn(EN_PRESET, 3);
     oct = song.octave;
-    btn_down(B_FX); frame();
+    key_down(OP_KEY[0]); frame();
+    ok = msg_is("ZOOM: -OUT +IN") && !gates();
     press(B_OCTUP);
-    ok = t->p[P_APROB] == 8 && t->p[P_ARATE] == 5 && arp_cur() == 6u && msg_is("ZOOM 8 STEPS 1/16") &&
+    ok &= t->p[P_APROB] == 8 && t->p[P_ARATE] == 5 && arp_cur() == 6u && msg_is("ZOOM 8 STEPS 1/16") &&
          song.octave == oct && t->p[P_APAT] == 0 && arp_pat[0].n == keep.n;
     for (i = 0; i < keep.n; i++)
         ok &= arp_pat[0].note[i] == ARP_NOTE(ARP_STEP(keep.note[i]) * 2u, ARP_ROW(keep.note[i]), 2u);
-    btn_up(B_FX); frame(); frames(200);
-    bad += check("  FX held + OCT+: 8 STEPS 1/16, every note x2, cursor 4 -> 7, ZOOM 8 STEPS 1/16, no octave", ok);
-    bad += check("  .. and FX let go: no FX page, no map", str_eq(cur_page()->title, "ARP") && !ui.layer && !ui.ly);
-    btn_down(B_FX); frames(800);                     /* (held past HOLD: FX's map peeks) */
-    ok = ui.layer == LAYER_FX;
+    key_up(OP_KEY[0]); frame(); frames(200);
+    bad += check("  OP1 (F#3) silent, says ZOOM: -OUT +IN; held + OCT+: 8 STEPS 1/16, every note x2, cursor 4 -> 7, no octave",
+                 ok && !gates());
+    bad += check("  .. and OP1 let go: the page stays, no layer", str_eq(cur_page()->title, "ARP") && !ui.layer && !ui.ly);
+    key_down(OP_KEY[0]); frames(800);               /* (held a while: nothing else happens) */
+    ok = !ui.layer && !gates();
     press(B_OCTDN);
     ok &= t->p[P_APROB] == 4 && t->p[P_ARATE] == 3 && arp_cur() == 3u && !memcmp(&arp_pat[0], &keep, sizeof keep) &&
           song.octave == oct && !ui.layer && msg_is("ZOOM 4 STEPS 1/8");
     press(B_OCTUP); press(B_OCTDN);                 /* (still held: again, and back) */
     ok &= t->p[P_APROB] == 4 && !memcmp(&arp_pat[0], &keep, sizeof keep);
-    btn_up(B_FX); frames(200);
-    bad += check("  FX held past HOLD + OCT-: back to SHAYPE exactly, cursor 7 -> 4, the map closes; again while held",
+    key_up(OP_KEY[0]); frames(200);
+    bad += check("  OP1 held a while + OCT-: back to SHAYPE exactly, cursor 7 -> 4; again while held",
                  ok && str_eq(cur_page()->title, "ARP"));
     t->p[P_ARATE] = 7;
-    btn_down(B_FX); frame(); press(B_OCTUP);
+    key_down(OP_KEY[0]); frame(); press(B_OCTUP);
     ok = msg_is("1/32 IS THE FASTEST") && t->p[P_APROB] == 4 && t->p[P_ARATE] == 7;
     t->p[P_ARATE] = 0; press(B_OCTDN);
     ok &= msg_is("1/2 IS THE SLOWEST");
@@ -8871,7 +8873,7 @@ static int test_arp_zoom(void)
     ok &= msg_is("NO 1/2T RATE");
     t->p[P_ARATE] = 6; press(B_OCTUP);
     ok &= msg_is("NO 1/32T RATE") && song.octave == oct;
-    btn_up(B_FX); frames(200);
+    key_up(OP_KEY[0]); frames(200);
     bad += check("  refusals: 1/32 FASTEST, 1/2 SLOWEST, 64 STEPS MAX, STEPS ARE ODD, NOTE BETWEEN STEPS, no 1/2T 1/32T; "
                  "nothing changes", ok && str_eq(cur_page()->title, "ARP") && !memcmp(&arp_pat[0], &keep, sizeof keep));
     t->p[P_ARATE] = 3;
@@ -8880,13 +8882,13 @@ static int test_arp_zoom(void)
     t->arp_idx = 2u * 4u + 3u;                       /* (pass 3, step 4, three quarters in) */
     t->arp_pos = per * 3u / 4u;
     fm1_irq_on();
-    btn_down(B_FX); frame(); press(B_OCTUP);
+    key_down(OP_KEY[0]); frame(); press(B_OCTUP);
     ok = t->arp_idx == 2u * 8u + 7u && t->arp_pos == per * 3u / 4u - per / 2u;
     press(B_OCTDN);
     ok &= t->arp_idx == 2u * 4u + 3u && t->arp_pos == per * 3u / 4u;
-    btn_up(B_FX); frames(200);
+    key_up(OP_KEY[0]); frames(200);
     bad += check("  playing: the arp keeps its pass, step and place in it, in and out", ok);
-    btn_down(B_FX); frame(); press(B_OCTUP); btn_up(B_FX); frames(200);
+    key_down(OP_KEY[0]); frame(); press(B_OCTUP); key_up(OP_KEY[0]); frames(200);
     z = arp_pat[0];
     ok = !project_save(0);
     fm1_irq_off(); ash_load(&arp_pat[0], 6); fm1_irq_on();
@@ -8895,9 +8897,177 @@ static int test_arp_zoom(void)
     bad += check("  a project keeps the zoomed pattern, STEPS and RATE", ok && !memcmp(&arp_pat[0], &z, sizeof z) &&
                  t->p[P_APROB] == 8 && t->p[P_ARATE] == 5);
     go_home(); frame();
-    btn_down(B_FX); frame(); press(B_OCTUP); btn_up(B_FX); frames(200);
-    bad += check("  off the ARP pages FX + OCT+ is as before (the octave), no zoom",
-                 song.octave == oct + 1 && t->p[P_APROB] == 8 && !memcmp(&arp_pat[0], &z, sizeof z));
+    key_down(OP_KEY[0]); frame();
+    ok = gates() == 1u;
+    press(B_OCTUP); key_up(OP_KEY[0]); frames(200);
+    bad += check("  off the ARP pages F#3 plays and F#3 + OCT+ is as before (the octave), no zoom",
+                 ok && song.octave == oct + 1 && t->p[P_APROB] == 8 && !memcmp(&arp_pat[0], &z, sizeof z));
+    song.octave = oct;
+    return bad;
+}
+
+/* WaveLoop: the OP keys on the ARP pages (ui_arp.c OP_KEY, arp_op, arp_op_leds, op_leds; ui_layer.c op_shift): F#3 G#3
+ * A#3 C#4 D#4 are OP1..OP5, silent and never recorded there, each held + OCT- / OCT+ its shift (OP2 SHIFT, OP3 OCT, OP4
+ * MIRROR, OP5 MUTATE; OP1 ZOOM: test_arp_zoom); their LEDs breathe, one held lit, OCT- / OCT+ lit only where its shift
+ * can go; F#4 (OP6) plays; off the ARP pages they are notes, recorded as ever */
+static uint32_t notes_in(const track_t *t)
+{
+    uint32_t i, n = 0;
+    for (i = 0; i < NSTEP; i++)
+        n += t->step[i].time == ST_NOTE ? t->step[i].n : 0u;
+    return n;
+}
+static int test_arp_ops(void)
+{
+    int bad = 0, ok;
+    uint32_t i, br, c, n;
+    int32_t oct;
+    arp_pat_t want, keep;
+    track_t *t;
+    ui_power_on();
+    song.sel = 0;
+    t = TSEL;
+    go_page(GR_ARP);
+    frame();
+    ash_load(&keep, 0);
+    oct = song.octave;
+    c = key_leds(&br);
+    bad += check("ARP OPs: the five OP keys breathe (can be pressed), none lit; no OP, no OCT override",
+                 (br & OP_KEYS) == OP_KEYS && !(c & OP_KEYS) && OP_KEYS == (1u << 1 | 1u << 3 | 1u << 5 | 1u << 8 | 1u << 10) &&
+                 !op_cur());
+    /* OP2 SHIFT */
+    key_down(OP_KEY[1]); frame();
+    c = key_leds(&br);
+    ok = msg_is("SHIFT: -LEFT +RIGHT") && !gates() && op_cur() == 2u && ((c >> 3) & 1u) && !((br >> 3) & 1u) &&
+         ((br & OP_KEYS) == (OP_KEYS & ~(1u << 3))) && arp_op_leds(2) == 3u;
+    want = arp_pat[0];
+    ash_shift(&want, 4, 1);
+    press(B_OCTUP);
+    ok &= !memcmp(&arp_pat[0], &want, sizeof want) && msg_is("SHIFT >") && song.octave == oct && t->p[P_APAT] == 0;
+    ash_shift(&want, 4, -1);
+    press(B_OCTDN);
+    ok &= !memcmp(&arp_pat[0], &want, sizeof want) && msg_is("SHIFT <") && song.octave == oct;
+    btn_down(B_OCTDN); btn_down(B_OCTUP); frame(); btn_up(B_OCTDN); btn_up(B_OCTUP); frame();
+    ok &= !memcmp(&arp_pat[0], &want, sizeof want) && song.octave == oct;
+    key_up(OP_KEY[1]); frame();
+    bad += check("  OP2 (G#3) SHIFT: silent, lit, OCTs lit; OCT+ / OCT- the toy's shift right / left; both OCTs: nothing", ok);
+    fm1_irq_off(); arp_pat[0].n = 0; fm1_irq_on();
+    key_down(OP_KEY[1]); frame();
+    ok = arp_op_leds(2) == 0u;
+    press(B_OCTUP);
+    ok &= msg_is("NO NOTES") && song.octave == oct;
+    key_up(OP_KEY[1]); frame();
+    bad += check("  SHIFT with no notes: OCTs dark, NO NOTES, no octave", ok);
+    fm1_irq_off(); arp_pat[0] = keep; fm1_irq_on();
+    /* OP3 OCT */
+    key_down(OP_KEY[2]); frame();
+    n = (uint32_t)t->p[P_APAT];
+    ok = msg_is("OCTAVE: -DOWN +UP") && arp_op_leds(3) == 3u && t->p[P_AXOCT] == 0;
+    press(B_OCTUP);
+    ok &= t->p[P_AXOCT] == 1 && msg_is("ARP OCT +1");
+    press(B_OCTUP); press(B_OCTUP);
+    ok &= t->p[P_AXOCT] == 3 && arp_op_leds(3) == 1u;
+    press(B_OCTUP);
+    ok &= t->p[P_AXOCT] == 3 && msg_is("+3 OCT IS THE HIGHEST");
+    for (i = 0; i < 6u; i++)
+        press(B_OCTDN);
+    ok &= t->p[P_AXOCT] == -3 && msg_is("ARP OCT -3") && arp_op_leds(3) == 2u;
+    press(B_OCTDN);
+    ok &= t->p[P_AXOCT] == -3 && msg_is("-3 OCT IS THE LOWEST") && song.octave == oct;
+    press(B_OCTUP); press(B_OCTUP); press(B_OCTUP); press(B_OCTUP);
+    ok &= t->p[P_AXOCT] == 1 && !memcmp(&arp_pat[0], &keep, sizeof keep) && t->p[P_APAT] == (int16_t)n;
+    key_up(OP_KEY[2]); frame();
+    bad += check("  OP3 (A#3) OCT: +1 .. +3, -3, the ends say so and light only the way back; the pattern, PAT stay", ok);
+    ok = !project_save(0);
+    t->p[P_AXOCT] = 0;
+    project_load(0);
+    ok &= t->p[P_AXOCT] == 1;
+    t->p[P_AXOCT] = 127;
+    ok &= param_fit(&TP[P_AXOCT], 127) == 0;
+    t->p[P_AXOCT] = 0;
+    bad += check("  a project keeps OCT; an older project's 127 there reads 0", ok);
+    /* OP4 MIRROR */
+    key_down(OP_KEY[3]); frame();
+    ok = msg_is("MIRROR: -FLIP +REVERSE") && arp_op_leds(4) == 3u;
+    want = keep;
+    ash_reverse(&want, 4);
+    press(B_OCTUP);
+    ok &= !memcmp(&arp_pat[0], &want, sizeof want) && msg_is("REVERSED") && t->p[P_APAT] == 0;
+    press(B_OCTUP);
+    ok &= !memcmp(&arp_pat[0], &keep, sizeof keep);
+    want = keep;
+    ash_flip(&want);
+    press(B_OCTDN);
+    ok &= !memcmp(&arp_pat[0], &want, sizeof want) && msg_is("FLIPPED");
+    press(B_OCTDN);
+    ok &= !memcmp(&arp_pat[0], &keep, sizeof keep) && song.octave == oct;
+    fm1_irq_off(); arp_pat[0].n = 0; fm1_irq_on();
+    ok &= arp_op_leds(4) == 0u;
+    press(B_OCTDN);
+    ok &= msg_is("NO NOTES");
+    key_up(OP_KEY[3]); frame();
+    bad += check("  OP4 (C#4) MIRROR: OCT+ reversed, OCT- flipped, each twice is itself; no notes: dark, NO NOTES", ok);
+    /* OP5 MUTATE */
+    fm1_irq_off(); arp_pat[0] = keep; fm1_irq_on();
+    key_down(OP_KEY[4]); frame();
+    ok = msg_is("MUTATE: -NOTE +NOTE") && arp_op_leds(5) == 3u;
+    n = arp_pat[0].n;
+    press(B_OCTUP);
+    ok &= arp_pat[0].n == n + 1u && msg_is("+ NOTE") && ARP_LEN(arp_pat[0].note[n]) == 1u &&
+          ash_empty(&arp_pat[0], 4, -1) == 23u && t->p[P_APAT] == 0;
+    press(B_OCTDN); press(B_OCTDN);
+    ok &= arp_pat[0].n == n - 1u && msg_is("- NOTE") && song.octave == oct;
+    fm1_irq_off(); arp_pat[0].n = 0; fm1_irq_on();
+    ok &= arp_op_leds(5) == 2u;
+    press(B_OCTDN);
+    ok &= msg_is("NO NOTES") && arp_pat[0].n == 0u;
+    t->p[P_APROB] = 1;
+    for (i = 0; i < 8u; i++)
+        press(B_OCTUP);
+    ok &= arp_pat[0].n == 8u && arp_op_leds(5) == 1u;
+    press(B_OCTUP);
+    ok &= msg_is("NO EMPTY CELL") && arp_pat[0].n == 8u;
+    key_up(OP_KEY[4]); frame();
+    t->p[P_APROB] = 4;
+    bad += check("  OP5 (D#4) MUTATE: + a length-1 note on an empty cell, - a note; none: NO NOTES; every cell full: NO "
+                 "EMPTY CELL, OCT+ dark", ok);
+    /* the OCT LEDs while held, the held lowest of two */
+    fm1_irq_off(); arp_pat[0] = keep; fm1_irq_on();
+    key_down(OP_KEY[3]); key_down(OP_KEY[1]); frame();
+    ok = op_cur() == 2u;
+    key_up(OP_KEY[1]); key_up(OP_KEY[3]); frame();
+    t->p[P_ARATE] = 0;
+    key_down(OP_KEY[0]); frame();
+    ok &= arp_op_leds(1) == 2u;                      /* (1/2: in only) */
+    key_up(OP_KEY[0]); frame();
+    t->p[P_ARATE] = 3;
+    bad += check("  two OPs held: the lowest; ZOOM at 1/2 lights OCT+ only", ok);
+    /* never sound, never record on the ARP pages; on HOME they play and record */
+    song.rec = 1; song.playing = 1;
+    n = notes_in(t);
+    ok = 1;
+    for (i = 0; i < 5u; i++) {
+        key_down(OP_KEY[i]); frame();
+        ok &= !gates();
+        key_up(OP_KEY[i]); frame();
+    }
+    ok &= notes_in(t) == n && !memcmp(&arp_pat[0], &keep, sizeof keep);
+    key_down(13); frame();                           /* (F#4, OP6: a note) */
+    ok &= gates() == 1u;
+    key_up(13); frame();
+    bad += check("  on ARP the OP keys never sound or record, nor write a row; F#4 (OP6) plays", ok && notes_in(t) > n);
+    go_home(); frame();
+    n = notes_in(t);
+    key_down(OP_KEY[2]); frame();
+    ok = gates() == 1u && !op_cur();
+    c = key_leds(&br);
+    ok &= !(br & OP_KEYS);
+    press(B_OCTUP);
+    ok &= song.octave == oct + 1 && t->p[P_AXOCT] == 0;
+    key_up(OP_KEY[2]); frame();
+    song.octave = oct;
+    bad += check("  on HOME they are notes: A#3 sounds and records, no breathing, OCT+ the octave", ok && notes_in(t) > n);
+    song.rec = 0; song.playing = 0;
     return bad;
 }
 
@@ -9030,6 +9200,7 @@ int main(void)
     bad += test_knob_card();
     bad += test_arp_page();
     bad += test_arp_zoom();
+    bad += test_arp_ops();
 
     if (getenv("UI_SCREEN_DIR")) chain_screens(getenv("UI_SCREEN_DIR"));
     printf(bad ? "ui: %d FAILED\n" : "ui: all passed\n", bad);

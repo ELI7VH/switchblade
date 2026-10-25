@@ -387,8 +387,10 @@ static __attribute__((noinline)) void arp_fire(track_t *t, uint32_t period, int 
     j = ash_tick(&arp_pat[trk_index(t)], arp_steps(t), t->arp_idx, held, n, (uint32_t)t->p[P_AOCT],
                  (uint32_t)t->p[P_AORDER], rng, &ofs, pitch, len);
     t->arp_ofs = (int8_t)ofs;
-    for (i = 0; i < j; i++)
-        arp_play(t, pitch[i], period * len[i] / 100u * gate, vel);
+    ofs = 12 * t->p[P_AXOCT];                        /* WaveLoop: OCT (OP3 on the ARP pages), a note past 0..127 is not */
+    for (i = 0; i < j; i++)                          /* played (as the core's own, ash_resolve) */
+        if ((uint32_t)(pitch[i] + ofs) <= 127u)
+            arp_play(t, (uint32_t)(pitch[i] + ofs), period * len[i] / 100u * gate, vel);
 }
 
 /* the arp's block (arp_step: only while it sounds, is on or the transport plays). The chord gone, its notes end; with
