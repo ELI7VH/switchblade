@@ -192,6 +192,20 @@ static void hk_fill(uint32_t x, uint32_t y, uint32_t w, uint32_t h);
 /* STYLE LINE: the dividers drawn on the screen (ui_draw.c lcd_rule) while no later blit or fill covers them */
 static int16_t rules[32][4];
 static uint32_t nrules;
+/* a card over the page (WaveLoop's knob card, ui_draw.c draw_knob_card): the screen's texts and dividers under it covered
+ * on purpose */
+static void hk_cover(int32_t x0, int32_t y0, int32_t x1, int32_t y1)
+{
+    uint32_t i, k = 0;
+    for (i = 0; i < nscr; i++)
+        if (scr[i].x0 < x1 && x0 < scr[i].x1 && scr[i].y0 < y1 && y0 < scr[i].y1)
+            scr[i].flags |= 16u;
+    for (i = 0; i < nrules; i++)
+        if (!(rules[i][0] < x1 && x0 < rules[i][2] && rules[i][1] < y1 && y0 < rules[i][3]))
+            memcpy(rules[k++], rules[i], sizeof rules[i]);
+    nrules = k;
+}
+#define GFX_HOOK_COVER(x0, y0, x1, y1) hk_cover(x0, y0, x1, y1)
 static void hk_rule(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
 {
     if (nrules < 32u) {
@@ -666,6 +680,7 @@ enum { S_HOME, S_HOME_IDLE, S_MESSAGE, S_MESSAGE_KEY, S_PRESETS, S_PRESETS_NOFAV
        S_GLO_FILL, S_SEQ_EUCLID, S_SEQ_EUCLID_64, S_MENU_SELECT, S_PROJECT_ERASE, S_CONFIRM_ERASE_PROJ,
        S_TOOLS_CLEAN, S_CONFIRM_CLEAN, S_MENU_MIDI_TRACK, S_MENU_MIDI_TCH_UNUSED, S_MENU_MIDI_AUTO,
        S_HOME_BIG_STOPPED, S_MIXER_MIDI, S_EDIT_BIG_OBX, S_EDIT_BIG_WAVE, S_EDIT_BIG_ACID, S_EDIT_BIG_DRIFT,
+       S_HOME_CC, S_HOME_CC_LFO, S_HOME_CC_WAVE, S_HOME_CC_WHEEL, S_ENV_CC,
        S_COUNT };
 static const char *const S_NAME[S_COUNT] = {"home", "home_idle", "message", "message_key", "presets",
     "presets_nofav", "user", "phrases", "project", "tools", "song_empty", "song", "step", "auto_steps",
@@ -696,7 +711,7 @@ static const char *const S_NAME[S_COUNT] = {"home", "home_idle", "message", "mes
     "auto_cond", "layer_glo_fill", "layer_seq_euclid", "layer_seq_euclid_64", "menu_select", "project_erase",
     "confirm_erase_project", "tools_clean", "confirm_clean", "menu_midi_track", "menu_midi_channels_unused",
     "menu_midi_auto_select", "home_big_stopped", "mixer_midi", "edit_big_obx", "edit_big_wave", "edit_big_acid",
-    "edit_big_drift"};
+    "edit_big_drift", "home_cc", "home_cc_lfo", "home_cc_lfo_wave", "home_cc_wheel", "env_cc"};
 
 /* the STEP page's piano roll (ui_graph.c graph_roll) on track 1, stopped unless said: an empty pattern; ACID in
  * A minor; POLY chords (Am7 F C G, tied); a line with ties, slides and accents in C major; LEN 32 on its second
@@ -875,6 +890,7 @@ static void setup(int s)
 {
     memset(kb_chn, 0, sizeof kb_chn);               /* no key held (roll_playing holds one) */
     state();
+    ui.wl.on = 0; ui.wl.seq = wl_io[3];             /* (WaveLoop: no knob card left from the screen before) */
     switch (s) {
     case S_HOME: song.octave = 2; song.rec = 1; usb.config = 1; break;
     case S_HOME_IDLE: song.playing = 0; song.batt_raw = 570; ui.hot_col = 1; ui.hot_t = 30; break;
@@ -1120,6 +1136,13 @@ static void setup(int s)
     case S_EDIT_BIG_DRIFT:
         song.sel = 3; eng(ENGI_DRIFT); TSEL->p[P_E6] = 0; TSEL->p[P_E5] = 0; TSEL->p[P_ED_FLT] = -64; song.rec = 8u;
         go_title("EDIT"); break;
+    /* WaveLoop build: the knob card (ui_draw.c draw_knob_card) over HOME and a page: the Oxygen's knob 1 (CUTOFF), knob 6
+     * (LFO > FILTER, bipolar), knob 8 (LFO WAVE, a name), the mod wheel; fader 7 (SUSTAIN) over ENV */
+    case S_HOME_CC: midi_control(0, 74, 96); break;
+    case S_HOME_CC_LFO: midi_control(0, 77, 30); break;
+    case S_HOME_CC_WAVE: midi_control(0, 70, 127); break;
+    case S_HOME_CC_WHEEL: song.sel = 3; midi_control(3, 1, 100); break;
+    case S_ENV_CC: go_title("ENV"); midi_control(0, 79, 64); break;
     case S_EDIT_ANALOG: go_title("MACHINE 1"); break;
     case S_EDIT_WAVE: eng(ENGI_WAVE); go_title("MACHINE 1"); break;
     case S_CONFIRM_SEQ: ui.confirm = CF_CLEAR_SEQ; ui.confirm_trk = 2; break;

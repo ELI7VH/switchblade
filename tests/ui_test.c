@@ -8706,6 +8706,49 @@ static int test_no_flash(void)
     return bad;
 }
 
+/* WaveLoop build: the knob card. A MIDI knob (CC74) and an FM-1 knob (HOME's KNOB 2) each show it over the page; it goes
+ * KCARD_MS after the last move and leaves the page as a clean redraw draws it; a move keeps it up */
+static int kc_drawn(const uint16_t *shot)              /* rows of the card's place that differ from shot */
+{
+    uint32_t y, n = 0;
+    for (y = KCARD_Y; y < KCARD_Y + KCARD_H; y++)
+        n += memcmp(&host_screen[y * 240u + KCARD_X], &shot[y * 240u + KCARD_X], KCARD_W * 2u) != 0;
+    return (int)n;
+}
+static int test_knob_card(void)
+{
+    static uint16_t shot[240 * 240];
+    uint32_t i;
+    int bad = 0, ok;
+    ui_power_on();
+    go_home(); frame(); frame();
+    memcpy(shot, host_screen, sizeof shot);
+    midi_control(0, 74, 96);
+    frame();
+    bad += check("WaveLoop knob card: a CC74 turn draws it over HOME (T1 CUTOFF)", ui.wl.on && ui.wl.trk == 0u &&
+                 ui.wl.id == P_E4 && kc_drawn(shot) > 40 && str_eq(kc_name(&trk[0], ui.wl.id), "CUTOFF"));
+    for (i = 0; i < KCARD_MS / 16u - 10u; i++)
+        frame();
+    midi_control(0, 74, 90);                             /* (a move before it went: the time starts again) */
+    for (i = 0; i < 20u; i++)
+        frame();
+    ok = ui.wl.on && kc_drawn(shot) > 40;
+    for (i = 0; i < KCARD_MS / 16u + 4u; i++)
+        frame();
+    memcpy(shot, host_screen, sizeof shot);
+    ui.force = 1; ui_draw();
+    bad += check("  a move keeps it up; KCARD_MS after the last, gone: the page whole again (as a full redraw)",
+                 ok && !ui.wl.on && !memcmp(shot, host_screen, sizeof shot));
+    turn(EN_K2, 3);
+    frame();
+    ok = ui.wl.on && ui.wl.id == ENGINES[TSEL->eng_req]->knob[1] && ui.wl.v == TSEL->p[ui.wl.id] && kc_drawn(shot) > 40;
+    midi_control(0, 1, 127);
+    frame();
+    ok &= ui.wl.id == KC_WHEEL && ui.wl.v == 127;
+    frames(KCARD_MS + 100u);
+    bad += check("  the FM-1's own knob (HOME KNOB 2: RESONANCE) shows it too; the mod wheel (CC1) as VIBRATO", ok && !ui.wl.on);
+    return bad;
+}
 int main(void)
 {
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -8793,6 +8836,7 @@ int main(void)
     bad += test_help();
     bad += test_no_flash();
     bad += test_acid_flags();
+    bad += test_knob_card();
 
     if (getenv("UI_SCREEN_DIR")) chain_screens(getenv("UI_SCREEN_DIR"));
     printf(bad ? "ui: %d FAILED\n" : "ui: all passed\n", bad);

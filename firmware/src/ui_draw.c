@@ -1409,6 +1409,101 @@ static void style_apply(void)
     }
 }
 
+/* WaveLoop build: the knob card. A knob that moves a sound's parameter, a MIDI controller's on any page (midi_control.c
+ * kc_note: the CC map, MIDI LEARN, the mod wheel) or the FM-1's on HOME (ui.c kc_knob: KNOB 1..4, SELECT's VOLUME), shows
+ * a card over the middle of the page: the track and its machine, what the knob does in words, the value (L when the face has its
+ * glyphs, else M) with its unit, a bar (a bipolar one from its middle). It goes KCARD_MS after the last move: ui_draw_page
+ * notices that before it draws (a full redraw then gives the page back whole); drawn last in the frame, over the page.
+ * Not over the MENU, a dialog, NAME or a layer's map (they have the screen; the time runs on) */
+#define KCARD_MS 800u
+#define KCARD_X 16
+#define KCARD_W 208
+#define KCARD_Y 70
+#define KCARD_H 92
+static void kc_take(void)                               /* a new move noted (the ISR's bytes): the card shows it */
+{
+    if (wl_io[3] == ui.wl.seq)
+        return;
+    fm1_irq_off();
+    ui.wl.seq = wl_io[3];
+    ui.wl.trk = (uint8_t)(wl_io[4] % NTRK);
+    ui.wl.id = wl_io[5];
+    ui.wl.v = (int16_t)(wl_io[6] | wl_io[7] << 8);
+    fm1_irq_on();
+    ui.wl.t = fm1_ms;
+    ui.wl.on = 1;
+}
+static const char *kc_name(const track_t *t, uint32_t id)   /* what parameter id does, in words */
+{
+    static const struct { uint8_t id; const char *s; } N[] = {
+        {P_LEVEL, "VOLUME"}, {P_PAN, "PAN"}, {P_GLIDE, "GLIDE"}, {P_ATK, "ATTACK"}, {P_DEC, "DECAY"},
+        {P_SUS, "SUSTAIN"}, {P_REL, "RELEASE"}, {P_LRATE, "LFO RATE"}, {P_LWAVE, "LFO WAVE"},
+        {P_LD_FLT, "LFO > FILTER"}, {P_LD_AMP, "LFO > AMP"}, {P_LD_PIT, "LFO > PITCH"}, {P_LD_SHP, "LFO > SHAPE"},
+        {P_DIST, "DRIVE"}, {P_CHOR, "CHORUS"}, {P_DLY, "DELAY"}, {P_REV, "REVERB"},
+    };
+    const engine_t *e = ENGINES[t->eng_req % NENGINES];
+    uint32_t i;
+    for (i = 0; i < 4u; i++)                            /* EDIT's four, spelled out as HOME's cards spell them */
+        if (e->knob[i] == id)
+            return big_label(t, i);
+    for (i = 0; i < NELEM(N); i++)
+        if (N[i].id == id)
+            return N[i].s;
+    return track_desc(t, id)->label;
+}
+static void draw_knob_card(void)
+{
+    const track_t *t = &trk[ui.wl.trk % NTRK];
+    const aafont_t *vf = &AF_L, *nf = &AF_M;
+    const char *unit = "", *name;
+    char head[24], val[16];
+    int32_t lo = 0, hi = 127, v = ui.wl.v, w, x, bw = KCARD_W - 24, f0, f1;
+    if (!ui.wl.on || fm1_ms - ui.wl.t >= KCARD_MS)
+        return;
+    str_cpy(head, "T1 ", sizeof head);
+    head[1] = (char)('1' + ui.wl.trk % NTRK);
+    str_cpy(head + 3, ENGINES[t->eng_req % NENGINES]->name, sizeof head - 3);
+    if (ui.wl.id == KC_WHEEL) {                         /* the mod wheel: its vibrato (voice.c), as a share */
+        name = "MOD WHEEL VIBRATO";
+        fmt_int(val, (v * 100 + 63) / 127);
+        unit = "%";
+    } else if (ui.wl.id < P_COUNT) {
+        const param_desc_t *d = track_desc(t, ui.wl.id);
+        name = kc_name(t, ui.wl.id);
+        param_format(d, v, val, &unit);
+        lo = d->min;
+        hi = d->max;
+    } else {
+        return;
+    }
+    if (!large_face_has(val) || text_w(vf, val) > bw - 30)
+        vf = &AF_M;
+    if (text_w(nf, name) > bw)
+        nf = &AF_S;
+    cv_begin(KCARD_W, KCARD_H, T_BG);
+    if (ux.style)                                       /* LINE: no card, a 1 px rule round it (as the dialog) */
+        cv_rrect(0, 0, KCARD_W, KCARD_H, 8, T_RULE, T_BG);
+    cv_rrect(!!ux.style, !!ux.style, KCARD_W - 2 * !!ux.style, KCARD_H - 2 * !!ux.style, 8 - !!ux.style, T_SURF,
+             ux.style ? T_RULE : T_BG);
+    cv_text_in(0, 6, KCARD_W, &AF_S, head, T_MID, T_SURF);
+    cv_text_in(0, 22, KCARD_W, nf, name, T_TEXT, T_SURF);
+    w = text_w(vf, val) + (unit[0] ? 4 + text_w(&AF_S, unit) : 0);
+    x = (KCARD_W - w) / 2;
+    x = cv_text_on(x, vf == &AF_L ? 43 : 52, vf, val, T_THEME, T_SURF);
+    if (unit[0])
+        cv_text_on(x + 4, vf == &AF_L ? 59 : 55, &AF_S, unit, T_MID, T_SURF);
+    cv_rect(12, KCARD_H - 12, bw, 4, T_LINE);              /* the bar: from the bottom, a bipolar value from its middle */
+    if (hi > lo) {
+        int32_t p = (clamp(v, lo, hi) - lo) * bw / (hi - lo), z = lo < 0 && hi > 0 ? -lo * bw / (hi - lo) : 0;
+        f0 = p < z ? p : z;
+        f1 = p < z ? z : p;
+        if (f1 - f0 < 2)                                /* (at the middle: a mark) */
+            f1 = f0 + 2;
+        cv_rect(12 + f0, KCARD_H - 12, f1 - f0, 4, T_THEME);
+    }
+    GFX_HOOK_COVER(KCARD_X, KCARD_Y, KCARD_X + KCARD_W, KCARD_Y + KCARD_H);
+    cv_blit(KCARD_X, KCARD_Y);
+}
 static void ui_draw_page(uint32_t counting);
 static void ui_draw(void)
 {
@@ -1428,6 +1523,12 @@ static void ui_draw(void)
 }
 static void ui_draw_page(uint32_t counting)
 {
+    kc_take();                                          /* WaveLoop: the knob card */
+    if (ui.wl.on && fm1_ms - ui.wl.t >= KCARD_MS) {        /* .. its time is up: the page redrawn whole, before it is
+                                                         * drawn (after it, the frame's end would clear the force) */
+        ui.wl.on = 0;
+        ui.force = 1;
+    }
     if (ui.uboot) {
         draw_uboot();
         draw_head();
@@ -1499,5 +1600,6 @@ static void ui_draw_page(uint32_t counting)
         ui.help_t--;
     felucca_dbg.stage = 6;
     draw_foot();
+    draw_knob_card();                                   /* WaveLoop: over the page */
     ui.force = 0;
 }

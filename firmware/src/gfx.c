@@ -38,6 +38,9 @@ typedef struct { uint16_t off; uint8_t w; const char *label; } kc_t;
 #ifndef GFX_HOOKS
 #define GFX_HOOKS 1
 #endif
+#ifndef GFX_HOOK_COVER
+#define GFX_HOOK_COVER(x0, y0, x1, y1) ((void)0)   /* a card over the page (WaveLoop's knob card): what it hides, on purpose */
+#endif
 #ifndef GFX_HOOK_CELL
 #define GFX_HOOK_CELL(x0, y0, x1, y1) ((void)0)    /* a cell, card, row or button (cv_rrect): a box touching it lies inside it */
 #endif
