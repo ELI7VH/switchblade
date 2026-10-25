@@ -265,7 +265,7 @@ static int nudge(void)
     bad += check("  a note 0.7 of a step late (SWING 100): +7, the most", step_nudge(&t->step[0]) == 7);
     t = seq1(1);
     song.sel = 0; song.rec = 1;
-    t->p[P_AMODE] = 1;                               /* the ARP: what it plays, as it plays it */
+    t->p[P_AMODE] = 1;                               /* the ARP (WaveLoop): what is played, as it is played */
     seq_start();
     seq_tick(t, CTL);
     t->seq_pos = P16 / 2u - 8u;
@@ -273,7 +273,7 @@ static int nudge(void)
     arp_step(t, CTL, CTL);
     input_off(t, 60);
     seq_stop();
-    bad += check("  the ARP's notes recorded with their time too", t->step[0].note[0] == 60u && step_nudge(&t->step[0]) == 8 - 1);
+    bad += check("  the ARP on: the note played recorded with its time too", t->step[0].note[0] == 60u && step_nudge(&t->step[0]) == 8 - 1);
 
     /* playback: QUANTIZE ON plays every step on its start (as before); OFF plays the nudges */
     t = seq1(1);

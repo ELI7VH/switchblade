@@ -14,11 +14,11 @@ static const uint8_t ARP_ROWKEY[ARP_ROWS] = {0, 2, 4, 6, 7, 9, 11, 12};   /* row
 
 static int arp_keys_on(void) { return !ui.home && !ui.menu && !ui.confirm && !ui.layer && cur_page()->graph == GR_ARP; }
 static uint32_t arp_cur(void) { return ui.arp.cur % arp_steps(TSEL); }   /* (STEPS may have shrunk under it) */
-/* the step the selected track's arp plays now, -1 none (stopped: no chord, ARP off) */
+/* the step the selected track's arp plays now, -1 none (no chord, ARP off) */
 static int32_t arp_playing(void)
 {
     const track_t *t = TSEL;
-    if (!t->p[P_AMODE] || !t->nheld || t->arp_idx == 0xFFFFFFFFu)
+    if (!t->p[P_AMODE] || !arp_fed(t) || t->arp_idx == 0xFFFFFFFFu)   /* (keys, MIDI or the sequencer's chord) */
         return -1;
     return (int32_t)(t->arp_idx % arp_steps(t));
 }

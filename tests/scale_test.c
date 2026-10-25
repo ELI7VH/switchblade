@@ -86,7 +86,8 @@ static void key_events_test(void)
     t->p[P_AMODE] = 1;
     ash_load(&arp_pat[trk_index(t)], 1);    /* (WaveLoop: SHAYPE's UP 4) */
     t->p[P_APROB] = 4; t->p[P_AGATE] = 75;
-    song.playing = song.rec = 1;
+    song.rec = 1;
+    seq_start();                           /* (WaveLoop: the arp's grid from PLAY) */
     fm1_in.notes = 1u << 8;                /* C# is silent */
     keyboard_block();
     assert(t->arp_phys == 0 && t->nheld == 0 && t->step[0].n == 0 && mo_w == 0);
@@ -98,7 +99,7 @@ static void key_events_test(void)
     fm1_in.notes = (1u << 11) | (1u << 10); /* E and D#: only Eb sounds/records */
     keyboard_block();
     assert(t->arp_phys == 1 && t->nheld == 1 && t->held[0] == 63);
-    assert(t->step[0].n == 0);             /* ARP on: the arp's notes are recorded, not the keys */
+    assert(t->step[0].n == 1 && t->step[0].note[0] == 63);   /* WaveLoop: ARP on, the key played is recorded */
     arp_tick(t, 1);
     assert(t->step[0].n == 1 && t->step[0].note[0] == 63);
     assert(mo_w == 1 && ((midi_out_q[0] >> 16) & 127u) == 63);

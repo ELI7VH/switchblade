@@ -597,7 +597,7 @@ static int test_rec(void)
     frame();
     bad += check("#133 STEP, armed and stopped: the key writes the cursor step (and moves on)",
                  trk[0].step[0].n == 1 && ui.cursor == 1);
-    /* ARP: the arp's notes are recorded, not the key */
+    /* ARP (WaveLoop): the key played is recorded, not the arp's notes */
     ui_power_on();
     {
         track_t *t = &trk[0];
@@ -607,16 +607,16 @@ static int test_rec(void)
         t->p[P_AOCT] = 2;
         t->p[P_APROB] = 127;
         song.rec = 1;
-        song.playing = 1;
+        seq_start();
         input_on(t, 60, 100);
         for (i = 0; i < NSTEP; i++)
             n += t->step[i].n;
-        bad += check("ARP on: the key held is not recorded", n == 0);
+        bad += check("ARP on (WaveLoop): the key played is recorded", n == 1u);
         arp_tick(t, 1);
         for (i = 0; i < NSTEP; i++)
             if (t->step[i].n)
-                notes = t->step[i].note[0];
-        bad += check("ARP on: the note the arp plays is recorded", notes == 60u);
+                notes += t->step[i].n;
+        bad += check("ARP on (WaveLoop): what the arp plays is not", notes == 1u && t->arp_n != 0u);
         t->p[P_AMODE] = 0;
         input_off(t, 60);
     }

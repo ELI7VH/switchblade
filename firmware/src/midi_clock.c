@@ -57,6 +57,8 @@ static __attribute__((noinline)) void midi_clock_pulse(uint32_t ms)
                         trk[i].nd_late = (uint32_t)(((uint64_t)(trk[i].nd_late - 1u) * ratio + 2048u) >> 12) + 1u;
                     if (trk[i].nd_early)
                         trk[i].nd_early = (uint32_t)(((uint64_t)(trk[i].nd_early - 1u) * ratio + 2048u) >> 12) + 1u;
+                    if (trk[i].arp_pos < (uint32_t)FS * 2u)   /* (WaveLoop: the arp's grid is the song's: with it) */
+                        trk[i].arp_pos = (uint32_t)(((uint64_t)trk[i].arp_pos * ratio + 2048u) >> 12);
                 }
                 if (clk_pos < (uint32_t)FS * 2u)   /* (the metronome's beat as the steps) */
                     clk_pos = (uint32_t)(((uint64_t)clk_pos * ratio + 2048u) >> 12);

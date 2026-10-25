@@ -225,21 +225,30 @@ static int shape_arp(void)
     bad += check("  HOLD: the chord stays after the keys; a new one replaces it from the first step", ok && t->nheld == 3u);
     t->p[P_AHOLD] = 0;
     t->nheld = 0; arp_tick(t, CTL);
-    /* recording: the notes the arp plays are written, a step's chord into one step */
+    /* recording (WaveLoop): the chord played is written, not what the arp plays: C E G pressed into step 1, the arp
+     * stepping meanwhile (SHAYPE: C+G, E+C, ..), one step holds C E G and nothing else is written */
     song.sel = 0; song.rec = 1;
     t->p[P_VOICE] = V_POLY;
     for (i = 0; i < NSTEP; i++)
         t->step[i] = (step_t){0};
     seq_start();
     seq_tick(t, CTL);
-    fm1_irq_off(); ash_load(&arp_pat[0], 3); fm1_irq_on();   /* STABS: C E G together on step 1 */
-    arp_chord(t, CEG, 3);
-    arp_tick(t, CTL);
+    for (i = 0; i < 3u; i++)
+        input_on(t, CEG[i], 100);
+    for (k = 0; k < 3u * 5512u / CTL; k++) {           /* three steps of 1/16, the arp at 1/8 playing */
+        seq_tick(t, CTL);
+        arp_tick(t, CTL);
+    }
+    ok = t->arp_n != 0u;
+    for (i = 0; i < 3u; i++)
+        input_off(t, CEG[i]);
     for (i = 0, k = 0; i < NSTEP; i++)
-        k += t->step[i].n == 3u && t->step[i].note[0] == 60 && t->step[i].note[1] == 64 && t->step[i].note[2] == 67;
+        k += t->step[i].time == ST_NOTE && t->step[i].n;
+    ok &= k == 1u && t->step[0].n == 3u && t->step[0].note[0] == 60 && t->step[0].note[1] == 64 && t->step[0].note[2] == 67 &&
+          t->step[1].time == ST_TIE && t->step[2].time == ST_TIE;
     seq_stop();
     song.rec = 0;
-    bad += check("  recording: STABS' chord written into one step, C E G", k == 1u);
+    bad += check("  recording: the chord played (C E G) into one step, held as TIEs; not the arp's notes", ok);
     t->nheld = 0; t->p[P_AMODE] = 0; arp_tick(t, CTL);
     ash_load(&arp_pat[0], 0);
     return bad;

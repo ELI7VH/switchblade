@@ -185,7 +185,8 @@ static uint32_t play_leds(void)
 {
     const track_t *t = TSEL;
     uint8_t s[4 + ARP_SND];
-    uint32_t n = t->seq_n < 4u ? t->seq_n : 4u, i, k, note, used = 0, m = 0, hit, a = t->arp_n < ARP_SND ? t->arp_n : ARP_SND;
+    uint32_t n = t->seq_arp ? 0u : t->seq_n < 4u ? t->seq_n : 4u, i, k, note, used = 0, m = 0, hit;   /* (WaveLoop: */
+    uint32_t a = t->arp_n < ARP_SND ? t->arp_n : ARP_SND;                 /* the arp's chord sounds none of its own) */
     for (i = 0; i < n; i++)
         s[i] = t->seq_notes[i];
     for (i = 0; i < a; i++)                             /* (the ARP's: SHAYPE sounds several at once) */
