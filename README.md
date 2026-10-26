@@ -56,8 +56,17 @@ track like the others (the fader buttons, the encoder, PRESETS, EDIT + the fifth
 track 4 with the 808 kit, so the Oxygen's pads (channel 4) play drums at once. Projects saved before keep their machines.
 
 - **The kits** (PRESETS, or KNOB 1 KIT on MACHINE 1): 808 (the revoiced one, with a deeper kick and a fuller snare and
-  clap), CR78 (dry and woody: maracas, conga, claves), the eight Yama-bruh FM kits (YB STANDARD, ELECTRO, POWER, BRUSH,
-  ORCH, SYNTH, LATIN, LOFI), Felucca's own kit and the model kits 10, 66, 55 and 77.
+  clap), CR78 (dry and woody: maracas, conga, claves), 909 (below), the eight Yama-bruh FM kits (YB STANDARD, ELECTRO,
+  POWER, BRUSH, ORCH, SYNTH, LATIN, LOFI), Felucca's own kit and the model kits 10, 66, 55 and 77.
+- **909:** a synthesized TR-909, the 9W9 circuit models (kick, snare, three toms, rim, clap) with oscillator-and-noise
+  hats, crash and ride (no sample ROM: an approximation of those four). Eleven drums: the TOM place plays low, mid or high
+  tom by the note (41 / 43 low, 45 / 47 mid, 48 / 50 high), the BELL place is RIDE (51 ride, 49 crash), and each of the
+  eleven rings on its own voice. Its knobs: PITCH tunes the drum, DECAY its length, TONE the kick's click, the snare's
+  noise, the toms' stick and the rim's, clap's and cymbals' colour, SNAP the snare's snappy, the kick's pitch sweep, the
+  toms' bend, the clap's spread, the rim's noise and the cymbals' sizzle; LEVEL, PAN and SEND as on every kit. PITCH TONE
+  DECAY SNAP shape the next hit; LEVEL, PAN and SEND the sound as it rings. A 909 drum costs about three of the 808's
+  drums but less than a synth voice, and drums share the eight voices, so a busy 909 never costs more than the synths
+  playing alone would (`tests/drum_test.c` measures it). Projects saved before the 909 keep their kits.
 - **Eight drums:** KICK SNARE CLAP HATCL HATOP TOM RIM BELL (a kit may play another piece in a place: CR78's maracas on
   CLAP, congas, claves, a cymbal). A note plays its General MIDI drum: 36 kick, 38 snare, 39 clap, 42 closed hat, 46 open
   hat, the toms, 37 rim, 56 cowbell, cymbals, congas and claves too. On the FM-1's keys the first C is the kick (C KICK,

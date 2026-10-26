@@ -901,6 +901,7 @@ static int drum_part_fx(track_t *t, int32_t *b, int32_t *z, uint32_t n)
     uint32_t i, f = drum_bus, k = (uint32_t)(t - trk);
     (void)b;
     drum_bus = 0;
+    drum_block_end(t);                                  /* (KIT 909: the next block draws its own noise) */
     if (!f || ((pf.mute >> k) & 1u))
         return 0;
     if (f & 2u) {

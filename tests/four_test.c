@@ -16,8 +16,9 @@ static void test_engine_table(void)
           ENGINES[ENGI_DRUM]->knob[3] == P_E4, "DRUM K1..K4: PITCH TONE DECAY SNAP");
     CHECK(ENGINES[ENGI_DRUM]->ownenv == 1u && ENGINES[ENGI_DRUM]->poly == 8u && ENGINES[ENGI_DRUM]->part_fx,
           "DRUM: hits (own envelope), a voice per drum, its PAN / SEND stage");
-    CHECK(DRUM_MEM <= DRIFT_MEM, "DRUM's state %u in DRIFT's room %u (the pool does not grow)", (unsigned)DRUM_MEM,
-          (unsigned)DRIFT_MEM);
+    CHECK(DRUM_MEM - sizeof(d9_part_t) <= DRIFT_MEM && ENG_MEM_PART == DRUM_MEM,
+          "DRUM's lanes %u in DRIFT's room %u; KIT 909's state %u beside them: the region is DRUM's %u (the pool grows by the 909)",
+          (unsigned)(DRUM_MEM - sizeof(d9_part_t)), (unsigned)DRIFT_MEM, (unsigned)sizeof(d9_part_t), (unsigned)DRUM_MEM);
     for (e = 0; e < 4u; e++) {
         CHECK(strcmp(ENGINES[e]->name, NAME[e]) == 0, "engine %u is %s", (unsigned)e, ENGINES[e]->name);
         CHECK(ENGINES[e]->knob[0] == P_E4, "%s K1 not CUT", NAME[e]);
@@ -44,12 +45,12 @@ static void test_engine_table(void)
 static void test_presets(void)
 {
     uint32_t e, k;
-    {   /* DRUM: the 808 first (a new project's T4), then CR78, the eight Yama-bruh kits, Felucca's own and the model kits */
-        static const char *const N[15] = {"808", "CR78", "YB STANDARD", "YB ELECTRO", "YB POWER", "YB BRUSH", "YB ORCH",
+    {   /* DRUM: the 808 first (a new project's T4), then CR78, the 909, the eight Yama-bruh kits, Felucca's own and the model kits */
+        static const char *const N[16] = {"808", "CR78", "909", "YB STANDARD", "YB ELECTRO", "YB POWER", "YB BRUSH", "YB ORCH",
                                           "YB SYNTH", "YB LATIN", "YB LOFI", "FELUCCA KIT", "KIT 10", "KIT 66", "KIT 55", "KIT 77"};
         const engine_t *d = ENGINES[ENGI_DRUM];
-        CHECK(d->npresets == 15u, "DRUM has %u presets", d->npresets);
-        for (k = 0; k < d->npresets && k < 15u; k++) {
+        CHECK(d->npresets == 16u, "DRUM has %u presets", d->npresets);
+        for (k = 0; k < d->npresets && k < 16u; k++) {
             CHECK(strcmp(d->presets[k].name, N[k]) == 0 && d->presets[k].e[0] == (int8_t)k && !d->presets[k].mono,
                   "DRUM preset %u: %s, KIT %d", (unsigned)k, d->presets[k].name, d->presets[k].e[0]);
             CHECK(preset_cat(ENGI_DRUM, k) == CAT_DRUMS, "DRUM %s: DRUMS", d->presets[k].name);

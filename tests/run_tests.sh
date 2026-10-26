@@ -115,7 +115,10 @@
 # DRUM (tests/drum_test.c, WaveLoop): DRUM (eng_drum.c, drum_voice.c, drum_yama.c) through the voice and mix paths: every
 #                   kit's drums sound and end, 808 vs CR78, the GM map and the FM-1's keys, each drum shaped on its own (a
 #                   live hit picks it, the sequencer's do not; stored only where edited), a drum's PAN and SEND, no ARP on
-#                   a DRUM track, drums and synths sharing the eight voices.
+#                   a DRUM track, drums and synths sharing the eight voices. KIT 909 (x0x/drum909.c): its eleven drums sound
+#                   and end, the toms / ride / crash ring together, the choke, its PITCH DECAY LEVEL SNAP TONE; the cost
+#                   (macOS: instructions a sample, the mean and the dearest half) of a 16th pattern of n drums with 8 - n
+#                   JUNO voices, 808 against 909, the 909's dearest within the four-track worst the firmware carries.
 # OB-Z (tests/obx_test.c, tests/dspfft.h): the SEM-style filter morph on one voice (spectra through a plain FFT):
 #                   MODE 0 is the low-pass of before the morph bit for bit, MODE 32 notches at the cutoff, 64 passes
 #                   the highs, 96 is the band-pass, 120 the low-pass again and 127 the 4-pole; the crossfade between

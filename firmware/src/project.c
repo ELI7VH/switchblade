@@ -604,9 +604,12 @@ static int project_restore_runtime(const project_t *input)
             ash_load(&arp_pat[k], 0);
         {   /* WaveLoop: a DRUM track's drums (saved before: every drum the kit's, the values saved) */
             drum_st_t d;
-            if (e == ENGI_DRUM && drum_unpack(&d, s->drum))
+            int dv = e == ENGI_DRUM ? drum_unpack(&d, s->drum) : 0;
+            if (dv) {
+                if (dv == 1)                            /* (saved before KIT 909: its kit and sound as they are now) */
+                    drum_kit_v1(t);
                 drum_state_set(t, &d);
-            else
+            } else
                 drum_track_loaded(t);
         }
         t->arp_n = 0;                                   /* (its notes ended: transport_req, panic_req) */

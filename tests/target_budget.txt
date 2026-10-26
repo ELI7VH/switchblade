@@ -49,3 +49,11 @@ dv_yama_run 194
 dv_run 5
 dv_out 35
 dv_metal_mix 16
+d9_voice_render 121
+d9_noise_block 19
+d9_render_bd 208
+d9_render_sd 262
+d9_render_tom 2736
+d9_render_rim 4194
+d9_render_clap 171
+d9_render_smp 1432

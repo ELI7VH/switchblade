@@ -35,7 +35,10 @@ FUNCS = ["obx_render", "obx_render_f", "obx_render_p4", "obx_render_x",   # OB-Z
          "track_dist",                                      # the per-track DIST (fx.c, FX.1), while P_DIST is up
          "drum_render", "drum_place",                       # WaveLoop: DRUM (eng_drum.c): a drum's block, its PAN / SEND
          "dv_metal_run", "dv_kick_run", "dv_snare_run", "dv_clap_run", "dv_hat_run", "dv_tom_run",   # drum_voice.c
-         "dv_rim_run", "dv_bell_run", "dv_cym_run", "dv_yama_run", "dv_run", "dv_out", "dv_metal_mix"]
+         "dv_rim_run", "dv_bell_run", "dv_cym_run", "dv_yama_run", "dv_run", "dv_out", "dv_metal_mix",
+         "d9_voice_render", "d9_noise_block",               # DRUM's KIT 909 (eng_drum.c, x0x/drum909.c): a 909 drum's block, its
+         "d9_render_bd", "d9_render_sd", "d9_render_tom",   # noise, the voices (float: FPU opcodes are invisible to this count,
+         "d9_render_rim", "d9_render_clap", "d9_render_smp"]  # so it guards their loops' structure only; drum_test.c has the cost)
 OPTIONAL = {"uac_tap48": 504}  # (absent from a FELUCCA_UAC_48K=0 or FELUCCA_UAC=0 build)
 TOL = 0.10                      # exact (no noise): small edits pass, a grown render loop does not
 DIV_W = 8                       # a divide weighs 1 + 8 instructions

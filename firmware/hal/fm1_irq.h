@@ -71,6 +71,9 @@ static void fm1_irq_init(void)
      * and the build has some 300 divides by a register. Off, such a divide gives a value nobody uses; the cost:
      * a real divide by 0 gives a wrong value instead of a crash report (the host tests trap on one) */
     FM1_EMU_CON &= ~(1u << 2);
+    /* WaveLoop (DRUM's KIT 909, x0x/drum909.c, float): the FPU's exception traps off too (bits 16..20), as the x0x and
+     * Melodee firmware run (x0x/README.md): ordinary inexact / underflowing float arithmetic is expected, never a crash */
+    FM1_EMU_CON &= ~(31u << 16);
     FM1_ETM_CON |= 1u;                                      /* branch trace for the report */
 }
 

@@ -14,7 +14,7 @@
  * DV_NLANE on the track: drums are released at once (a hit ends itself, a key-up does nothing), so a synth's new note
  * takes a ringing drum's voice before any held note's.
  *
- * KIT (E0): 808 CR78, the Yama-bruh kits (YB ...), Felucca's own (STD) and the model kits 10 66 55 77. Each drum has
+ * KIT (E0): 808 CR78 909, the Yama-bruh kits (YB ...), Felucca's own (STD) and the model kits 10 66 55 77. Each drum has
  * its own PITCH (+-12 semitones), TONE, DECAY, SNAP (the drum's extra: the snare's snappiness, the hats' sizzle, the
  * toms' bend, the clap's spread, ...), LEVEL (100: as designed), PAN and SEND (its reverb, on top of the track's REV).
  * They are E1..E7: the track's p[P_E1..P_E7] always hold the PICKED drum's values (drum_st.focus), so every page,
@@ -35,23 +35,36 @@
  * The ARP does not play a DRUM track (seq.c events_block: ARP is off there).
  *
  * State: the eight lanes of a part in its engine memory (engines.c eng_mem, DRUM_MEM); the per-drum values in drum_st
- * (the project and the autosave keep them: project.c drum_pack). */
+ * (the project and the autosave keep them: project.c drum_pack).
+ *
+ * KIT 909 (DK_909): the 9W9 TR-909 voices (x0x/drum909.c: Charles Vestal's fm1-x0x 201e5c5, GPL-3.0; 9W9 by
+ * athousanddetails, after ER-99 by Matthew Cieplak), as the WaveLoop Melodee fork carries them: circuit-modelled BD SD
+ * LT MT HT RS CP, synthesized CH OH CR RD (oscillators and noise, no sample ROM). Float (the FPU, -mfprev1). Eleven
+ * drums on the eight lanes: a note strikes its 909 drum (drum909_ins: the toms by the note, 49 52 55 57 the crash, 51
+ * 53 56 59 the ride, on the BELL lane, named RIDE), each drum a voice of its own (d9_part_t.owner: the three toms, the
+ * ride and the crash ring together), a closed hat chokes the open one (drum909_trigger). A lane's PITCH TONE DECAY SNAP
+ * set its drums' 909 parameters at the hit (d9_values); LEVEL, PAN and SEND act on the sound as for every kit. The
+ * part's 909 noise is drawn once a block (d9_voice_render: the first 909 voice that renders; drum_block_end clears it). */
 #include "drum_voice.c"
+#include "x0x/drum909.c"                         /* KIT 909 (GPL-3.0: keep the notices in x0x/) */
 
 /* KIT values (E0), the order the knob shows them; each the Kit's model kit (DV_KIT: 0 80, 1 10, 2 66, 3 55, 4 77,
  * 5 CR78), Yama-bruh bank (0..7) or Felucca's own (STD) */
-enum { DK_808, DK_CR78, DK_YSTD, DK_YELEC, DK_YPOWER, DK_YBRUSH, DK_YORCH, DK_YSYNTH, DK_YLATIN, DK_YLOFI, DK_STD,
-       DK_10, DK_66, DK_55, DK_77, DK_COUNT };
-static const char *const N_DRUM_KIT[DK_COUNT] = {"808", "CR78", "YB STD", "YB ELEC", "YB PWR", "YB BRSH", "YB ORCH",
-                                                 "YB SYN", "YB LAT", "YB LOFI", "STD", "10", "66", "55", "77"};
+enum { DK_808, DK_CR78, DK_909, DK_YSTD, DK_YELEC, DK_YPOWER, DK_YBRUSH, DK_YORCH, DK_YSYNTH, DK_YLATIN, DK_YLOFI,
+       DK_STD, DK_10, DK_66, DK_55, DK_77, DK_COUNT };   /* (909 came in after CR78: drum_unpack's version 1 moves the
+                                                         * kits saved before it, project.c) */
+static const char *const N_DRUM_KIT[DK_COUNT] = {"808", "CR78", "909", "YB STD", "YB ELEC", "YB PWR", "YB BRSH",
+                                                 "YB ORCH", "YB SYN", "YB LAT", "YB LOFI", "STD", "10", "66", "55", "77"};
 #define DKP_STD 0u                               /* drum_kit_of: Felucca's own */
 #define DKP_MODEL 0x10u                          /* + the DV_KIT index */
 #define DKP_YAMA 0x20u                           /* + the Yama-bruh bank */
+#define DKP_909 0x30u                            /* the 909 (x0x/drum909.c): no lane voices */
 static const uint8_t DK_PLAYS[DK_COUNT] = {
-    DKP_MODEL + 0, DKP_MODEL + 5, DKP_YAMA + 0, DKP_YAMA + 1, DKP_YAMA + 2, DKP_YAMA + 3, DKP_YAMA + 4, DKP_YAMA + 5,
+    DKP_MODEL + 0, DKP_MODEL + 5, DKP_909, DKP_YAMA + 0, DKP_YAMA + 1, DKP_YAMA + 2, DKP_YAMA + 3, DKP_YAMA + 4, DKP_YAMA + 5,
     DKP_YAMA + 6, DKP_YAMA + 7, DKP_STD, DKP_MODEL + 1, DKP_MODEL + 2, DKP_MODEL + 3, DKP_MODEL + 4,
 };
 static uint32_t drum_kit_plays(int32_t v) { return DK_PLAYS[v >= 0 && v < DK_COUNT ? v : 0]; }
+static int drum_is909(const struct track *t) { return t->p[P_E0] == DK_909; }
 /* the model kits' pieces where a lane plays another than its own (DV_KIT order): 1 TOM -> CONGA, 2 RIM -> CLAVE,
  * 4 BELL -> CYM, 8 CLAP -> MARACAS */
 static const uint8_t DK_SWAP[DV_NKIT] = {0, 4, 1, 0, 2 | 4, 1 | 2 | 8};
@@ -107,6 +120,8 @@ static const char *drum_lane_name(const struct track *t, uint32_t l)
         return "CONGA";
     if (l == DV_RIM && (s & 2u))
         return "CLAVE";
+    if (l == DV_BELL && drum_is909(t))
+        return "RIDE";                                   /* (the 909's ride and crash: drum909_ins) */
     return (s & 4u) && l == DV_BELL ? "CYM" : N[l];
 }
 
@@ -188,15 +203,16 @@ static void drum_state_set(struct track *t, const drum_st_t *in)
     d->mask[d->focus] = 0;
 }
 
-/* stored with a DRUM track (project.c, in its ARP pattern's place: a DRUM track plays no ARP): 'D', version 1, then the
- * state; DRUM_PACKED bytes */
+/* stored with a DRUM track (project.c, in its ARP pattern's place: a DRUM track plays no ARP): 'D', version 2, then the
+ * state; DRUM_PACKED bytes. Version 1: saved before KIT 909 came in after CR78 (the kits from YB STD on one lower:
+ * project.c moves them, drum_kit_v1) */
 #define DRUM_MAGIC 'D'
 #define DRUM_PACKED (2u + 1u + DC_N + DV_NLANE + DV_NLANE * DC_N)
 static void drum_pack(const drum_st_t *d, uint8_t *b)
 {
     uint32_t l, c, k = 0;
     b[k++] = DRUM_MAGIC;
-    b[k++] = 1u;
+    b[k++] = 2u;
     b[k++] = d->focus;
     for (c = 0; c < DC_N; c++)
         b[k++] = (uint8_t)d->kit[c];
@@ -206,11 +222,11 @@ static void drum_pack(const drum_st_t *d, uint8_t *b)
         for (c = 0; c < DC_N; c++)
             b[k++] = (uint8_t)d->v[l][c];
 }
-/* 1: b is a stored state (into d) */
+/* b is a stored state (into d): its version (1, 2), else 0 */
 static int drum_unpack(drum_st_t *d, const uint8_t *b)
 {
     uint32_t l, c, k = 3;
-    if (b[0] != DRUM_MAGIC || b[1] != 1u || b[2] >= DV_NLANE)
+    if (b[0] != DRUM_MAGIC || b[1] < 1u || b[1] > 2u || b[2] >= DV_NLANE)
         return 0;
     d->focus = b[2];
     d->set = 1;
@@ -222,7 +238,15 @@ static int drum_unpack(drum_st_t *d, const uint8_t *b)
         for (c = 0; c < DC_N; c++)
             d->v[l][c] = (int8_t)b[k++];
     d->mask[d->focus] = 0;
-    return 1;
+    return b[1];
+}
+/* a DRUM track of a version-1 state (saved before KIT 909): its kit and its sound's index as they are now */
+static void drum_kit_v1(struct track *t)
+{
+    if (t->p[P_E0] >= DK_909 && t->p[P_E0] < DK_COUNT - 1)
+        t->p[P_E0]++;
+    if (t->preset >= DK_909 && t->preset < DK_COUNT - 1)
+        t->preset++;
 }
 
 /* ------------------------------------------------------------------ the voices --- */
@@ -239,11 +263,71 @@ typedef struct {
  * maracas), HATCL, HATOP, BELL (a cymbal); -1 none (such a drum there would be silent: no kit puts one there) */
 #define DRUM_NMB 4u
 static const int8_t DRUM_MB[DV_NLANE] = {-1, -1, 0, 1, 2, -1, -1, 3};
+/* KIT 909: the part's 909 (its eleven drums), each drum's voice and this block's noise */
 typedef struct {
-    drum_lane_t lane[DV_NLANE];
+    drum909_t d;
+    float *nz;                   /* this block's noise (d9_noise_block), 0: none drawn yet (drum_block_end) */
+    uint8_t owner[D9_NUM];       /* the voice playing each 909 drum: index + 1, 0 = none */
+    uint8_t ready;               /* d is set up (drum909_init; the region starts zeroed: eng_mem_claim) */
+} d9_part_t;
+typedef struct {
+    drum_lane_t lane[DV_NLANE];  /* (first: drum_mb_of) */
     dv_metal_t mb[DRUM_NMB];
+    d9_part_t d9;                /* (its own room beside the lanes: a kit switched, or locked per step, between the 909
+                                  * and another lets both ring out) */
 } drum_part_t;
-#define DRUM_MEM (sizeof(drum_part_t))           /* the part's engine memory: its eight lanes (in DRIFT's room) */
+#define DRUM_MEM (sizeof(drum_part_t))           /* the part's engine memory: its eight lanes and the 909 (the largest) */
+static d9_part_t *d9_of(const struct track *t)
+{
+    uint32_t p = (uint32_t)(t - trk);
+    d9_part_t *k;
+    if (p >= NPART)
+        return 0;
+    k = &((drum_part_t *)ENG_MEM(p))->d9;
+    if (!k->ready) {
+        drum909_init(&k->d);
+        k->ready = 1;
+    }
+    return k;
+}
+/* the 909 drum a note strikes (Melodee's drum909_ins): 49 52 55 57 the crash, 51 53 56 59 the ride; by its lane else, the
+ * toms by the note (below 45 LT, below 48 MT, HT) */
+static uint32_t drum909_ins(uint32_t note)
+{
+    if (note == 49u || note == 52u || note == 55u || note == 57u)
+        return D9_CR;
+    if (note == 51u || note == 53u || note == 59u || note == 56u)
+        return D9_RD;
+    switch (drum_lane(note)) {
+    case DV_KICK: return D9_BD;
+    case DV_SNARE: return D9_SD;
+    case DV_CLAP: return D9_CP;
+    case DV_HATC: return D9_CH;
+    case DV_HATO: return D9_OH;
+    case DV_RIM: return D9_RS;
+    default: return note < 45u ? D9_LT : note < 48u ? D9_MT : D9_HT;
+    }
+}
+/* 909 drum ins still sounding */
+static int drum909_live(const d9_part_t *k, uint32_t ins)
+{
+    if (ins <= D9_SD)
+        return k->d.bt[ins].mute > 0;
+    if (ins <= D9_HT)
+        return k->d.tom[ins - D9_LT].mute > 0;
+    if (ins == D9_RS)
+        return k->d.rim.mute > 0;
+    if (ins == D9_CP)
+        return k->d.clap.mute > 0;
+    return k->d.smp[ins - D9_CH].mute > 0;
+}
+/* the end of a DRUM part's block (fx.c drum_part_fx): the next block draws its own noise */
+static void drum_block_end(const struct track *t)
+{
+    uint32_t p = (uint32_t)(t - trk);
+    if (p < NPART)
+        ((drum_part_t *)ENG_MEM(p))->d9.nz = 0;
+}
 static drum_lane_t *drum_kit_of(const struct track *t)
 {
     uint32_t p = (uint32_t)(t - trk);
@@ -264,6 +348,90 @@ static drum_lane_t *drum_lane_of(const struct track *t, const voice_t *v)
     return L->owner == i + 1u ? L : 0;
 }
 
+/* KIT 909: drum ins's parameters for this hit from its lane's values (Melodee's drum909_values, on Switch Blade's
+ * per-drum controls), then the hit. Each 909 parameter starts at its 9W9 default (the panel's pots); PITCH moves the
+ * drum's tuning (+-12 semitones: the kick's sweep, the snare's two shells, the toms, the rim's and clap's filters, the
+ * metal's oscillators); DECAY its decays (x2 per 24 steps from 64); TONE (from 64) the kick's click and the toms' stick
+ * (ATTACK), the snare's noise (TONE), the rim's, clap's and metal's TUNE pot (their colour); SNAP (from 64) the snare's
+ * SNAPPY, the kick's pitch sweep (P.DPTH, above 64), the toms' bend, the clap's spread, the rim's noise, the metal's
+ * DRIVE (its sizzle). Velocity: the 909's own (its accent 2, velocity depth 1); LEVEL, PAN, SEND: d9_voice_render */
+static __attribute__((noinline)) void d9_values(const struct track *t, d9_part_t *k, uint32_t ins, uint32_t lane,
+                                                uint32_t vel)
+{
+    drum909_t *d = &k->d;
+    int32_t tone = drum_val(t, lane, DC_TONE) - 64, snap = drum_val(t, lane, DC_SNAP) - 64, j;
+    float ratio = fm_exp2f((float)clamp(drum_val(t, lane, DC_PITCH), -12, 12) * (1.0f / 12.0f));
+    float decay = fm_exp2f((float)(drum_val(t, lane, DC_DECAY) - 64) * (1.0f / 24.0f));
+    for (j = 0; j < d9_nspec[ins]; j++) {
+        const d9_pspec_t *sp = &d9_specs[ins][j];
+        int32_t value = sp->ui.def;
+        if (sp->field == D9_F_ATTACK || sp->field == D9_F_TONE || (ins >= D9_RS && sp->field == D9_F_TUNE))
+            value += tone;
+        if (sp->field == D9_F_SNAPPY || sp->field == D9_F_PDEPTH || (ins >= D9_CH && sp->field == D9_F_DRIVE))
+            value += snap;
+        d9_set_panel(d, (int)ins, (int)j, value, 1);     /* (deferred: the filters and shapes once, below) */
+    }
+    if (ins <= D9_HT) {
+        static const float DEC[5] = {1380.0f, 320.0f, 1700.0f, 1050.0f, 1100.0f};
+        d->bt[ins].decay = DEC[ins] * decay;
+        if (ins == D9_SD) {
+            d->bt[ins].tune *= ratio;
+            d->bt[ins].tune2 = 325.0f * ratio;
+            d->bt[ins].noise_decay = 1200.0f * fm_exp2f((float)tone * (1.0f / 24.0f)) * decay;
+        } else if (ins != D9_BD) {
+            d->bt[ins].tune *= ratio;
+            d->bt[ins].sweep_depth = 1.0f + 0.12f * fm_exp2f((float)snap * (1.0f / 32.0f));   /* the toms' bend */
+        }
+        d9_shape_prep(&d->bt[ins].shape, d->bt[ins].drive, d->bt[ins].dist_type);
+    } else if (ins == D9_RS) {
+        d->rim.tune *= ratio;
+        d9_rim_retune(&d->rim);
+        d9_shape_prep(&d->rim.shape, d->rim.drive, d->rim.dist_type);
+    } else if (ins == D9_CP) {
+        d->clap.tune *= ratio;
+        d->clap.tail_decay *= decay;
+        d->clap.spread = 12.0f * fm_exp2f((float)snap * (1.0f / 48.0f));
+        d9_clap_retune(&d->clap);
+        d9_shape_prep(&d->clap.shape, d->clap.drive, d->clap.dist_type);
+    } else {
+        d9_smp_t *m = &d->smp[ins - D9_CH];
+        m->pitch *= ratio;
+        m->decay *= decay;
+        d9_smp_rate(m);
+        d9_shape_prep(&m->shape, m->drive, m->dist_type);
+    }
+    drum909_trigger(d, (int)ins, (float)vel * (1.0f / 127.0f));
+    if (ins == D9_SD) {                                  /* (the trigger pins the snare's decay and the rim's: theirs again) */
+        d->bt[1].decay = 340.0f * decay;
+        d9_env_exp(&d->bt[1].amp, 0.00001f, d->bt[1].decay * D9_MS);
+        d->bt[1].mute = d9_ceil((d->bt[1].noise_decay + d->bt[1].decay + 60.0f) * D9_MS);
+    } else if (ins == D9_RS) {
+        d->rim.decay = 200.0f * decay;
+        d->rim.noise_mix = 0.35f * fm_exp2f((float)snap * (1.0f / 32.0f));
+        d9_env_exp(&d->rim.amp, 0.00001f, d->rim.decay * D9_MS);
+        d->rim.mute = d9_ceil((d->rim.decay + 20.0f) * D9_MS);
+    } else if (ins == D9_BD) {
+        d->bt[0].bd_base *= ratio;
+        d->bt[0].bd_df *= ratio;
+        d->bt[0].pitch.v *= ratio;
+    }
+}
+static void d9_note_on(struct track *t, voice_t *v, uint32_t lane)
+{
+    d9_part_t *k = d9_of(t);
+    uint32_t i = (uint32_t)(v - t->v), ins = drum909_ins(v->note), j;
+    if (!k)
+        return;
+    for (j = 0; j < D9_NUM; j++)                         /* this voice played another 909 drum: it stops there */
+        if (k->owner[j] == i + 1u)
+            k->owner[j] = 0;
+    k->owner[ins] = (uint8_t)(i + 1u);                   /* (its last voice, if another, ends: drum_done) */
+    v->s[0] = (int32_t)lane;
+    v->s[1] = (int32_t)ins + 1;                          /* a 909 voice (0: a lane's) */
+    v->env_out = 32767;                                  /* the hit starts at its level (the velocity is the 909's) */
+    d9_values(t, k, ins, lane, v->vel);
+}
+
 static void drum_note_on(struct track *t, voice_t *v)
 {
     drum_lane_t *K = drum_kit_of(t), *L;
@@ -272,10 +440,17 @@ static void drum_note_on(struct track *t, voice_t *v)
     if (!K || i >= NVOICE)
         return;
     lane = drum_lane(v->note);
-    role = drum_gm(t->p[P_E0], v->note, &st);
     L = &K[(uint32_t)v->s[0] & (DV_NLANE - 1u)];
     if (L->owner == i + 1u)                              /* this voice played another lane: it stops there */
         L->owner = 0;
+    if (drum_is909(t)) {                                 /* KIT 909: its own drums */
+        d9_note_on(t, v, lane);
+        if (!drum_seq)
+            drum_hit[(uint32_t)(t - trk) % NTRK] = (uint8_t)(lane + 1u);
+        return;
+    }
+    v->s[1] = 0;
+    role = drum_gm(t->p[P_E0], v->note, &st);
     L = &K[lane];
     if (L->role != role || L->v.type != dv_run_type(role)) {   /* another drum on this lane: from rest */
         dv_init(&L->v, role);
@@ -297,12 +472,19 @@ static void drum_note_on(struct track *t, voice_t *v)
 static int32_t drum_amp(const struct track *t, const voice_t *v)
 {
     (void)t;
-    return mulq15(32767, v->vel * 258);
+    return v->s[1] ? 32767 : mulq15(32767, v->vel * 258);   /* (KIT 909: the velocity is in the 909's hit) */
 }
-/* the voice is free once its drum has rung out (-84 dB), or another voice took its lane */
+/* the voice is free once its drum has rung out (-84 dB; the 909's: its mute count, -100 dB), or another voice took its
+ * lane (its 909 drum) */
 static int drum_done(const struct track *t, const voice_t *v)
 {
-    const drum_lane_t *L = drum_lane_of(t, v);
+    const drum_lane_t *L;
+    if (v->s[1]) {
+        uint32_t p = (uint32_t)(t - trk), ins = (uint32_t)v->s[1] - 1u;
+        const d9_part_t *k = p < NPART ? &((const drum_part_t *)ENG_MEM(p))->d9 : 0;
+        return !k || !k->ready || ins >= D9_NUM || k->owner[ins] != (uint32_t)(v - t->v) + 1u || !drum909_live(k, ins);
+    }
+    L = drum_lane_of(t, v);
     return !L || (!L->v.live && !L->v.trig);
 }
 
@@ -333,7 +515,47 @@ static __attribute__((noinline)) void drum_place(const int32_t *o, uint32_t n, i
     }
 }
 
-static void drum_render(struct track *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
+/* KIT 909: one block of the voice's 909 drum (drum909_render_voice: float), at its lane's LEVEL (100: 9W9's level), into
+ * the 32-bit path every drum takes (the knee, the voice's ramp, PAN and SEND as drum_render's) */
+static __attribute__((noinline)) void d9_voice_render(struct track *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
+{
+    uint32_t p = (uint32_t)(t - trk), ins = (uint32_t)v->s[1] - 1u, lane = (uint32_t)v->s[0] & (DV_NLANE - 1u), i;
+    d9_part_t *k = p < NPART ? &((drum_part_t *)ENG_MEM(p))->d9 : 0;
+    float f[CTL], g;
+    int32_t y[CTL], pan, snd;
+    if (!k || !k->ready || ins >= D9_NUM || k->owner[ins] != (uint32_t)(v - t->v) + 1u)
+        return;
+    if (n > CTL)
+        n = CTL;
+    if (!k->nz)                                          /* the part's noise, once a block (the first 909 voice) */
+        k->nz = d9_noise_block(&k->d, CTL);
+    for (i = 0; i < n; i++)
+        f[i] = 0.0f;
+    drum909_render_voice(&k->d, (int)ins, k->nz, f, (int)n);
+    g = (float)clamp(drum_val(t, lane, DC_LEVEL), 0, 127) * 120.0f;   /* (Melodee's 12000 at LEVEL 100) */
+    for (i = 0; i < n; i++)
+        y[i] = (int32_t)(fm_clampf(f[i], -2.0f, 2.0f) * g);
+    pan = drum_val(t, lane, DC_PAN);
+    snd = drum_val(t, lane, DC_SEND);
+    if (pan) {
+        int32_t gm = 4096 - (pan < 0 ? -pan : pan) * 32;
+        for (i = 0; i < n; i++) {
+            int32_t s = y[i];
+            y[i] = voice_amp(soft_knee(s + (s >> 2), 24000), m, i) << 1;
+            out[i] += (y[i] * gm) >> 12;
+        }
+    } else {
+        for (i = 0; i < n; i++) {
+            int32_t s = y[i];
+            y[i] = voice_amp(soft_knee(s + (s >> 2), 24000), m, i) << 1;
+            out[i] += y[i];
+        }
+    }
+    if (pan | snd)
+        drum_place(y, n, pan, snd);
+}
+
+static __attribute__((noinline)) void drum_render(struct track *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
 {
     drum_lane_t *L = drum_lane_of(t, v);
     dv_param_t k;
@@ -384,12 +606,21 @@ static void drum_render(struct track *t, voice_t *v, int32_t *out, uint32_t n, c
     if (pan | snd)
         drum_place(y, n, pan, snd);
 }
+/* engine_t.render: a lane's drum (drum_render, as before KIT 909) or a 909 drum (d9_voice_render) */
+static void drum_render_voice(struct track *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
+{
+    if (v->s[1])
+        d9_voice_render(t, v, out, n, m);
+    else
+        drum_render(t, v, out, n, m);
+}
 
 /* {KIT, PITCH, TONE, DECAY, SNAP, LEVEL, PAN, SEND}; every kit suggests the BEAT pattern (GM notes) */
 #define DRUM_E(kit) {(kit), 0, 64, 64, 64, 100, 0, 0}
 static const preset_t DRUM_PRESETS[] = {
     {"808", DRUM_E(DK_808), {0, 100, 127, 100}, 0, FX(0, 0, 0, 0), PAT(10)},   /* (a new project's T4: engines.c TRK_DEF) */
     {"CR78", DRUM_E(DK_CR78), {0, 100, 127, 100}, 0, FX(0, 0, 0, 0), PAT(10)},
+    {"909", DRUM_E(DK_909), {0, 100, 127, 100}, 0, FX(0, 0, 0, 0), PAT(10)},   /* (x0x/drum909.c: synthesized, float) */
     {"YB STANDARD", DRUM_E(DK_YSTD), {0, 100, 127, 100}, 0, FX(0, 0, 0, 0), PAT(10)},
     {"YB ELECTRO", DRUM_E(DK_YELEC), {0, 100, 127, 100}, 0, FX(0, 0, 0, 0), PAT(10)},
     {"YB POWER", DRUM_E(DK_YPOWER), {0, 100, 127, 100}, 0, FX(0, 0, 0, 0), PAT(10)},
@@ -425,7 +656,7 @@ static const engine_t ENG_DRUM = {
     .knob = {P_E1, P_E2, P_E3, P_E4},                    /* HOME: PITCH TONE DECAY SNAP of the picked drum */
     .poly = DV_NLANE,
     .note_on = drum_note_on,
-    .render = drum_render,
+    .render = drum_render_voice,
     .mem = DRUM_MEM,
     .ownenv = 1,
     .amp = drum_amp,

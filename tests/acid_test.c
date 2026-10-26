@@ -559,7 +559,7 @@ static void test_envelope_hooks(void)
         check(0, "amp() / done(): ACID has no own-envelope hooks (still the placeholder)");
         return;
     }
-    check(ACID_MEM == sizeof(acid_t) && ACID_MEM <= ENG_MEM_PART && ENG_MEM_PART <= (DRIFT_MEM > 800u ? DRIFT_MEM : 800u), "ACID: state %u bytes in the region of %u (ACID adds nothing to the pool: the region is WAVE's 800 or, since Task 6.2, DRIFT's voice + chorus)", (unsigned)ACID_MEM, (unsigned)ENG_MEM_PART);
+    check(ACID_MEM == sizeof(acid_t) && ACID_MEM <= ENG_MEM_PART && ENG_MEM_PART <= (DRIFT_MEM > 800u ? DRIFT_MEM : 800u) + (DRUM_MEM > DRIFT_MEM ? DRUM_MEM - DRIFT_MEM : 0u), "ACID: state %u bytes in the region of %u (ACID adds nothing to the pool: the region is WAVE's 800 or, since Task 6.2, DRIFT's voice + chorus; WaveLoop: DRUM's lanes + KIT 909)", (unsigned)ACID_MEM, (unsigned)ENG_MEM_PART);
     /* amp() in [0, 32767] across the corners (accent, drive, resonance, envelope depth, both waves, slide) */
     for (k = 0; k < 16u; k++) {
         acid_fresh();

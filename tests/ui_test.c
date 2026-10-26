@@ -3493,6 +3493,28 @@ static int screen_has_text(const char *s)            /* a big card drew s as its
             return 1;
     return 0;
 }
+/* WaveLoop: KIT 909 came in after CR78 (stored 2, the kits from YB STD on one higher): a project saved before it (its
+ * drums' 'D' area version 1, eng_drum.c drum_unpack) keeps the kit it had; one saved now (version 2) plays the 909 */
+static int test_drum_909_project(void)
+{
+    static project_t p;
+    int ok;
+    ui_power_on(); song.sel = 3; set_engine_of(TSEL, ENGI_DRUM); frame();
+    TSEL->p[P_E0] = 2;
+    TSEL->preset = 2;
+    project_capture(&p);
+    ok = p.t[3].drum[0] == 'D' && p.t[3].drum[1] == 2u;
+    ok &= project_restore_runtime(&p) == 0 && trk[3].p[P_E0] == DK_909 && trk[3].preset == 2u &&
+          !strcmp(drum_lane_name(&trk[3], DV_BELL), "RIDE");
+    p.t[3].drum[1] = 1u;                                 /* (as saved before the 909: 2 was YB STD) */
+    p.sum = proj_sum(&p);
+    ok &= project_restore_runtime(&p) == 0 && trk[3].p[P_E0] == DK_YSTD && trk[3].preset == DK_YSTD &&
+          str_eq(N_DRUM_KIT[trk[3].p[P_E0]], "YB STD");
+    p.t[3].p[P_E0] = 1;                                  /* CR78: the same either way */
+    p.sum = proj_sum(&p);
+    ok &= project_restore_runtime(&p) == 0 && trk[3].p[P_E0] == DK_CR78;
+    return check("DRUM: KIT 909 saved and loaded (version 2); a project of before it (version 1) keeps its kit, YB STD stays YB STD", ok);
+}
 static int test_edit_big(void)
 {
     static const char *const MLBL[NENGINES] = {"DETUNE", "POSITION", "DECAY", "DRIVE", "SNAP"};
@@ -9237,6 +9259,7 @@ int main(void)
     bad += test_step_rec();
     bad += test_step_preview_chord_entry();
     bad += test_presets_knob();
+    bad += test_drum_909_project();
     bad += test_midi();
     bad += test_save();
     bad += test_actions();
