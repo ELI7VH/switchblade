@@ -15,7 +15,8 @@
 #define ST_MAGIC 0x554C4546u                   /* "FELU" */
 #define ST_SECTOR 4096u
 #define ST_PAYLOAD_OFF 256u
-#define ST_PAYLOAD_MAX (ST_SECTOR - ST_PAYLOAD_OFF)
+#define ST_BASE_PAYLOAD (ST_SECTOR - ST_PAYLOAD_OFF)
+#define ST_PAYLOAD_MAX (ST_BASE_PAYLOAD + ST_SECTOR)
 
 /* flash map (FL_DATA 0x97000..0xDFFFF, FL_GLOB 0xFC000.., FL_AUTO 0xE5000..0xE6FFF): settings 0xFC000, projects
  * 0x97000..0x9EFFF, user preset banks 0xDC000..0xDFFFF (upreset.c); the autosave (project.c, 1.2): A 0xE5000,
@@ -79,6 +80,27 @@ static uint32_t st_sector(uint32_t obj, uint32_t copy)  /* flash offset of copy 
     return 0x97000u + (obj - OBJ_PROJECT0) * 2u * ST_SECTOR + copy * ST_SECTOR;
 }
 
+/* FOR5 extends project objects in the unused retired-sample range. Each old
+ * A/B base keeps its address; its extra sector is written before the base commit.
+ * Projects 0..3: B8000..BFFFF; autosave: C0000..C1FFF; songs: C2000..D9FFF.
+ * DC000 user banks, existing songs and all old commit records remain intact. */
+static int st_extended(uint32_t obj)
+{
+    return (obj >= OBJ_PROJECT0 && obj < OBJ_PROJECT0 + 4u) || obj == OBJ_AUTOSAVE ||
+           (obj >= OBJ_SONG0 && obj < OBJ_SONG0 + SL_N);
+}
+static uint32_t st_extra(uint32_t obj, uint32_t copy)
+{
+    uint32_t index = obj >= OBJ_SONG0 ? 5u + obj - OBJ_SONG0 :
+                     obj == OBJ_AUTOSAVE ? 4u : obj - OBJ_PROJECT0;
+    return 0xB8000u + (2u * index + copy) * ST_SECTOR;
+}
+static uint32_t st_payload_addr(uint32_t obj, uint32_t copy, uint32_t off)
+{
+    return off < ST_BASE_PAYLOAD ? st_sector(obj, copy) + ST_PAYLOAD_OFF + off :
+                                  st_extra(obj, copy) + off - ST_BASE_PAYLOAD;
+}
+
 static uint8_t st_buf[ST_PAYLOAD_MAX] __attribute__((aligned(4), section(".pool")));   /* (main loop only) */
 
 static int st_head(uint32_t obj, uint32_t copy, st_hdr_t *h)   /* commit record valid: 0 */
@@ -87,7 +109,7 @@ static int st_head(uint32_t obj, uint32_t copy, st_hdr_t *h)   /* commit record 
         return -1;
     if (st_read(st_sector(obj, copy), h, sizeof *h))
         return -1;
-    if (h->magic != ST_MAGIC || h->type != obj || h->slot != copy || h->len > ST_PAYLOAD_MAX ||
+    if (h->magic != ST_MAGIC || h->type != obj || h->slot != copy || h->len > (st_extended(obj) ? ST_PAYLOAD_MAX : ST_BASE_PAYLOAD) ||
         h->hcrc != st_crc32(h, sizeof *h - 4u))
         return -1;
     return 0;
@@ -95,8 +117,10 @@ static int st_head(uint32_t obj, uint32_t copy, st_hdr_t *h)   /* commit record 
 
 static int st_body(uint32_t obj, uint32_t copy, const st_hdr_t *h)   /* payload -> st_buf, CRC ok: 0 */
 {
-    if (st_read(st_sector(obj, copy) + ST_PAYLOAD_OFF, st_buf, h->len) || st_crc32(st_buf, h->len) != h->crc)
-        return -1;
+    uint32_t n = h->len > ST_BASE_PAYLOAD ? ST_BASE_PAYLOAD : h->len;
+    if (st_read(st_payload_addr(obj, copy, 0), st_buf, n)) return -1;
+    if (h->len > n && st_read(st_payload_addr(obj, copy, n), st_buf + n, h->len - n)) return -1;
+    if (st_crc32(st_buf, h->len) != h->crc) return -1;
     return 0;
 }
 
@@ -143,7 +167,7 @@ static int st_save_to(uint32_t obj, const void *src, uint32_t len, int to)
     uint32_t seq, base, off;
     int cur, rc;
     st_hdr_t h;
-    if (st_obj_bad(obj) || len > ST_PAYLOAD_MAX || to > 1)
+    if (st_obj_bad(obj) || len > (st_extended(obj) ? ST_PAYLOAD_MAX : ST_BASE_PAYLOAD) || to > 1)
         return -1;
     cur = st_current(obj, &h);
     seq = cur < 0 ? 0u : h.seq;
@@ -154,9 +178,10 @@ static int st_save_to(uint32_t obj, const void *src, uint32_t len, int to)
         st_buf[off] = ((const uint8_t *)src)[off];    /* the driver wants RAM sources */
     if ((rc = st_erase(base)) != 0)
         return rc;
+    if (len > ST_BASE_PAYLOAD && (rc = st_erase(st_extra(obj, (uint32_t)to))) != 0) return rc;
     for (off = 0; off < len; off += 256u) {
         uint32_t n = len - off > 256u ? 256u : len - off;
-        if ((rc = st_prog(base + ST_PAYLOAD_OFF + off, st_buf + off, n)) != 0)
+        if ((rc = st_prog(st_payload_addr(obj, (uint32_t)to, off), st_buf + off, n)) != 0)
             return rc;
     }
     h.magic = ST_MAGIC;

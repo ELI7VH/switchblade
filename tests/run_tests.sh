@@ -372,6 +372,10 @@ if [ -f build/gen/felucca_tables.h ]; then
     run "VOID instrumented: no table read out of range on a TYPE switch, no int32 overflow at the corners (VOWEL, LP24, WARP)" "$OUT/void_instr"
     $CC -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/four_test" tests/four_test.c -lm && "$OUT/four_test" || fail=1
     echo "== DRUM (WaveLoop): every kit's drums, the GM map and the keys, each drum its own, PAN / SEND, no ARP, the voice pool"
+    $CC -O1 -w -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/seq_128_test" tests/seq_128_test.c -lm
+    run "128 steps: high pages, recording, automation, legacy import and chain preparation" "$OUT/seq_128_test"
+    $CC -O1 -w -o "$OUT/storage_128_test" tests/storage_128_test.c
+    run "Extended project storage: every byte cut and corrupt-extension fallback" "$OUT/storage_128_test"
     $CC -O1 -w -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/seq_length_test" tests/seq_length_test.c -lm
     run "Sequence length choices: melodic and drum controls" "$OUT/seq_length_test"
     $CC -O1 -w -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/drum_seq_test" tests/drum_seq_test.c -lm

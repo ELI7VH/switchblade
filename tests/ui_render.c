@@ -2067,21 +2067,21 @@ int main(int argc, char **argv)
         nfind = 0;
     }
     {   /* WaveLoop's DRUM sequencer: the actual firmware drawing, including held-hit cards. */
-        uint32_t kit, large, held, i;
-        for (kit = 0; kit < 3; kit++) for (large = 0; large < 2; large++) for (held = 0; held < 2; held++) {
+        uint32_t kit, large, held, high, i;
+        for (high = 0; high < 2; high++) for (kit = 0; kit < 3; kit++) for (large = 0; large < 2; large++) for (held = 0; held < 2; held++) {
             char name[64];
-            snprintf(name, sizeof name, "drum_grid_%u_%u_%u", kit, large, held);
+            snprintf(name, sizeof name, "drum_grid_%u_%u_%u_%u", kit, large, held, high);
             cur_name = name;
             setup(S_STEP); eng(ENGI_DRUM); machine_mode();
             TSEL->p[P_E0] = kit;
-            track_defaults_steps(TSEL); TSEL->p[P_SLEN] = 64;
+            track_defaults_steps(TSEL); TSEL->p[P_SLEN] = high ? 128 : 64;
             for (i = 0; i < 16; i++) {
-                TSEL->step[i].time = ST_NOTE;
-                TSEL->step[i].hit = (uint8_t)(8u | (!(i % 4u) ? 1u : 0u) | (i % 8u == 4u ? 6u : 0u));
-                TSEL->step[i].acc = !(i % 4u) ? 1u : 0u;
+                TSEL->step[i + (high ? 112u : 0u)].time = ST_NOTE;
+                TSEL->step[i + (high ? 112u : 0u)].hit = (uint8_t)(8u | (!(i % 4u) ? 1u : 0u) | (i % 8u == 4u ? 6u : 0u));
+                TSEL->step[i + (high ? 112u : 0u)].acc = !(i % 4u) ? 1u : 0u;
             }
             drum_focus_set(TSEL, DV_SNARE);
-            ui.cursor = 4; ui.bank = 0; song.playing = 1; TSEL->seq_idx = 6;
+            ui.cursor = high ? 116 : 4; ui.bank = high ? 7 : 0; song.playing = 1; TSEL->seq_idx = high ? 118 : 6;
             dg.down = held ? 1u << 4 : 0u;
             if (large) ui_prefs |= PREF_LARGE; else ui_prefs &= ~PREF_LARGE;
             draw(S_STEP); lint(); write_ppm(out, "DRUM", name);

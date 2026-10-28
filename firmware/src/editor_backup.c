@@ -130,7 +130,7 @@ static uint32_t ed_bk_commit(void)
 /* a project object's length: FOR4's only (every Felucca length is refused) */
 static int proj_store_len(uint32_t len)
 {
-    return len == sizeof(project_store_t);
+    return len == sizeof(project_store_t) || len == 3840u;
 }
 static uint32_t ed_bk_write(const uint8_t *a, uint32_t n)
 {

@@ -598,19 +598,20 @@ static void cursor_move(int32_t c)
  * being entered on the roll (its note keys held). [EDIT]
  * tapped meanwhile clears the held steps' locks (EDIT alone still clears the step, its locks with it). Not while a
  * song plays (STOP TO EDIT). A lock is a motion record (motion.c): AUTOMATION's PLAY plays it, CLEAR clears it */
-static uint64_t lock_held(void)
+/* A melodic step hold addresses one cursor: 0 = none, otherwise step + 1 (up to 128). */
+static uint32_t lock_held(void)
 {
     const track_t *t = TSEL;
     uint32_t len = (uint32_t)t->p[P_SLEN], keys = fm1_in.notes & ~kb_layer;
     if (ui.home || ui.menu || ui.confirm || ui.layer || name_on() || !song.seq_mode || cur_page()->graph != GR_ROLL ||
         !keys || detail_on() || drum_grid_on())                           /* (DETAIL: its knobs are the step's own fields, sd_turn) */
         return 0;
-    return ui.entry_open && !live_rec_sel() && ui.cursor < len ? (uint64_t)1 << ui.cursor : 0u;
+    return ui.entry_open && !live_rec_sel() && ui.cursor < len ? ui.cursor + 1u : 0u;
 }
 
 /* KNOB k turned s with the steps `held` held: each gets (or changes) its lock of lock_id(k), from its lock or the
  * sound's own value */
-static void lock_turn(uint32_t k, int32_t s, uint64_t held)
+static void lock_turn(uint32_t k, int32_t s, uint32_t held)
 {
     track_t *t = TSEL;
     uint32_t id = lock_id(k), i;
@@ -626,7 +627,7 @@ static void lock_turn(uint32_t k, int32_t s, uint64_t held)
     motion_undo_take(t, 0x100u | k);                    /* (1.1.5: SAVE held takes the locks back) */
     for (i = 0; i < NSTEP; i++) {
         int16_t v;
-        if (!((held >> i) & 1u))
+        if (!(held == i + 1u))
             continue;
         if (!motion_lock_get(t, i, id, &v))
             v = motion_base_value(t, id);
@@ -637,16 +638,16 @@ static void lock_turn(uint32_t k, int32_t s, uint64_t held)
 }
 
 /* [EDIT] with the steps `held` held: their locks go */
-static void lock_clear(uint64_t held)
+static void lock_clear(uint32_t held)
 {
     uint32_t i, n = 0;
-    if (!(motion_lock_steps(song.sel) & held)) {
+    if (!held || !((motion_lock_steps_from(song.sel, (held - 1u) & ~63u) >> ((held - 1u) & 63u)) & 1u)) {
         ui_message("NO LOCKS");
         return;
     }
     motion_undo_take(TSEL, 0);                          /* (1.1.5: SAVE held brings them back) */
     for (i = 0; i < NSTEP; i++)
-        if ((held >> i) & 1u)
+        if (held == i + 1u)
             n += motion_clear_locks(TSEL, i);
     motion_undo_done(TSEL);
     ui_message(n ? "LOCKS CLEARED" : "NO LOCKS");
@@ -657,7 +658,7 @@ static void lock_clear(uint64_t held)
  * PRESETS moves the cursor again (MENU > STEP PREVIEW: it sounds). SEQ > AUTOMATION's NUDGE rows (ui_events.c) are the
  * other way. They play with the track's QUANTIZE OFF (AUTOMATION's QUANTIZE row; ON, the default, plays every step on
  * its start: the message says so). One undo per turn (SAVE held), as AUTOMATION's */
-static void nudge_turn(uint64_t held, int32_t steps)
+static void nudge_turn(uint32_t held, int32_t steps)
 {
     uint32_t i;
     int32_t v = 0;
@@ -668,7 +669,7 @@ static void nudge_turn(uint64_t held, int32_t steps)
     }
     step_undo_take(TSEL, 0x800u);                       /* (a knob turned on: one) */
     for (i = 0; i < NSTEP; i++)
-        if ((held >> i) & 1u) {
+        if (held == i + 1u) {
             v = clamp(step_nudge(&TSEL->step[i]) + (steps > 0 ? 1 : -1), -8, 7);
             step_set_nudge(&TSEL->step[i], v);
         }
@@ -687,23 +688,23 @@ static void nudge_turn(uint64_t held, int32_t steps)
  * ev_sput: one storage, nothing new stored; back at its default a field is no row there). A step that plays nothing
  * takes none (sd_takes: NO NOTE).
  * One undo per knob gesture on a step (SAVE held): walking to the next step starts another */
-static uint64_t sd_steps(void) { return (uint64_t)1 << ui.cursor; }
+static uint32_t sd_steps(void) { return ui.cursor + 1u; }
 static void sd_turn(uint32_t slot, int32_t steps)
 {
     track_t *t = TSEL;
     uint32_t k = SD_KIND[slot & 3u], i, n = 0;
-    uint64_t m = sd_steps();
+    uint32_t m = sd_steps();
     int32_t d = k == EVK_CHANCE ? accel(EN_K1 + slot, steps, 100) : k == EVK_VEL ? accel(EN_K1 + slot, steps, 126) : steps;
     for (i = 0; i < NSTEP; i++)
-        n += ((m >> i) & 1u) && sd_takes(&t->step[i], k);
+        n += (m == i + 1u) && sd_takes(&t->step[i], k);
     if (!n) {
         ui_message("NO NOTE");
         return;
     }
-    step_undo_take(t, 0x4000u | slot << 6 | ui.cursor);   /* (this knob on this step: one undo) */
+    step_undo_take(t, 0x4000u | slot << STEP_BITS | ui.cursor);   /* (this knob on this step: one undo) */
     for (i = 0; i < NSTEP; i++) {
         int32_t v;
-        if (!((m >> i) & 1u) || !sd_takes(&t->step[i], k))
+        if (!(m == i + 1u) || !sd_takes(&t->step[i], k))
             continue;
         v = ev_sval(&t->step[i], k);
         v = k == EVK_CHANCE ? ev_chance_turn(v, steps, d) : k == EVK_RATCH ? clamp(v + d, 1, 4) :
@@ -720,18 +721,18 @@ static void sd_turn(uint32_t slot, int32_t steps)
 static void sd_reset(void)
 {
     track_t *t = TSEL;
-    uint64_t m = sd_steps();
+    uint32_t m = sd_steps();
     uint32_t i, k, n = 0;
     for (i = 0; i < NSTEP; i++)
         for (k = 0; k < 4u; k++)
-            n += ((m >> i) & 1u) && ev_sval(&t->step[i], SD_KIND[k]) != ev_sdefv(SD_KIND[k]);
+            n += (m == i + 1u) && ev_sval(&t->step[i], SD_KIND[k]) != ev_sdefv(SD_KIND[k]);
     if (!n) {
         ui_message("NOTHING TO RESET");
         return;
     }
     step_undo_take(t, 0);
     for (i = 0; i < NSTEP; i++)
-        for (k = 0; (m >> i) & 1u && k < 4u; k++)
+        for (k = 0; m == i + 1u && k < 4u; k++)
             ev_sput(&t->step[i], SD_KIND[k], ev_sdefv(SD_KIND[k]));
     motion_undo_done(t);
     ui_message("STEP RESET");
@@ -1171,7 +1172,7 @@ static void presets_turn(int32_t s)
 {
     const page_t *pg = cur_page();
     uint32_t g = pg->graph;
-    uint64_t held = lock_held();
+    uint32_t held = lock_held();
     if (detail_on()) {                                    /* DETAIL (1.5.1): the cursor (its KNOB 1 is CHANCE) */
         if (chain_busy())
             ui_message("STOP TO EDIT");
@@ -1254,7 +1255,7 @@ static int page_tap(uint32_t b)
         return 1;
     }
     if (b == B_EDIT && song.seq_mode && !ui.home && cur_page()->graph == GR_ROLL) {   /* STEP: EDIT clears the step */
-        uint64_t held = lock_held();
+        uint32_t held = lock_held();
         if (chain_busy()) { ui_message("STOP TO EDIT"); return 1; }
         if (held) {                                     /* a step held: its locks (the step stays) */
             lock_clear(held);
@@ -1703,7 +1704,7 @@ static void ui_input(void)
     for (k = 0; k < 4u && !kq; k++) {
         const page_t *pg = cur_page();
         int16_t *hv;
-        uint64_t held;
+        uint32_t held;
         if ((s = panel_enc(EN_K1 + k)) == 0)
             continue;
         if (mom_down())                                 /* (LFO + a knob, MOMENTARY or not: LFO's release opens no page) */

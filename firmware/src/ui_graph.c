@@ -193,7 +193,7 @@ static void pr_bars(const step_t *st, int32_t x, int32_t w, uint16_t c, int acc_
 static void graph_roll(const track_t *t, uint16_t c)
 {
     uint32_t i, len = (uint32_t)t->p[P_SLEN], base = ui.bank * 16u, ncol, mask = scale_mask(t), held = pr_held();
-    uint64_t locks = motion_lock_steps(trk_index(t));
+    uint64_t locks = motion_lock_steps_from(trk_index(t), base & ~63u);
     int32_t r, ybot = PR_Y0 + PR_ROWS * PR_RH, gw;
     char nb[8];
     ncol = base < len ? (len - base < 16u ? len - base : 16u) : 0u;
@@ -229,7 +229,7 @@ static void graph_roll(const track_t *t, uint16_t c)
             cv_frame(x, PR_Y0 - 2, PR_CW + 1, ybot - PR_Y0 + 4, T_TEXT);
         if (song.playing && si == t->seq_idx)
             cv_rect(x + 6, PR_Y0, 1, ybot - PR_Y0, T_ACCENT);
-        if ((locks >> si) & 1u)                       /* a parameter lock: a mark under the step */
+        if ((locks >> (si & 63u)) & 1u)                       /* a parameter lock: a mark under the step */
             cv_rect(x + 3, ybot + 3, 7, 2, T_ACCENT);
         if (step_detailed(&seq_steps(t)[si]))         /* 1.5.1: CHANCE / RATCH / NUDGE set: a mark over it (DETAIL) */
             cv_rect(x + 4, 2, 5, 3, c);
@@ -578,7 +578,7 @@ static uint32_t str_hash(uint32_t h, const char *s)
 /* Save-bank validity is expensive (CRC/import). Refresh it once per redraw or
  * twice per second, rather than parsing four projects on every UI frame. */
 static char graph_pname[4][13];                       /* .. and the slots' names ("" none) */
-static uint16_t graph_plen[4][NTRK];                  /* .. each track's pattern length (project_info: 1/48 quarters) */
+static uint32_t graph_plen[4][NTRK];                  /* .. each track's pattern length (project_info: 1/48 quarters) */
 static uint32_t graph_pden[4][NTRK];                  /* .. and its picture for SONG (project.c proj_density: 2 bits a cell) */
 static uint8_t graph_pcell[4][NTRK];                  /* .. in this many cells (min(LEN, 16)) */
 static uint32_t graph_pname_sig;
@@ -856,7 +856,7 @@ static uint32_t graph_signature(void)
             ph = 0xFFFFu;                            /* the roll shows the cursor's bank only */
         h ^= steps_hash(t) + ph * 31u + ui.cursor * 7919u + ui.bank * 613u;
         {                                            /* the parameter locks' marks */
-            uint64_t lk = motion_lock_steps(trk_index(t));
+            uint64_t lk = motion_lock_steps_from(trk_index(t), ui.bank < 4u ? 0u : 64u);
             h = (h ^ (uint32_t)lk ^ (uint32_t)(lk >> 32) * 2654435761u) * 16777619u;
         }
         if (detail_on())                             /* DETAIL: QUANTIZE (NUDGE's DIM), the lane named in the accent */
@@ -1147,9 +1147,7 @@ static void graph_events(void)
             const char *unit;
             const param_desc_t *d = track_desc(t, id);
             int32_t x;
-            b[0] = (char)('0' + ((e->place & 63u) + 1u) / 10u);
-            b[1] = (char)('0' + ((e->place & 63u) + 1u) % 10u);
-            b[2] = 0;
+            fmt_int(b, (int32_t)(e->place & STEP_MASK) + 1);
             GFX_HOOK_ALIGN(0, y, 0, y + 16, AL_V, "list row text centred up/down");
             cv_text_on(14, y + LIST_TY, &AF_M, lock ? "LOCK" : "AUTO", sel ? T_INK : lock ? T_ACCENT : T_MID, bg);
             GFX_HOOK_ALIGN(0, y, 0, y + 16, AL_V, "list row text centred up/down");

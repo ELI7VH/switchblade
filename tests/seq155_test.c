@@ -337,7 +337,7 @@ static int cond_store(void)
     ok &= proj_pack(&pk, &a) && proj_import(&b, &pk, sizeof pk);
     for (i = 0; i < NCOND; i++)
         ok &= step_cond(&b.t[0].step[i]) == 1u + i;
-    bad += check("FUN10: the conditions round trip (the chance byte 102..112), the size unchanged", ok && sizeof pk == 3840u);
+    bad += check("FUN10: the conditions round trip (the chance byte 102..112), the size unchanged", ok && sizeof pk == PROJ_STORE_SIZE);
     bad += check("  1.5 / 1.5.1's rule refuses a project holding one (the slot reads empty there), one without loads",
                  old0 && !old_accepts(&pk));
     pk.raw[68u + P_COUNT + 2u + 8u] = 113;
@@ -545,12 +545,14 @@ static int test_double_half(void)
         memcpy(ref, t->step, sizeof ref);
         btn_down(B_SEQ); frame();
         tkey(12);
-        ok = t->p[P_SLEN] == 64 && !memcmp(t->step, ref, 40u * sizeof ref[0]) && !memcmp(t->step + 40, ref, 24u * sizeof ref[0]);
+        ok = t->p[P_SLEN] == 80 && !memcmp(t->step, ref, 40u * sizeof ref[0]) && !memcmp(t->step + 40, ref, 40u * sizeof ref[0]);
+        tkey(12); /* 80 -> 128, bounded at the new maximum */
+        ok &= t->p[P_SLEN] == 128;
         memcpy(ref, t->step, sizeof ref);
         undo.trk = 0;
         tkey(12);
-        ok &= t->p[P_SLEN] == 64 && msg_is("64 STEPS: NO ROOM") && !undo.trk && !memcmp(t->step, ref, sizeof ref);
-        bad += check("DOUBLE from LEN 40: 64 (steps 1..24 copied); at 64: NO ROOM, nothing done", ok);
+        ok &= t->p[P_SLEN] == 128 && msg_is("128 STEPS: NO ROOM") && !undo.trk && !memcmp(t->step, ref, sizeof ref);
+        bad += check("DOUBLE from LEN 40: 80, then 128; at 128: NO ROOM, nothing done", ok);
         t->p[P_SLEN] = 8;
         for (i = 0; motion.count < MOTION_MAX - 4u; i++)
             motion_set_event(&trk[1 + i % 3u], i / 3u % NSTEP, P_REV + i / 192u, (int16_t)(i % 100u));

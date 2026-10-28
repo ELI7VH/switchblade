@@ -321,12 +321,12 @@ static void ed_motion_reply(uint32_t k, uint32_t rc, uint32_t kinds, uint32_t fu
     }
     for (i = j = 0; i < motion.count && j < n; i++) {
         const motion_event_t *e = &motion.event[i];
-        if ((e->place >> 6) != k) continue;
-        ed_b(e->place & 63u); ed_b(MOTION_ID(e)); ed_v(e->value);
+        if ((e->place >> STEP_BITS) != k) continue;
+        ed_b(e->place & STEP_MASK); ed_b(MOTION_ID(e)); ed_v(e->value);
         j++;
     }
     for (i = j = 0; kinds && i < motion.count && j < n; i++)
-        if ((motion.event[i].place >> 6) == k) {
+        if ((motion.event[i].place >> STEP_BITS) == k) {
             ed_b((motion.event[i].param & MOTION_LOCK) != 0u);
             j++;
         }
@@ -362,7 +362,7 @@ static int ed_args_ok(uint32_t cmd, const uint8_t *a, uint32_t n)
                 a[13] <= 100u && a[14] >= 1u && a[14] <= 4u);
     case ED_MOTION:
         return (n == 1u || (n == 2u && (a[1] == 2u || a[1] == 7u || a[1] == 8u)) || (n == 3u && a[1] == 1u && a[2] <= 1u) ||
-                (n == 6u && (a[1] == 3u || a[1] == 5u)) || (n == 4u && a[1] == 4u) || (n == 3u && a[1] == 6u)) &&
+                (n == 6u && (a[1] == 3u || a[1] == 5u)) || (n == 4u && a[1] == 4u) || (n == 3u && (a[1] == 6u || a[1] == 9u))) &&
                a[0] < NTRK;
     case ED_SONG:
         return n && (a[0] == 1u || a[0] == 5u || n == 1u);
@@ -393,7 +393,7 @@ static void ed_handle(const uint8_t *f, uint32_t n)   /* f: the bytes between F0
     switch (cmd) {
     case ED_MOTION: {
         track_t *t = &trk[a[0]]; uint32_t rc = 0;
-        if (na > 1u && a[1] >= 7u) {
+        if (na > 1u && (a[1] == 7u || a[1] == 8u)) {
             /* (the query with the kinds; 8: all of them, 1.2) */
         } else if (na > 1u && chain_busy()) rc = 3;
         else if (na > 1u) {
@@ -402,7 +402,8 @@ static void ed_handle(const uint8_t *f, uint32_t n)   /* f: the bytes between F0
             else if (a[1] == 3u) rc = motion_set_event(t, a[2], a[3], (int16_t)ed_rv(a + 4));
             else if (a[1] == 4u && a[2] < NSTEP && motion_param(a[3])) motion_delete_event(t, a[2], a[3]);
             else if (a[1] == 5u) rc = motion_set_lock(t, a[2], a[3], (int16_t)ed_rv(a + 4));
-            else if (a[1] == 6u && (a[2] < NSTEP || a[2] == 127u)) (void)motion_clear_locks(t, a[2]);
+            else if (a[1] == 6u && (a[2] < NSTEP || a[2] == 127u)) (void)motion_clear_locks(t, a[2] == 127u ? NSTEP : a[2]);
+            else if (a[1] == 9u && a[2] < NSTEP) (void)motion_clear_locks(t, a[2]);
             else rc = 1;
             ui.force = 1;
         }
@@ -414,7 +415,7 @@ static void ed_handle(const uint8_t *f, uint32_t n)   /* f: the bytes between F0
         ed_b(NENGINES);
         ed_b(P_COUNT);
         ed_b(G_COUNT);
-        ed_b(NSTEP);
+        ed_b(64); /* legacy client field; the tagged extension below carries the full limit */
         ed_b(P_E0);
         for (i = 0; i < NENGINES; i++)
             ed_str(ENGINES[i]->name, 8);
@@ -433,6 +434,7 @@ static void ed_handle(const uint8_t *f, uint32_t n)   /* f: the bytes between F0
         ed_b(0x43); ed_b(1); ed_b(ML_N);   /* 1.5: MIDI LEARN's map (cmds 78, 79; editor_learn.c) */
         ed_b(0x4B); ed_b(1); ed_b(NCOND);   /* 1.5.5: a step's condition (1..11) after its nudge */
         ed_b(0x45); ed_b(1); ed_b(ED_PAL_N);   /* 1.6: CUSTOM, the user's palette: 5 colours (cmds 80, 81; editor_palette.c) */
+        ed_b(0x58); ed_b(1); ed_b(NSTEP & 127u); ed_b(NSTEP >> 7); /* extended pattern length, u14 */
         break;
     case ED_GET:
     case ED_SET:

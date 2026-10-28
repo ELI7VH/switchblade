@@ -90,7 +90,7 @@ track 4 with the 808 kit, so the Oxygen's pads (channel 4) play drums at once. P
 ### Drum step sequencer
 
 On a **DRUM** track, press **SEQ** for the kit grid. Eight named lanes share the track's
-clock, division, swing and pattern length (1–64 steps). Each page shows 16 steps.
+clock, division, swing and pattern length (1–128 steps). Each page shows 16 steps.
 Changing kits keeps the rhythm; names follow the kit (for example CR78's MARAC/CONGA/CLAVE).
 
 | Control | Action |
@@ -98,7 +98,7 @@ Changing kits keeps the rhythm; names follow the kit (for example CR78's MARAC/C
 | Sixteen white keys, left to right | Toggle steps 1–16 of the displayed page, on release |
 | First eight black keys, left to right | Pick KICK, SNARE, CLAP, closed hat, open hat, TOM, RIM, BELL/RIDE |
 | Knob 1 / an external MIDI pad | Pick the drum to edit |
-| Knob 2 | Page 1–4, within the pattern length |
+| Knob 2 | Page 1–8, within the pattern length |
 | Knob 3 | Pattern length |
 | Knob 4 | Step division: 1/32 through 4BAR, including triplets |
 | Hold SEQ + knob 3 | Swing |
@@ -317,6 +317,8 @@ Install at your own risk.
 
 GPL-3.0-only, as Felucca: [LICENSE](LICENSE).
 
-Sequence length knobs offer **2, 4, 8, 16, 32, 48, 64** steps: hold SEQ + K1 for melodic tracks, or K3 on the drum grid with no step held. Older songs retain their saved lengths until edited.
+Sequence length knobs offer **2, 4, 8, 16, 32, 48, 64, 128** steps: hold SEQ + K1 for melodic tracks, or K3 on the drum grid with no step held. Older songs retain their saved lengths until edited.
 
 For longer phrases, choose a slower division: 64 steps at 1/16 spans 4 bars; at 1/8 it spans 8 bars; at 1/4 it spans 16 bars (4/4). Regular tracks use hold SEQ + K2 for the same division control.
+
+128 steps at 1/16 now give **eight bars in 4/4**. See [128-step controls, save compatibility and validation](docs/128-STEPS.md).

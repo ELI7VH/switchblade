@@ -31,7 +31,7 @@ static void song_step(int dir);                  /* WaveLoop: the set list (setl
 static void song_dupe(void);
 static void sl_line(char *b, const char **name);
 static int project_name(uint32_t slot, char *b);
-static int project_info(uint32_t slot, char *b, uint16_t *len48, uint32_t *den, uint8_t *n);
+static int project_info(uint32_t slot, char *b, uint32_t *len48, uint32_t *den, uint8_t *n);
 static int project_rename(uint32_t slot, const char *name);
 static int project_erase(uint32_t slot);
 static void project_cur_name(char *b);
@@ -813,14 +813,14 @@ static uint32_t track_sig(const track_t *t)      /* the sound, the steps */
     uint8_t id[3] = {t->eng_req, t->preset, t->user};
     uint32_t h = fnv(fnv(steps_sig(t), t->p, sizeof t->p), id, 3), k = trk_index(t);
     for (uint32_t j = 0; j < motion.count; j++)
-        if ((motion.event[j].place >> 6) == k) h = fnv(h, &motion.event[j], sizeof motion.event[j]);
+        if ((motion.event[j].place >> STEP_BITS) == k) h = fnv(h, &motion.event[j], sizeof motion.event[j]);
     return h ^ ((motion.on >> k) & 1u);
 }
 static uint32_t motion_sig(const track_t *t)     /* the track's motion only (the sound moves while it plays) */
 {
     uint32_t h = 2166136261u, k = trk_index(t);
     for (uint32_t j = 0; j < motion.count; j++)
-        if ((motion.event[j].place >> 6) == k) h = fnv(h, &motion.event[j], sizeof motion.event[j]);
+        if ((motion.event[j].place >> STEP_BITS) == k) h = fnv(h, &motion.event[j], sizeof motion.event[j]);
     return h ^ ((motion.on >> k) & 1u);
 }
 /* the track's pattern as a song plays it from a slot: the steps, LEN DIV SWING GATE, QUANTIZE, the automation (the

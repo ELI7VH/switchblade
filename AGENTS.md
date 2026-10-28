@@ -11,3 +11,7 @@ for unit ownership, firmware safety and the FM-1 handoff queue.
   `tests/ui_render.c` renders/lints the drum grid for 808, CR78 and 909.
 - Do not flash while the user is playing. Identify the unit and back up its songs first.
   The GHOULBOX is excluded; JIANT is parked while this drum-sequencer work is active.
+
+- 128-step support uses FOR5 (6400 bytes), reading FOR4 (3840) through migration. Read `docs/128-STEPS.md` before changing storage, automation or the editor protocol.
+- Motion places are 9-bit (`STEP_BITS`/`STEP_MASK`); never narrow to a byte. Single melodic UI holds use step+1, not a 64-bit mask.
+- New boundary suites: `seq_128_test.c` and `storage_128_test.c`; the fixture is synthetic, not a device backup.

@@ -194,7 +194,7 @@ static uint32_t ev_list(uint16_t *rw)
             if ((k == 3u ? ui.ev_vel && ev_vel_row(&t->step[s]) : !ev_sdef(&t->step[s], SK[k])) ||
                 ui.ev_keep == EVC(SK[k], s))
                 rw[n++] = EVC(SK[k], s);
-        for (; j < m && (motion.event[idx[j]].place & 63u) == s; j++)
+        for (; j < m && (motion.event[idx[j]].place & STEP_MASK) == s; j++)
             rw[n++] = EVC(EVK_REC, idx[j]);
     }
     rw[n++] = EVC(EVK_ADD, 0);
@@ -213,7 +213,7 @@ static uint32_t ev_cur(uint16_t *rw, uint32_t *np)
 static uint32_t ev_step_of(uint32_t c)
 {
     uint32_t k = c >> 8, a = c & 0xFFu;
-    return k == EVK_REC ? motion.event[a].place & 63u : k == EVK_ADD ? ui.ev_step : k == EVK_QNT ? 0u : a;
+    return k == EVK_REC ? motion.event[a].place & STEP_MASK : k == EVK_ADD ? ui.ev_step : k == EVK_QNT ? 0u : a;
 }
 
 /* the page opened, or the track or its sound changed: + ADD's step and parameter inside what the track has */
@@ -256,7 +256,7 @@ static uint32_t ev_sig(void)
     for (i = 0; i < n; i++) {
         c = rw[i];
         if (c >> 8 == EVK_REC)
-            c ^= (uint32_t)motion.event[c & 0xFFu].place << 24 | (uint32_t)motion.event[c & 0xFFu].param << 16 |
+            c ^= (uint32_t)motion.event[c & 0xFFu].place * 2654435761u | (uint32_t)motion.event[c & 0xFFu].param << 16 |
                  (uint32_t)(uint16_t)motion.event[c & 0xFFu].value << 8;
         else if (ev_skd(c >> 8))
             c ^= (uint32_t)ev_sval(&t->step[c & 0xFFu], c >> 8) << 16;
@@ -385,7 +385,7 @@ static void ev_knob(uint32_t slot, int32_t s)
     }
     i = c & 0xFFu;
     e = &motion.event[i];
-    step = e->place & 63u;
+    step = e->place & STEP_MASK;
     id = MOTION_ID(e);
     if (slot == 1u) {                                   /* the next step where its parameter is free */
         uint32_t top = ev_len(t) > step ? ev_len(t) : step + 1u, m = (uint32_t)(s > 0 ? s : -s);
@@ -489,7 +489,7 @@ static void ev_oct(void)
         const motion_event_t e = motion.event[c & 0xFFu];
         uint32_t lock = !(e.param & MOTION_LOCK);
         motion_undo_take(t, 0);
-        (void)motion_put(t, e.place & 63u, MOTION_ID(&e), e.value, lock ? MOTION_LOCK : 0u);
+        (void)motion_put(t, e.place & STEP_MASK, MOTION_ID(&e), e.value, lock ? MOTION_LOCK : 0u);
         motion_undo_done(t);
         ui_message(lock ? "NOW A LOCK" : "NOW AUTOMATION");
     }
@@ -517,7 +517,7 @@ static void ev_delete(void)
     if (k == EVK_REC) {
         e = &motion.event[c & 0xFFu];
         motion_undo_take(t, 0);
-        motion_delete_event(t, e->place & 63u, MOTION_ID(e));
+        motion_delete_event(t, e->place & STEP_MASK, MOTION_ID(e));
     } else {
         step_undo_take(t, 0);
         ev_sput(&t->step[c & 0xFFu], k, ev_sdefv(k));

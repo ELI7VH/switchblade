@@ -1,16 +1,13 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
-/* Projects: four slots. The slots live in .noinit RAM: they survive resets and UBOOT entry. With FELUCCA_FLASH
- * (default) every save also goes to flash through storage.c, and an empty RAM slot is filled from flash on load.
- *
- * FM1-Four: FOR4 is the only project format (PROJ_MAGIC "FOR4", PROJ_STORE_SIZE bytes): P_COUNT (112) biased-byte parameters
- * per track, engine byte 0..3 (OB-Z WAVE ACID DRIFT), 9-byte steps, the song chain, 128 motion records, the MIDI IN
- * bytes, the retired FM6 area (written 0, not read), the 12-byte name, an FNV-1a hash. Every Felucca format (FUN1..FUN10)
- * is refused, not converted: an engine byte 1..3 of a Felucca project would otherwise load as another machine.
- *
- * Built on the Mac too (tests/project_test.c, -DPROJ_HOST): the part above the #ifndef
- * PROJ_HOST needs core.h, params.c (TP) and engines.c. */
-#define PROJ_MAGIC 0x34524F46u                 /* "FOR4": 112 parameters, 128 motion records, nudges (FM1-Four, the only format) */
+/* FOR5 projects: four tracks of 128 steps, 128 automation/lock records and
+ * per-track SHAYPE / drum state. The 6400-byte wire object is distinct from the
+ * runtime structure. Storage extends each A/B base with one retired-sample sector.
+ * Legacy FOR4 (3840 bytes, 64 steps) imports without changing its sounds or timing;
+ * upper steps start empty. Older firmware cannot load newly saved FOR5 objects.
+ * RAM slot caches live in .pool, are cleared at startup and reload from flash. */
+#define PROJ_LEGACY_MAGIC 0x34524F46u
+#define PROJ_MAGIC 0x35524F46u                 /* "FOR5", little-endian */
 #ifndef SL_N
 #define SL_N 12u                               /* (storage.c: WaveLoop's set list) */
 #endif
@@ -42,12 +39,12 @@ typedef struct {
     char name[PROJ_NAME_LEN];                  /* the project's name: upper-case ASCII 32..126, 0-padded; "" = none */
     uint32_t sum;
 } project_t;
-/* Serialized FOR4 keeps the retained cache's exact extent. Params are biased bytes, steps pack n/time/flags. The reserved
+/* FOR5 has its own extent; legacy FOR4 is read by the importer. Params are biased bytes, steps pack n/time/flags. The reserved
  * tail is zero and covered by the hash. The tail's last 12 bytes (PROJ_NAME_OFF, just before the hash) are the project's
  * name: ASCII 32..126 (upper case), 0-padded, all 0 = no name. The four packed FM6 patches' area (PROJ_FM6_OFF, before
  * the name) is retired: written 0, not read; 12 bytes of the reserved tail are left for parameters added later (16 before
  * FM1-Four's P_MOUT, a byte per track). */
-#define PROJ_STORE_SIZE 3840u                  /* FOR4: a whole storage object (storage.c ST_PAYLOAD_MAX) */
+#define PROJ_STORE_SIZE 6400u                  /* FOR5: base + extension storage payload */
 #define PROJ_NAME_OFF (PROJ_STORE_SIZE - 4u - PROJ_NAME_LEN)
 #define PROJ_FM6_OFF (PROJ_NAME_OFF - NTRK * PROJ_FM6_PACKED)
 /* 1.5.5 (#202): MIDI IN TRACK, the last 3 of FOR4's 16 spare bytes (just before the patches: the parameters a later
@@ -73,8 +70,8 @@ typedef union { uint32_t align; uint8_t raw[PROJ_STORE_SIZE]; } project_store_t;
 #define PROJ_NG 27u
 #define PROJ_CLKOUT_AT 65u
 _Static_assert(G_COUNT == PROJ_NG + 1u && G_CLKOUT == PROJ_NG, "FOR4 globals retain the original IDs; G_CLKOUT at byte 65");
-_Static_assert(sizeof(project_store_t) == 3840u, "FOR4 storage size");
-project_store_t proj_slot[4] __attribute__((section(".noinit")));
+_Static_assert(sizeof(project_store_t) == 6400u, "FOR5 storage size");
+project_store_t proj_slot[4] __attribute__((section(".pool")));
 
 static uint32_t proj_hash(const void *p, uint32_t n)   /* FNV-1a over n bytes */
 {
@@ -101,8 +98,9 @@ static int proj_engines_ok(const project_t *q)
 }
 static int proj_import(project_t *q, const void *b, int n)
 {
-    if (n == PROJ_STORE_SIZE && ((const uint32_t *)b)[0] == PROJ_MAGIC)
-        return proj_unpack(q, b, PROJ_STORE_SIZE) && proj_engines_ok(q);
+    if ((n == PROJ_STORE_SIZE && ((const uint32_t *)b)[0] == PROJ_MAGIC) ||
+        (n == 3840 && ((const uint32_t *)b)[0] == PROJ_LEGACY_MAGIC))
+        return proj_unpack(q, b, (uint32_t)n) && proj_engines_ok(q);
     if (n == (int)sizeof *q && proj_ok((const project_t *)b)) {
         memcpy(q, b, sizeof *q);
         return proj_engines_ok(q);
@@ -206,8 +204,9 @@ static int proj_pack(project_store_t *out, const project_t *q)
     b[PROJ_CLKOUT_AT] = (uint8_t)(q->g[G_CLKOUT] != 0);
     for (t = 0; t < NTRK; t++) {
         for (i = 0; i < P_COUNT; i++) {
-            if (q->t[t].p[i] < -64 || q->t[t].p[i] > 127) return 0;
-            b[pos++] = (uint8_t)(q->t[t].p[i] + 64);
+            int32_t v = q->t[t].p[i] - (i == P_SLEN ? 1 : 0);
+            if (v < -64 || v > 127) return 0;
+            b[pos++] = (uint8_t)(v + 64);
         }
         b[pos++] = q->t[t].engine; b[pos++] = q->t[t].preset;
         for (i = 0; i < NSTEP; i++) {
@@ -252,20 +251,22 @@ static int proj_pack(project_store_t *out, const project_t *q)
 static int proj_unpack(project_t *q, const uint8_t *b, uint32_t st)
 {
     uint32_t pos = 68u, t, i, magic, size, sum, np = b[66];
+    uint32_t old = st == 3840u, ns = old ? 64u : NSTEP;
+    uint32_t motion_size = old ? 388u : sizeof q->motion;
     uint32_t name_off = st - 4u - PROJ_NAME_LEN, end = name_off - NTRK * PROJ_FM6_PACKED;
     memcpy(&magic, b, 4); memcpy(&size, b + 4, 4); memcpy(&sum, b + st - 4u, 4);
-    if (st != PROJ_STORE_SIZE || magic != PROJ_MAGIC || size != st || sum != proj_hash(b, st - 4u) ||
-        np != P_COUNT || 68u + NTRK * (np + 2u + NSTEP * 9u) + sizeof q->chain + sizeof q->motion > end)
+    if ((!old && st != PROJ_STORE_SIZE) || magic != (old ? PROJ_LEGACY_MAGIC : PROJ_MAGIC) || size != st || sum != proj_hash(b, st - 4u) ||
+        np != P_COUNT || 68u + NTRK * (np + 2u + ns * 9u) + sizeof q->chain + motion_size > end)
         return 0;
     memset(q, 0, sizeof *q); q->magic = PROJ_MAGIC; q->size = sizeof *q;
     memcpy(q->g, b + 8, 2u * PROJ_NG); q->sel = b[62]; q->parts = b[63]; q->phys = b[64];
     q->rsv = (uint8_t)(b[PROJ_SONG_AT] <= SL_N ? b[PROJ_SONG_AT] : 0u);   /* (WaveLoop: the set list's song) */
     q->g[G_CLKOUT] = (int16_t)(b[PROJ_CLKOUT_AT] & 1u);
     for (t = 0; t < NTRK; t++) {
-        for (i = 0; i < P_COUNT; i++) { if (b[pos] > 191u) return 0; q->t[t].p[i] = (int16_t)b[pos++] - 64; }
+        for (i = 0; i < P_COUNT; i++) { if (b[pos] > 191u) return 0; q->t[t].p[i] = (int16_t)b[pos++] - 64 + (!old && i == P_SLEN ? 1 : 0); }
         q->t[t].engine = b[pos++]; q->t[t].preset = b[pos++];
         if (q->t[t].engine >= NENGINES) return 0;
-        for (i = 0; i < NSTEP; i++) {
+        for (i = 0; i < ns; i++) {
             step_t *s = &q->t[t].step[i]; uint32_t meta, nd = 0;
             for (uint32_t j = 0; j < 4u; j++) {         /* (bit 7 of note j is bit j of the nudge) */
                 nd |= (uint32_t)(b[pos] >> 7) << j;
@@ -282,13 +283,28 @@ static int proj_unpack(project_t *q, const uint8_t *b, uint32_t st)
             step_set_nudge(s, (int32_t)(nd ^ 8u) - 8);
         }
     }
+    if (old) for (t = 0; t < NTRK; t++)
+        for (i = ns; i < NSTEP; i++) q->t[t].step[i].time = ST_REST;
     memcpy(&q->chain, b + pos, sizeof q->chain);
     pos += sizeof q->chain;
-    memcpy(&q->motion, b + pos, sizeof q->motion);
+    if (old) {
+        q->motion.count = b[pos]; q->motion.on = b[pos + 1u];
+        if (q->motion.count > MOTION_MAX) return 0;
+        for (i = 0; i < q->motion.count; i++) {
+            const uint8_t *e = b + pos + 4u + i * 3u;
+            q->motion.event[i].place = (uint16_t)((e[0] >> 6) * NSTEP + (e[0] & 63u));
+            q->motion.event[i].param = e[1]; q->motion.event[i].value = (int8_t)e[2];
+        }
+    } else memcpy(&q->motion, b + pos, sizeof q->motion);
     if (!chain_valid(&q->chain) || !motion_valid(&q->motion)) return 0;
-    proj_midi_unpack(q, b);
+    if (old) {
+        uint8_t midi[3]; memcpy(midi, b + end - 3u, 3);
+        uint32_t v = midi[0] | (uint32_t)midi[1] << 8 | (uint32_t)midi[2] << 16;
+        for (t = 0; t < NTRK; t++) { uint32_t c = v >> (5u * t) & 31u; q->mch[t] = c <= 17u ? (uint8_t)c : 0; }
+        if (v & 0x800000u) q->g[G_ROUTE] = ROUTE_TRACK;
+    } else proj_midi_unpack(q, b);
     for (t = 0; t < NTRK; t++)                          /* WaveLoop: the ARP's patterns, or an older project's */
-        proj_arp_unpack(&q->t[t], b + PROJ_ARP_OFF + t * PROJ_FM6_PACKED);
+        proj_arp_unpack(&q->t[t], b + end + t * PROJ_FM6_PACKED);
     {
         char n[PROJ_NAME_LEN + 1u];
         memcpy(q->name, n, proj_name_get(n, b + name_off));
@@ -305,9 +321,9 @@ static char proj_name[PROJ_NAME_LEN + 1u]    /* the name of the music as it is n
 #define PROJ_NO_SLOT 0xFFu
 static uint8_t proj_cur = PROJ_NO_SLOT;      /* the slot the music was loaded from or last saved to (a rename of it
                                               * renames the music too); PROJ_NO_SLOT none (the editor's restore) */
-static union {                               /* serialized main-loop work; no retained expansion */
+static union {                               /* serialized main-loop / backup scratch */
     project_store_t s;
-    uint8_t raw[3840];                         /* (the staging of a backup object, up to a storage object: editor_backup.c) */
+    uint8_t raw[PROJ_STORE_SIZE];                         /* (the staging of a backup object, up to a storage object: editor_backup.c) */
 } proj_wire_u __attribute__((section(".pool")));
 #define proj_wire (proj_wire_u.s)
 static uint8_t proj_wire_gen;                /* +1 whenever proj_wire is rewritten (a backup's runtime copy lives there) */
@@ -470,7 +486,7 @@ static uint32_t proj_density(const proj_trk_t *t, uint8_t *n)
     return d;
 }
 /* .. and, den not 0, each track's picture (proj_density: den[k], its cells n[k]; 0 for an empty slot) */
-static int project_info(uint32_t slot, char *b, uint16_t *len48, uint32_t *den, uint8_t *n)
+static int project_info(uint32_t slot, char *b, uint32_t *len48, uint32_t *den, uint8_t *n)
 {
     uint32_t k;
     b[0] = 0;
@@ -484,7 +500,7 @@ static int project_info(uint32_t slot, char *b, uint16_t *len48, uint32_t *den, 
         return 0;
     proj_name_get(b, (const uint8_t *)proj_scratch.name);
     for (k = 0; len48 && k < NTRK; k++)
-        len48[k] = (uint16_t)len48_of(proj_scratch.t[k].p[P_SLEN], proj_scratch.t[k].p[P_SDIV]);
+        len48[k] = len48_of(proj_scratch.t[k].p[P_SLEN], proj_scratch.t[k].p[P_SDIV]);
     for (k = 0; den && k < NTRK; k++)
         den[k] = proj_density(&proj_scratch.t[k], &n[k]);
     return 1;
@@ -715,7 +731,7 @@ static uint32_t chain_prepare(void)
             {
                 motion_store_t *m = &chain.source[i].motion; uint32_t n = 0;
                 for (uint32_t e = 0; e < m->count; e++) {
-                    const motion_event_t *v = &m->event[e]; uint32_t owner = v->place >> 6;
+                    const motion_event_t *v = &m->event[e]; uint32_t owner = v->place >> STEP_BITS;
                     if (MOTION_ID(v) >= P_FM1_ATK && p->t[owner].engine != trk[owner].eng_req) continue;
                     m->event[n++] = *v;
                 }

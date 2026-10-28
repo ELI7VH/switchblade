@@ -18,7 +18,7 @@ static int motion_recording(void)
     project_t q; project_store_t packed;
     project_capture(&q);
     bad += check("project snapshot saves base + independent events while sounding", q.t[0].p[P_REV] == 23 && q.motion.event[0].value == 110 &&
-        proj_pack(&packed, &q) && sizeof packed == 3840u);
+        proj_pack(&packed, &q) && sizeof packed == PROJ_STORE_SIZE);
     seq_stop();
     bad += check("stop before another step restores the original parameter", t->p[P_REV] == 23);
     seq_start(); seq_tick(t, CTL);
@@ -53,7 +53,7 @@ static int motion_capacity(void)
     saved = motion; motion_store_t invalid = motion; invalid.count = MOTION_MAX + 1;
     bad += check("invalid restore leaves the pool intact", motion_replace_track(&trk[0], &invalid) != 0 && !memcmp(&motion, &saved, sizeof saved));
     motion_clear(&trk[0]);
-    bad += check("track clear keeps every other track's events", motion.count == 1u && motion.event[0].place >> 6 == 1u);
+    bad += check("track clear keeps every other track's events", motion.count == 1u && motion.event[0].place >> STEP_BITS == 1u);
     return bad;
 }
 static int probability_playback(void)
@@ -78,7 +78,7 @@ static int compact_project(void)
     motion_set_event(t, 3, P_REV, 110);
     project_t before, after; project_store_t packed, corrupt;
     project_capture(&before);
-    bad += check("FUN10 fits the retained and flash extent", sizeof(proj_slot) == 4u * 3840u && proj_pack(&packed, &before));
+    bad += check("FUN10 fits the retained and flash extent", sizeof(proj_slot) == 4u * PROJ_STORE_SIZE && proj_pack(&packed, &before));
     before.t[0].step[3].hit = before.t[0].step[3].acc = 0;
     before.sum = proj_sum(&before);
     bad += check("FUN10 round trip preserves signed values/FM params/probability/motion (a step's hit bits dropped)",
@@ -588,7 +588,7 @@ static int auto_list(void)
     press(B_OCTUP);
     bad += check("  OCT+: a second lock on step 3, first in the list (by step)", motion_count(t) == 2u &&
         motion_lock_get(t, 2, ui.ev_id, &v) && rows_n() == 5u && ui.ev_row == 2u &&
-        (motion.event[row_at(2) & 0xFFu].place & 63u) == 2u);
+        (motion.event[row_at(2) & 0xFFu].place & STEP_MASK) == 2u);
     turn(EN_K1, 5);
     press(B_OCTUP);
     bad += check("  OCT+ on + ADD LOCK where one is: ALREADY LISTED, that row selected", motion_count(t) == 2u &&

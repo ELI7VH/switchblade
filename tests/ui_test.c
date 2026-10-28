@@ -6547,7 +6547,7 @@ static int test_seq_tools(void)
     ok = !memcmp(TSEL->step, ref, sizeof ref) && tl_lock_at(3) && TSEL->p[P_SLEN] == 8 && msg_is("SEQUENCE PUT BACK") &&
          ui.layer == LAYER_SEQ && song.octave == 0;
     turn(EN_K1, -2);
-    ok &= TSEL->p[P_SLEN] == 6;                         /* KNOB 1: LEN (the PATTERN page's four) */
+    ok &= TSEL->p[P_SLEN] == 2;                         /* KNOB 1: LEN (the PATTERN page's four) */
     oct_back();
     ok &= TSEL->p[P_SLEN] == 8;
     btn_up(B_SEQ); frame();

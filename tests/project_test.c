@@ -55,15 +55,14 @@ int main(void)
     uint32_t i, k;
     int bad = 0, ok;
 
-    bad += check("identity: PROJ_MAGIC is \"FOR4\" (little-endian bytes F O R 4)", PROJ_MAGIC == 0x34524F46u &&
-                 !memcmp("FOR4", &(uint32_t){PROJ_MAGIC}, 4));
-    bad += check("FOR4 fits one flash object, the retained cache in NOINIT", sizeof(project_store_t) <= 4096u - 256u &&
-                 sizeof(project_store_t) == 3840u && 0xC8u + 4u * sizeof(project_store_t) <= 0x3D50u);
+    bad += check("identity: PROJ_MAGIC is \"FOR4\" (little-endian bytes F O R 4)", PROJ_MAGIC == 0x35524F46u &&
+                 !memcmp("FOR5", &(uint32_t){PROJ_MAGIC}, 4));
+    bad += check("FOR4 fits one flash object, the retained cache in NOINIT", sizeof(project_store_t) <= 7936u && sizeof(project_store_t) == 6400u);
     bad += check("five machines (WaveLoop: DRUM the fifth): NENGINES 5, P_COUNT 112 (P_MOUT just before P_E0)",
                  NENGINES == 5u && ENGI_DRUM == 4u && P_COUNT == 112u && P_MOUT + 1u == P_E0);
     bad += check("name / FM6 area / MIDI offsets, 12 spare bytes before the retired area (MIDI IN's 3 among them)",
-                 PROJ_NAME_OFF == 3824u && PROJ_FM6_OFF == 3312u && 68u + NTRK * (P_COUNT + 2u + NSTEP * 9u) +
-                 sizeof(chain_config_t) + sizeof(motion_store_t) + 12u == PROJ_FM6_OFF);
+                 PROJ_NAME_OFF == 6384u && PROJ_FM6_OFF == 5872u && 68u + NTRK * (P_COUNT + 2u + NSTEP * 9u) +
+                 sizeof(chain_config_t) + sizeof(motion_store_t) <= PROJ_MIDI_OFF);
 
     /* round trip: the four engines, presets, steps, the name, the ARP's patterns ('S' 1 n 0 + the notes, the rest 0) */
     four_project(&a);

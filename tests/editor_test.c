@@ -119,12 +119,17 @@ static int motion_locks(void)
     a[1] = 7; n = request(ED_MOTION, a, 2);
     bad += check("MOTION op 7: the query with the kinds", n == 5u + 5u + 2u * 4u + 2u + 1u && host_wire[19] == 1);
     a[1] = 5; a[2] = 64; n = request(ED_MOTION, a, 6);
-    bad += check("MOTION op 5 refuses step 64 (rc 1)", host_wire[6] == 1);
+    bad += check("MOTION op 5 accepts step 64 without aliasing step 0", host_wire[6] == 0 && motion_lock_count(&trk[1]) == 2u);
+    motion_clear_locks(&trk[1],64);
     a[1] = 6; a[2] = 2; request(ED_MOTION, a, 3);
     bad += check("MOTION op 6 on step 2: its automation event stays", host_wire[6] == 0 && host_wire[8] == 2);
     a[2] = 127; request(ED_MOTION, a, 3);
     bad += check("MOTION op 6, 127: every lock goes, the automation stays", host_wire[6] == 0 && host_wire[8] == 1 &&
         host_wire[14] == 0 && !motion_lock_count(&trk[1]));
+    a[1]=5; a[2]=127; request(ED_MOTION,a,6);
+    bad += check("MOTION last-step lock uses all seven index bits",motion_lock_count(&trk[1])==1u);
+    a[1]=9; request(ED_MOTION,a,3);
+    bad += check("MOTION op 9 clears just step 127, preserving the automation event",!motion_lock_count(&trk[1]) && motion_count(&trk[1])==1u);
     motion_clear(&trk[1]);
     /* 1.2 (INFO 41 01 00 01): 128 records; ops 1..7 reply as before (max 64, at most 64 records), op 8 all of them */
     {
@@ -158,7 +163,7 @@ static int preferences(void)
     uint8_t a[4] = {0, 0, 0, 0};                         /* (Switch Blade: the palette list is MACHINE alone) */
     reset();
     uint32_t n = request(ED_INFO, a, 0);
-    uint32_t e = n - 6u;                                  /* (1.5.5: 4B 01 NCOND, 1.6: 45 01 5 last, below) */
+    uint32_t e = n - 10u;                                  /* (1.5.5: 4B 01 NCOND, 1.6: 45 01 5 last, below) */
     bad += check("INFO tags the capabilities after CHAIN_ROWS (no FM6 tags 46 / 50 / 56) without changing command 33",
         ED_SONG == 33 && ED_UI_STATE == 34 && ED_FAV_SET == 38 &&
         host_wire[e - 37] == CHAIN_ROWS &&
@@ -174,9 +179,11 @@ static int preferences(void)
         host_wire[e - 7] == 0x57 && host_wire[e - 6] == 1 && host_wire[e - 5] == NTRK &&   /* 1.2: SONG lanes */
         host_wire[e - 4] == 0x43 && host_wire[e - 3] == 1 && host_wire[e - 2] == ML_N);   /* 1.5: MIDI LEARN */
     bad += check("INFO 1.5.5: 4B 01 11, a step's condition after its nudge",
-        host_wire[n - 7] == 0x4B && host_wire[n - 6] == 1 && host_wire[n - 5] == NCOND);
+        host_wire[n - 11] == 0x4B && host_wire[n - 10] == 1 && host_wire[n - 9] == NCOND);
     bad += check("INFO 1.6: 45 01 5, CUSTOM's colours, last",
-        host_wire[n - 4] == 0x45 && host_wire[n - 3] == 1 && host_wire[n - 2] == 5);
+        host_wire[n - 8] == 0x45 && host_wire[n - 7] == 1 && host_wire[n - 6] == 5);
+    bad += check("INFO extended steps: 58 01 00 01 (128), MIDI-safe bytes",
+        host_wire[n - 5] == 0x58 && host_wire[n - 4] == 1 && host_wire[n - 3] == 0 && host_wire[n - 2] == 1);
     request(ED_UI_SET, a, 2);
     bad += check("UI_SET 0 (palette MACHINE, the only one) applies and reports RAM-only saving",
         host_wire[5] == 3 && settings.palette == UI_PAL_MACHINE && T_BG == UI_MACHINE_PALS[TSEL->eng_req % NENGINES].bg);

@@ -580,9 +580,9 @@ static int follow_test(void)
         for (k4 = 0; k4 < 27u && kb_map(t4, k4) > 127u; k4++)
             ;
         fm1_in.notes |= 1u << k4; host_notes |= 1u << k4; frame();
-        ok = ui.entry_open && lock_held() == (1u << 4);
+        ok = ui.entry_open && lock_held() == 5u;
         queued(0x90, 60, 100, 1); frame();               /* T1's channel */
-        ok &= song.sel == 3u && lock_held() == (1u << 4) && midi_lit(0);
+        ok &= song.sel == 3u && lock_held() == 5u && midi_lit(0);
         turn(EN_K1, 3);
         ok &= motion_lock_count(t4) == 1u && !motion_lock_count(&trk[0]);
         fm1_in.notes &= ~(1u << k4); frame();

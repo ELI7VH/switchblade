@@ -176,7 +176,7 @@ int main(void)
     reset();
     trk[0].step[0] = (step_t){{60}, 1, ST_NOTE, 0, 96, 0, 0};
     bad += check("LIST captures the runtime: 8 objects (ids 0..7), runtime 3840 B (FUN10)",
-                 list(0, &len, &crc) == 0 && rep[2] == 8u && len == sizeof(project_store_t) && len == 3840u &&
+                 list(0, &len, &crc) == 0 && rep[2] == 8u && len == sizeof(project_store_t) && len == PROJ_STORE_SIZE &&
                  crc == st_crc32(ED_BK_RAW, len));
     {
         uint32_t i, ok = 1;

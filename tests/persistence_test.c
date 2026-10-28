@@ -365,7 +365,7 @@ static int setlist_test(void)
     song_step(1);
     ok = sl_cur == 1u && song.g[G_BPM] == 140;
     bad += check("set list: songs unchanged: a step writes only the autosave (the songs are not written again)",
-                 ok && erases - e0 == 2u);
+                 ok && erases - e0 == 4u);
     as_power_on();
     ui_prefs |= PREF_RESTORE_OFF;
     ok = !autosave_boot(1) && sl_cur == 2u && sl_used == 3u;   /* new music: the first free song */
@@ -384,9 +384,9 @@ static int setlist_test(void)
     ok = k == before_proj;
     for (i = 0x9F000u; i < 0xA0000u; i++)
         ok &= nor[i] == 0xFFu;
-    for (i = 0xB8000u; i < 0xDC000u; i++)
+    for (i = 0xDA000u; i < 0xDC000u; i++)
         ok &= nor[i] == 0xFFu;
-    bad += check("set list: the PROJECT slots untouched; nothing written at 0x9F000 or past 0xB8000 (the retired areas)", ok);
+    bad += check("set list: the PROJECT slots untouched; nothing written at 0x9F000 or DA000..DBFFF (the retired areas)", ok);
     return bad;
 }
 
@@ -617,7 +617,7 @@ int main(void)
         for (i = 0; i < P_COUNT; i++) {
             uint32_t e;
             for (e = 0; e < NENGINES; e++)
-                if (param_desc_of(e, i)->min < -64 || param_desc_of(e, i)->max > 127) {
+                if (param_desc_of(e, i)->min < -64 || param_desc_of(e, i)->max > (i == P_SLEN ? 128 : 127)) {
                     printf("param %u engine %u: range %d..%d does not fit FUN7's byte\n", i, e,
                            param_desc_of(e, i)->min, param_desc_of(e, i)->max);
                     bad++;

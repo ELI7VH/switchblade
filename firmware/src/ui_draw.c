@@ -11,7 +11,7 @@
  * free text (names) is ellipsised at its size. */
 static void draw_menu(void);
 static int name_on(void);                              /* NAME (ui_name.c) */
-static uint64_t lock_held(void);                       /* parameter locks: the steps held on STEP (ui_input.c) */
+static uint32_t lock_held(void);                       /* parameter locks: the steps held on STEP (ui_input.c) */
 static void name_draw(void);
 #include "ui_led.c"                                    /* 7-segment LED readouts: the BPM, EDIT, HOME */
 #include "ui_ctl.c"                                    /* the machines' controls: discs, arcs, bevels, brushed silver, wood */
@@ -1113,10 +1113,8 @@ static void draw_columns(void)
         return;
     }
     if (cur_page()->graph == GR_ROLL && lock_held()) {   /* a step held: what KNOB 1..4 lock (ui_input.c lock_turn) */
-        uint64_t held = lock_held();
-        uint32_t st = 0;
-        while (!((held >> st) & 1u))
-            st++;                                       /* (the first step held: its values) */
+        uint32_t held = lock_held();
+        uint32_t st = held - 1u;                                       /* (the first step held: its values) */
         for (c = 0; c < 4u; c++) {
             uint32_t id = lock_id(c);
             const param_desc_t *d;
