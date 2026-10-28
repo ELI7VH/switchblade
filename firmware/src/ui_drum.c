@@ -101,7 +101,7 @@ static void dg_turn(uint32_t slot, int32_t steps)
     } else {
         uint32_t id = slot == 2u ? P_SLEN : P_SSWING;
         step_undo_take(t, 0x8100u | slot);
-        t->p[id] = (int16_t)clamp(t->p[id] + steps, TP[id].min, TP[id].max);
+        t->p[id] = (int16_t)param_turn(&TP[id], t->p[id], steps);
         if (ui.cursor >= (uint32_t)t->p[P_SLEN]) cursor_set(t->p[P_SLEN] - 1);
         motion_undo_done(t);
     }

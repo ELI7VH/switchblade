@@ -31,7 +31,8 @@ int main(void)
     REQUIRE(t->step[0].hit == 255 && t->step[0].vel == 76);
     dg_turn(1, 3); tap_key(DG_WHITE[15]);
     REQUIRE(ui.bank == 3 && ui.cursor == 63 && t->step[63].hit == 1);
-    dg_turn(2, -47); REQUIRE(t->p[P_SLEN] == 17 && ui.bank == 1 && ui.cursor == 16);
+    dg_turn(2, -2); REQUIRE(t->p[P_SLEN] == 32 && ui.bank == 1 && ui.cursor == 31);
+    cursor_set(16);
     t->step[16].n = 2; t->step[16].note[0] = 49; t->step[16].note[1] = 38; t->step[16].time = ST_NOTE;
     tap_key(DG_BLACK[7]); tap_key(DG_WHITE[0]);
     REQUIRE(t->step[16].n == 1 && t->step[16].note[0] == 38); /* old crash removes only BELL */

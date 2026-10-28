@@ -103,7 +103,7 @@ static int mom_turn(uint32_t k, int32_t s)
         if (i == 0u)
             ui_message("MOMENTARY  [OCT+] KEEP");
     }
-    *vp = (int16_t)param_turn(d, *vp, accel(EN_K1 + k, s, d->fmt == F_ENUM ? 0 : d->max - d->min));
+    *vp = (int16_t)param_turn(d, *vp, accel(EN_K1 + k, s, (d->fmt == F_ENUM || d == &TP[P_SLEN]) ? 0 : d->max - d->min));
     return 1;
 }
 
@@ -429,7 +429,7 @@ static void home_turn(uint32_t k, int32_t s)
     const param_desc_t *d = home_param(k, &vp);
     if (!d || !vp || d->max == d->min)
         return;
-    *vp = (int16_t)param_turn(d, *vp, accel(EN_K1 + k, s, d->fmt == F_ENUM ? 0 : d->max - d->min));
+    *vp = (int16_t)param_turn(d, *vp, accel(EN_K1 + k, s, (d->fmt == F_ENUM || d == &TP[P_SLEN]) ? 0 : d->max - d->min));
     motion_capture(TSEL, (uint32_t)(vp - TSEL->p), *vp);
     ml_knob(TSEL, (uint32_t)(vp - TSEL->p));
     kc_knob(TSEL, (uint32_t)(vp - TSEL->p));          /* (WaveLoop: the knob card) */
@@ -622,7 +622,7 @@ static void lock_turn(uint32_t k, int32_t s, uint64_t held)
     if (id == 0xFFu)
         return;                                         /* (an empty card: nothing to lock) */
     d = track_desc(t, id);
-    s = accel(EN_K1 + k, s, d->fmt == F_ENUM ? 0 : d->max - d->min);
+    s = accel(EN_K1 + k, s, (d->fmt == F_ENUM || d == &TP[P_SLEN]) ? 0 : d->max - d->min);
     motion_undo_take(t, 0x100u | k);                    /* (1.1.5: SAVE held takes the locks back) */
     for (i = 0; i < NSTEP; i++) {
         int16_t v;
@@ -881,7 +881,7 @@ static void edit_param(uint32_t slot, int32_t steps)
     d = page_desc(pg, slot, &vp);
     if (!d || !vp || d->max == d->min)
         return;
-    v = param_turn(d, *vp, accel(EN_K1 + slot, steps, d->fmt == F_ENUM ? 0 : d->max - d->min));
+    v = param_turn(d, *vp, accel(EN_K1 + slot, steps, (d->fmt == F_ENUM || d == &TP[P_SLEN]) ? 0 : d->max - d->min));
     if (vp == &TSEL->p[P_APAT] && v != *vp) {          /* WaveLoop: ARP 3's PAT loads the factory pattern turned to */
         *vp = (int16_t)v;
         arp_factory(TSEL, (uint32_t)v);

@@ -279,6 +279,9 @@ static const uint8_t DIV_ORDER[10] = {9, 8, 7, 6, 0, 1, 4, 2, 5, 3};   /* 4BAR 2
 static const uint8_t SLDIV_ORDER[6] = {0, 3, 1, 4, 2, 5};              /* 1/8 8T 1/16 16T 1/32 32T */
 static const uint8_t DTIME_ORDER[13] = {9, 8, 7, 6, 12, 0, 10, 1, 11, 4, 2, 5, 3};   /* 4BAR 2BAR 1/1 1/2 1/4D 1/4 1/8D
                                                                                       * 1/8 1/16D 8T 1/16 16T 1/32 */
+/* Stored lengths remain literal step counts; knobs offer these seven choices.
+ * Offsets are relative to P_SLEN.min (1), preserving old odd-length songs. */
+static const uint8_t SLEN_ORDER[7] = {1, 3, 7, 15, 31, 47, 63};
 /* WaveLoop: the ARP's DIR without RAND (Elijah, 2026-10-25: "get rid of random"): UP DOWN PEND WYNDO SHYFT. A stored
  * RAND (3) stays RAND, shown as it is, until the knob turns: then the one past it that way (PEND or WYNDO) */
 static const uint8_t DIR_ORDER[5] = {0, 1, 2, 4, 5};
@@ -288,6 +291,10 @@ static const uint8_t *enum_order(const param_desc_t *d)   /* the divisions' (eve
 }
 static const uint8_t *enum_order_n(const param_desc_t *d, int32_t *n)   /* any order, and how many values it shows */
 {
+    if (d == &TP[P_SLEN]) {
+        *n = (int32_t)sizeof SLEN_ORDER;
+        return SLEN_ORDER;
+    }
     *n = d->names == N_ADIR ? (int32_t)sizeof DIR_ORDER : d->max - d->min + 1;
     return d->names == N_ADIR ? DIR_ORDER : enum_order(d);
 }

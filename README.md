@@ -315,3 +315,5 @@ Install at your own risk.
 ## Licence
 
 GPL-3.0-only, as Felucca: [LICENSE](LICENSE).
+
+Sequence length knobs offer **2, 4, 8, 16, 32, 48, 64** steps: hold SEQ + K1 for melodic tracks, or K3 on the drum grid with no step held. Older songs retain their saved lengths until edited.
