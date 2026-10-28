@@ -39,3 +39,17 @@ Build: `v0.1-wl-drum1`. User controls are in the README's **Drum step sequencer*
 - Device probe: no MIDI inputs; no FM-1 available. Firmware has **not** been installed,
   listened to on hardware or tested with physical buttons/controllers. Identify the
   Switch Blade unit, back up its songs, and ensure the user is not playing before flashing.
+
+## Test-unit installation (2026-10-28)
+
+Elijah confirmed the connected FM-1 was his test unit and authorized replacing JIANT.
+Before installation, all 42 backup objects passed CRC verification in
+`build/backup-connected-jiant-2026-10-28.json`.
+
+The installer transferred `build/switchblade-v0.1-wl-drum1.fwsc` (SHA-256
+`d2aa73c0d664c757a9c0edd76b8468eb7ab3fefd12a7895b5c354985931bc2a5`), restarted the unit,
+and confirmed `FM-1_940`. A fresh editor query returned `Switch Blade v0.1-wl-dru`
+(the INFO string is capped at 24 bytes), and four tracks: OB-Z, WAVE, NANO, DRUM.
+Track 4 was selected, with kit/preset 2 (909). Raw replies are retained in
+`build/install-test-unit-2026-10-28.json`. Physical control use and listening are not
+verified by this handshake. The separate main Switch Blade and GHOULBOX units were untouched.
