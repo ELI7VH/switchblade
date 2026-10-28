@@ -26,6 +26,21 @@ Validation:
 - Target build passes memory and interrupt checks.
 - Full firmware UI sweep: zero lint findings and zero alignment failures.
 
-The build is ready as `v0.1-wl-tie4`. Installation was held because the connected
+The build is `v0.1-wl-tie4`. Installation was initially held because the connected
 unit was emitting playback clock (144 clock events in three seconds); no flash
 or stop command was sent. Confirm the user has stopped before installing.
+
+
+## Installed after playback stopped — 2026-10-28
+
+Elijah confirmed "Stopped — install it". Installation completed and the unit
+restarted as `FM-1_940`; live editor INFO returned `Switch Blade v0.1-wl-tie`
+(the 24-byte name limit). The unit initially resumed its autosave, so the fresh
+pre-update runtime backup was restored. A second CRC-checked backup confirmed
+the complete current project was byte-identical to the pre-update copy.
+
+Code: `49c10dd`. Package SHA-256:
+`fb59157c0da6b9aafd8bf4ed612a8d9179df3aa948cd7cf14594fbe919201a58`.
+Local receipt: `build/install-tie4-2026-10-28.json`; backups:
+`build/backup-pre-tie4-2026-10-28/` and `build/backup-post-tie4-2026-10-28/`.
+Physical knob operation still needs the player's hands-on check.
