@@ -83,3 +83,11 @@ rate, and changing division leaves the notes, hits and swing intact.
 This trades step resolution for phrase duration; it does not add steps.
 The combined length/division host test passes 35 checks and the drum suite
 passes 33. Target build passes memory and interrupt checks.
+
+Installed on the connected test unit on 2026-10-28; reboot and editor INFO
+confirm `Switch Blade v0.1-wl-div` (24-byte limit). The unit initially resumed
+an older autosave; restoring current-project object 0 from the fresh pre-update
+backup recovered all edits, verified byte-for-byte by another CRC-checked backup.
+The other seven exposed backup objects also passed CRC verification.
+Local receipt: `build/install-div3-2026-10-28.json`. Package SHA-256:
+`d03e3867590c81f2015b238a5eb2031491686b66ff60a6a54e218017dd488848`. Physical knob use remains unverified.
