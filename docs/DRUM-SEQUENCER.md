@@ -43,7 +43,7 @@ Build: `v0.1-wl-drum1`. User controls are in the README's **Drum step sequencer*
 ## Test-unit installation (2026-10-28)
 
 Elijah confirmed the connected FM-1 was his test unit and authorized replacing JIANT.
-Before installation, all 42 backup objects passed CRC verification in
+Before installation, all 43 backup objects passed CRC verification in
 `build/backup-connected-jiant-2026-10-28.json`.
 
 The installer transferred `build/switchblade-v0.1-wl-drum1.fwsc` (SHA-256
