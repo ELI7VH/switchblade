@@ -583,7 +583,7 @@ static int follow_test(void)
         ok = ui.entry_open && lock_held() == 5u;
         queued(0x90, 60, 100, 1); frame();               /* T1's channel */
         ok &= song.sel == 3u && lock_held() == 5u && midi_lit(0);
-        turn(EN_K1, 3);
+        turn(EN_K2, 3);
         ok &= motion_lock_count(t4) == 1u && !motion_lock_count(&trk[0]);
         fm1_in.notes &= ~(1u << k4); frame();
         frames(48);

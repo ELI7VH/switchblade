@@ -501,13 +501,13 @@ static int lock_undo(void)
     frame();
     for (kn = 0; kn < 27u && kb_map(t, kn) > 127u; kn++)
         ;
-    id = lock_id(0);
+    id = lock_id(1);
     cursor_set(4);
     lk_down(kn);
-    turn(EN_K1, 3);
-    turn(EN_K1, 2);
+    turn(EN_K2, 3);
+    turn(EN_K2, 2);
     lk_up(kn);
-    bad += check("lock undo: a step held, KNOB 1 turned twice: one lock", id != 0xFFu && motion_lock_get(t, 4, id, &v) &&
+    bad += check("lock undo: a step held, KNOB 2 turned twice: one lock", id != 0xFFu && motion_lock_get(t, 4, id, &v) &&
         v == motion_base_value(t, id) + 5);
     hold(B_SAVE);
     bad += check("  SAVE held: the lock is gone (one undo for the whole turn), the step's note stays",

@@ -15,3 +15,5 @@ for unit ownership, firmware safety and the FM-1 handoff queue.
 - 128-step support uses FOR5 (6400 bytes), reading FOR4 (3840) through migration. Read `docs/128-STEPS.md` before changing storage, automation or the editor protocol.
 - Motion places are 9-bit (`STEP_BITS`/`STEP_MASK`); never narrow to a byte. Single melodic UI holds use step+1, not a 64-bit mask.
 - New boundary suites: `seq_128_test.c` and `storage_128_test.c`; the fixture is synthetic, not a device backup.
+
+- Stopped, armed melodic step entry reserves held-note K1 for tie length. Release after stretching advances by note_len; other held knobs keep parameter locks. See `docs/NOTE-STRETCH.md`.

@@ -11,6 +11,7 @@
  * free text (names) is ellipsised at its size. */
 static void draw_menu(void);
 static int name_on(void);                              /* NAME (ui_name.c) */
+static int entry_len_on(void);
 static uint32_t lock_held(void);                       /* parameter locks: the steps held on STEP (ui_input.c) */
 static void name_draw(void);
 #include "ui_led.c"                                    /* 7-segment LED readouts: the BPM, EDIT, HOME */
@@ -1116,6 +1117,11 @@ static void draw_columns(void)
         uint32_t held = lock_held();
         uint32_t st = held - 1u;                                       /* (the first step held: its values) */
         for (c = 0; c < 4u; c++) {
+            if (!c && entry_len_on()) {
+                fmt_int(val, (int32_t)note_len(TSEL, ui.cursor));
+                draw_column(0, "LEN", val, "", VAL(0u), -1, ICON_AUTO);
+                continue;
+            }
             uint32_t id = lock_id(c);
             const param_desc_t *d;
             int16_t v;
@@ -1169,7 +1175,10 @@ static void draw_columns(void)
             fmt_int(sn, (int32_t)ui.cursor + 1);
             str_cpy(sl, "/", 8);
             fmt_int(sl + 1, TSEL->p[P_SLEN]);
-            draw_column(0, "STEP", sn, sl, VAL(0u), -1, ICON_AUTO);
+            if (entry_len_on()) {
+                fmt_int(sn, (int32_t)note_len(TSEL, ui.cursor));
+                draw_column(0, "LEN", sn, "", VAL(0u), -1, ICON_AUTO);
+            } else draw_column(0, "STEP", sn, sl, VAL(0u), -1, ICON_AUTO);
             draw_column(1, "NOTE", val, u, step_on(st) ? VAL(1u) : T_DIM, -1, ICON_AUTO);
             if (step_on(st)) {                            /* a note: its LEN (1.5, KNOB 3: the TIEs after it) */
                 fmt_int(sn, (int32_t)note_len(TSEL, ui.cursor));

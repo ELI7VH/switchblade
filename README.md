@@ -322,3 +322,5 @@ Sequence length knobs offer **2, 4, 8, 16, 32, 48, 64, 128** steps: hold SEQ + K
 For longer phrases, choose a slower division: 64 steps at 1/16 spans 4 bars; at 1/8 it spans 8 bars; at 1/4 it spans 16 bars (4/4). Regular tracks use hold SEQ + K2 for the same division control.
 
 128 steps at 1/16 now give **eight bars in 4/4**. See [128-step controls, save compatibility and validation](docs/128-STEPS.md).
+
+Held-note entry: on a melodic STEP page, arm REC while stopped, hold a note/chord and turn **K1 to stretch**. Release all keys to advance past its full length. [Controls and validation](docs/NOTE-STRETCH.md).

@@ -787,6 +787,24 @@ static void step_edit(uint32_t slot, int32_t steps)
     }
 }
 
+/* During stopped step entry K1 stretches the held note/chord at its anchor.
+ * Panel and incoming MIDI holds share the same entry and release path. */
+static int entry_len_on(void)
+{
+    return ui.entry_open && !ui.home && !ui.menu && !ui.confirm && !ui.layer && !mom_down() &&
+           song.seq_mode && !song.playing && !chain_busy() && ((song.rec >> song.sel) & 1u) &&
+           cur_page()->graph == GR_ROLL && !detail_on() && TSEL->eng_req != ENGI_DRUM &&
+           ((fm1_in.notes & ~kb_layer) || midi_owners[song.sel]);
+}
+static int entry_len_turn(uint32_t slot, int32_t steps)
+{
+    if (slot || !entry_len_on()) return 0;
+    ui.entry_stretch = 1;
+    step_edit(2, steps); /* existing tie, collision, end-of-pattern and undo rules */
+    ui.hot_col = 0; ui.hot_t = 40; ui.force = 1;
+    return 1;
+}
+
 static void edit_param(uint32_t slot, int32_t steps)
 {
     int16_t *vp;
@@ -1114,6 +1132,7 @@ static void entry_note(track_t *t, step_t *st, uint32_t note, uint32_t add)
     uint32_t n, i, j;
     if (!ui.entry_open) {
         ui.entry_open = 1;
+        ui.entry_stretch = 0;
         follow_hold();                                /* (1.6, #242) */
         if (!add) {
             st->n = 0;
@@ -1152,7 +1171,9 @@ static void seq_entry(uint32_t pressed, const uint8_t *mn, uint32_t mk)
     for (k = 0; k < mk; k++)
         entry_note(t, st, mn[k], add);
     if (ui.entry_open && !(fm1_in.notes & ~kb_layer) && !midi_owners[song.sel]) {
-        if (add)
+        if (ui.entry_stretch)
+            cursor_set(ui.cursor + note_len(t, ui.cursor));
+        else if (add)
             ui.entry_open = 0;                          /* (ADD: the cursor stays) */
         else
             cursor_set(ui.cursor + 1);
@@ -1713,6 +1734,7 @@ static void ui_input(void)
             ui.hot_t = 0;
             continue;
         }
+        if (entry_len_turn(k, s)) continue;
         if ((held = lock_held()) != 0u) {               /* a step held on STEP: KNOB k locks (parameter locks) */
             lock_turn(k, s, held);
             ui.hot_col = (uint8_t)k;

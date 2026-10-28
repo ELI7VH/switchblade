@@ -150,6 +150,7 @@ static struct {
     uint8_t fam_last[FAM_COUNT]; /* last page used per family */
     uint8_t bank;                /* SEQ: 16-step bank (follows the cursor) */
     uint8_t cursor;              /* SEQ: step being edited (STEP page KNOB 1 moves it) */
+    uint8_t entry_stretch;       /* held-note K1 length edit: release advances past its complete span */
     uint8_t entry_open;          /* SEQ: keys held since the first press of this entry */
     uint8_t plk_src;             /* parameter locks (ui_input.c lock_*): the sound page whose KNOB 1..4 a step held
                                   * locks, PAGES index + 1; 0 = HOME's four */
@@ -600,6 +601,7 @@ static void cursor_set(int32_t c)
     ui.cursor = (uint8_t)((c % len + len) % len);
     ui.bank = (uint8_t)(ui.cursor / 16u);
     ui.entry_open = 0;
+    ui.entry_stretch = 0;
 }
 
 static void cursor_fix(void)                           /* LEN got shorter: onto the last step */
