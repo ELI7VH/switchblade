@@ -579,32 +579,39 @@ static void rec_note(track_t *t, uint32_t note, uint32_t vel)
     /* the step's notes play later in this pass (it is the next one, not played early yet, or the one playing whose
      * nudge has not come yet): what sounds now must not play again there (rskip) */
     sounds = next ? t->nd_fired != idx + 1u : t->nd_late != ND_NONE;
-    if (s->time != ST_NOTE || !s->n || trk_vmode(t) != V_POLY) {
-        s->n = 0;                                   /* a fresh step */
+    if (s->time != ST_NOTE || (!s->n && !s->hit) || (t->engine != ENGI_DRUM && trk_vmode(t) != V_POLY)) {
+        s->n = 0; s->hit = s->acc = 0;               /* a fresh step */
         s->flags = 0;
         s->vel = 0;
         step_set_nudge(s, off);
     }
+    uint32_t lane = drum_lane(note), lane_hit = t->engine == ENGI_DRUM && note == DRUM_LANE_NOTE[lane];
+    if (lane_hit) {
+        s->hit |= (uint8_t)(1u << lane);
+        if (vel > 110u) s->acc |= (uint8_t)(1u << lane);
+        else s->acc &= (uint8_t)~(1u << lane);
+    }
     for (k = 0; k < s->n && s->note[k] != note; k++)
         ;
-    if (k == s->n) {
+    if (!lane_hit && k == s->n) {
         if (s->n < 4u)
             s->n++;
         s->note[s->n - 1u] = (uint8_t)note;
     }
     s->time = ST_NOTE;
-    if (vel > 110)
+    if (vel > 110 && !lane_hit)
         s->flags |= SF_ACCENT;
-    if (vel > s->vel)
+    if ((!lane_hit || vel <= 110u) && vel > s->vel)
         s->vel = (uint8_t)vel;
     t->seq_active = 1;
     if (sounds) {                                   /* it sounds now: the step must not trigger it again */
         if (t->rskip_idx != idx)
             t->rskip_n = 0;
         t->rskip_idx = (uint8_t)idx;
-        if (t->rskip_n < 4u)
+        if (t->rskip_n < sizeof t->rskip)
             t->rskip[t->rskip_n++] = (uint8_t)note;
     }
+    if (t->engine == ENGI_DRUM) return;          /* hits never tie into the next beat */
     if (!t->rh_n || t->rh_start != idx) {           /* a new hold (one in another step ends) */
         t->rh_n = 0;
         t->rh_start = (uint8_t)idx;
@@ -621,7 +628,7 @@ static void rec_hold(track_t *t, uint32_t idx, uint32_t len)
 {
     step_t *s;
     uint32_t k;
-    if (!t->rh_n)
+    if (!t->rh_n || t->engine == ENGI_DRUM)
         return;
     if (!((song.rec >> trk_index(t)) & 1u) || t->rh_ties + 1u >= len) {
         t->rh_n = 0;                                /* disarmed, or the whole pattern is this note */
@@ -829,7 +836,7 @@ static void keyboard_block(void)
     }
     lay = (fm1_in.buttons & kb_mask) || kb_lock;  /* (#83: kb_lock, a layer locked open with no button held) */
     fx = (fm1_in.buttons & perf_mask) || (kb_lock & 2u);
-    mute = song.grid == 2u ? ~0u : song.grid == 3u ? SONG_KEYS : song.grid == 4u ? ARP_KEYS : 0u;   /* the keys that
+    mute = (song.grid == 2u || song.grid == 5u) ? ~0u : song.grid == 3u ? SONG_KEYS : song.grid == 4u ? ARP_KEYS : 0u;   /* the keys that
                                                   * never sound here (4: the ARP page's, ui_arp.c) */
     for (k = 0; k < 27u; k++) {
         if (!((ch >> k) & 1u))
@@ -1004,7 +1011,7 @@ static __attribute__((noinline)) void seq_step(track_t *t, const step_t *s, uint
     uint32_t len = t->p[P_SLEN] ? (uint32_t)t->p[P_SLEN] : 1u;
     uint32_t next_tie = seq_steps(t)[(idx + 1u) % len].time == ST_TIE;
     uint32_t hits = step_ratchet(s);
-    uint8_t nn[4], vv[4];                           /* the notes it plays */
+    uint8_t nn[12], vv[12];                         /* four exact GM notes plus eight drum lanes */
     uint32_t m = 0, sk = 0;
     /* QNT SEQ: the step's notes snap to the scale as they play. SEQ+T (#218): moved by TRN first, as the keys are.
      * seq_notes keeps the notes that sound: their note-offs match */
@@ -1024,7 +1031,7 @@ static __attribute__((noinline)) void seq_step(track_t *t, const step_t *s, uint
         }
         return;
     }
-    if (s->time == ST_REST || !s->n) {
+    if (s->time == ST_REST || (!s->n && !(t->engine == ENGI_DRUM && s->hit))) {
         seq_release(t);
         return;
     }
@@ -1047,7 +1054,23 @@ static __attribute__((noinline)) void seq_step(track_t *t, const step_t *s, uint
         sk |= ((skip >> i) & 1u) << m;
         m++;
     }
-    if (t->p[P_AMODE]) {                            /* WaveLoop: the ARP plays the step (its live-recorded notes too: */
+    if (t->engine == ENGI_DRUM) {
+        for (i = 0; i < DV_NLANE; i++) {
+            uint32_t note = DRUM_LANE_NOTE[i];
+            if (!((s->hit >> i) & 1u)) continue;
+            for (j = 0; j < m && nn[j] != note; j++) ;
+            if (j < m) {                            /* old note + lane: one trigger, its lane accent/skip still applies */
+                if ((s->acc >> i) & 1u) vv[j] = 127;
+                sk |= ((skip >> (4u + i)) & 1u) << j;
+                continue;
+            }
+            nn[m] = (uint8_t)note;
+            vv[m] = (uint8_t)(((s->acc >> i) & 1u) ? 127u : vel);
+            sk |= ((skip >> (4u + i)) & 1u) << m;
+            m++;
+        }
+    }
+    if (t->p[P_AMODE] && t->engine != ENGI_DRUM) { /* WaveLoop: the ARP plays the step (its live-recorded notes too: */
         seq_chord(t, nn, m, vel, gate, hits == 1u && ((s->flags & SF_SLIDE) != 0 || next_tie));   /* held anyway) */
         return;
     }
@@ -1121,7 +1144,7 @@ static __attribute__((noinline)) void seq_ratchet(track_t *t, uint32_t period)
  * a NOTE step that plays something, x1 (a ratcheted step's parts divide the step: on its start); else 0 */
 static int32_t seq_nudge(const track_t *t, const step_t *s)
 {
-    if (t->p[P_SQNT] || s->time != ST_NOTE || !s->n || step_ratchet(s) != 1u)
+    if (t->p[P_SQNT] || s->time != ST_NOTE || (!s->n && !(t->engine == ENGI_DRUM && s->hit)) || step_ratchet(s) != 1u)
         return 0;
     return step_nudge(s);
 }
@@ -1133,7 +1156,7 @@ static __attribute__((noinline)) uint32_t seq_time(track_t *t, uint32_t idx, uin
 {
     const step_t *s = &seq_steps(t)[idx];
     uint32_t vel = (s->flags & SF_ACCENT) ? 127u : (s->vel ? s->vel : 96u);
-    if (s->time != ST_NOTE || !s->n || step_ratchet(s) != 1u)
+    if (s->time != ST_NOTE || (!s->n && !(t->engine == ENGI_DRUM && s->hit)) || step_ratchet(s) != 1u)
         return 0;
     return mod_time(t, s->note[0], vel, period);
 }
@@ -1162,6 +1185,9 @@ static __attribute__((noinline)) void seq_play(track_t *t, uint32_t idx, uint32_
             for (i = 0; i < s->n; i++)
                 if (s->note[i] == t->rskip[k])
                     skip |= 1u << i;
+            if (t->engine == ENGI_DRUM)
+                for (i = 0; i < DV_NLANE; i++)
+                    if (DRUM_LANE_NOTE[i] == t->rskip[k]) skip |= 1u << (4u + i);
         }
         t->rskip_n = 0;
     }

@@ -1135,6 +1135,20 @@ static void draw_columns(void)
         }
         return;
     }
+    if (drum_grid_on()) {
+        const step_t *st = &TSEL->step[ui.cursor];
+        char bank[8];
+        draw_column(0, "DRUM", drum_lane_name(TSEL, dg_lane()), "", VAL(0u), -1, ICON_AUTO);
+        fmt_int(val, (int32_t)ui.bank + 1);
+        str_cpy(bank, "/", sizeof bank); fmt_int(bank + 1, (TSEL->p[P_SLEN] + 15) / 16);
+        draw_column(1, "PAGE", val, bank, VAL(1u), -1, ICON_AUTO);
+        fmt_int(val, dg.down ? (st->vel ? st->vel : 96) : TSEL->p[P_SLEN]);
+        draw_column(2, dg.down ? "VEL" : "LEN", val, "", VAL(2u), -1, ICON_AUTO);
+        if (dg.down) str_cpy(val, ((st->acc >> dg_lane()) & 1u) || (st->flags & SF_ACCENT) ? "ON" : "OFF", sizeof val);
+        else fmt_int(val, TSEL->p[P_SSWING]);
+        draw_column(3, dg.down ? "ACC" : "SWING", val, "", VAL(3u), -1, ICON_AUTO);
+        return;
+    }
     if (cur_page()->scope == SC_STEP) {
         static const char *const TIME_N[3] = {"NOTE", "TIE", "REST"};
         const step_t *st = &seq_steps(TSEL)[ui.cursor];

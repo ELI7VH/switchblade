@@ -215,7 +215,7 @@ typedef struct {                 /* acid-style step: up to 4 notes (POLY), time,
     uint8_t time;                /* ST_NOTE / ST_TIE / ST_REST */
     uint8_t flags;               /* SF_ACCENT | SF_SLIDE | SF_RATCH */
     uint8_t vel;
-    uint8_t hit, acc;            /* the retired DRUM grid's hits: kept in the struct, never read or stored */
+    uint8_t hit, acc;            /* DRUM: eight kit lanes and their accents; notes[] keeps legacy/variant hits */
     uint8_t probability;         /* 0 = legacy 100%; 1..100 = percent, 101 = silent; 1.5.5: 102..112 a condition */
 } step_t;
 
@@ -329,7 +329,7 @@ typedef struct track {
     step_t step[NSTEP];
     uint32_t seq_pos;            /* q8 samples into the current step */
     uint16_t seq_idx;
-    uint8_t seq_notes[4];        /* sounding seq notes (the step's notes) */
+    uint8_t seq_notes[12];       /* sounding seq notes: 4 exact pitches + 8 drum lanes */
     uint8_t seq_n;
     uint8_t seq_hold;            /* last step slides: keep the notes until the next step */
     uint8_t slide_glide;         /* next legato note glides (slide) */
@@ -337,7 +337,7 @@ typedef struct track {
     uint32_t seq_off;
     uint8_t seq_active;          /* any step programmed */
     uint8_t rskip_idx;           /* live recording put notes into the step about to play: */
-    uint8_t rskip_n, rskip[4];   /* do not trigger them again there (they sound already) */
+    uint8_t rskip_n, rskip[12];  /* do not trigger them again there (they sound already) */
     /* NUDGE (QUANTIZE OFF, seq.c seq_tick): a step plays at its start + its nudge. Latched as a step starts: */
     uint32_t nd_late;            /* the step playing now plays at this seq_pos + 1 (0: it played) */
     uint32_t nd_early;           /* the next step plays early, at this seq_pos + 1 of this one (0: on its start) */

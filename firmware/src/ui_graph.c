@@ -254,6 +254,33 @@ static void graph_roll(const track_t *t, uint16_t c)
         }
     }
 }
+/* DRUM grid: kit names, eight lanes, sixteen keys/steps. */
+static void graph_drum(const track_t *t, uint16_t c)
+{
+    uint32_t lane, i, base = ui.bank * 16u, len = (uint32_t)t->p[P_SLEN];
+    for (lane = 0; lane < DV_NLANE; lane++) {
+        int32_t y = 5 + (int32_t)lane * 12;
+        uint16_t lc = lane == dg_lane() ? T_ACCENT : T_DIM;
+        cv_text_fit(6, y, &AF_S, drum_lane_name(t, lane), lc, T_BG, 42);
+        if (lane == dg_lane()) cv_rect(49, y, 177, 11, T_LANE);
+        for (i = 0; i < 16u && base + i < len; i++) {
+            const step_t *st = &seq_steps(t)[base + i];
+            int32_t x = 50 + (int32_t)i * 11;
+            uint16_t col = (st->flags & SF_ACCENT) || ((st->acc >> lane) & 1u) ? T_TEXT : c;
+            if (dg_has(st, lane)) cv_rect(x + 2, y + 2, 7, 7, lane == dg_lane() ? T_ACCENT : col);
+            else cv_rect(x + 5, y + 5, 1, 1, T_DIM);
+            if (!(i & 3u)) cv_rect(x, y, 1, 11, T_RAISE);
+        }
+    }
+    if (ui.cursor / 16u == ui.bank) {
+        int32_t x = 50 + (int32_t)(ui.cursor % 16u) * 11;
+        cv_rect(x, 3, 10, 1, T_ACCENT);
+        cv_rect(x, 102, 10, 1, T_ACCENT);
+    }
+    if (song.playing && t->seq_idx / 16u == ui.bank)
+        cv_rect(50 + (int32_t)(t->seq_idx % 16u) * 11, 4, 1, 96, T_TEXT);
+}
+
 /* WaveLoop: the ARP pages' grid (ui_arp.c): SHAYPE's pattern of the track, steps across (the cursor's 16; 8 or fewer twice as wide), rows up (row
  * 1 at the bottom, the lowest held note's place). A note is a bar over its steps (its start a notch brighter); the
  * cursor step framed, the step the arp plays a line with its notes lit; the beats' lines brighter. On the left a key per
@@ -834,7 +861,9 @@ static uint32_t graph_signature(void)
         }
         if (detail_on())                             /* DETAIL: QUANTIZE (NUDGE's DIM), the lane named in the accent */
             h = (h ^ (0xD1u + (uint32_t)t->p[P_SQNT] * 31u + (ui.hot_t ? ui.hot_col + 1u : 0u) * 977u)) * 2654435761u;
-        else {                                       /* the roll: its view and the keys held */
+        else if (t->eng_req == ENGI_DRUM) {
+            h = (h ^ dg_lane() ^ ((uint32_t)t->p[P_E0] << 8) ^ dg.down) * 16777619u;
+        } else {                                       /* the roll: its view and the keys held */
             pr_follow(t);
             h = (h ^ (proll.lo + 1u)) * 16777619u;
             h = (h ^ pr_held()) * 16777619u;
@@ -1713,6 +1742,8 @@ static void draw_graph(void)
             cv_oy = 0;
             if (detail_on())                          /* 1.5.1 (#199) */
                 graph_detail(t, c);
+            else if (t->eng_req == ENGI_DRUM)
+                graph_drum(t, c);
             else
                 graph_roll(t, c);
             break;

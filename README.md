@@ -87,6 +87,41 @@ track 4 with the 808 kit, so the Oxygen's pads (channel 4) play drums at once. P
   synth's new note takes a ringing drum's voice before any held note's. A drum voice costs a fraction of a synth voice
   (the audio interrupt's code did not grow: `tests/target_budget.py`).
 
+### Drum step sequencer
+
+On a **DRUM** track, press **SEQ** for the kit grid. Eight named lanes share the track's
+clock, division, swing and pattern length (1–64 steps). Each page shows 16 steps.
+Changing kits keeps the rhythm; names follow the kit (for example CR78's MARAC/CONGA/CLAVE).
+
+| Control | Action |
+| --- | --- |
+| Sixteen white keys, left to right | Toggle steps 1–16 of the displayed page, on release |
+| First eight black keys, left to right | Pick KICK, SNARE, CLAP, closed hat, open hat, TOM, RIM, BELL/RIDE |
+| Knob 1 / an external MIDI pad | Pick the drum to edit |
+| Knob 2 | Page 1–4, within the pattern length |
+| Knob 3 | Pattern length |
+| Knob 4 | Swing |
+| Hold white step key(s) + knob 3 | Set those steps' velocity (shared by their unaccented hits) |
+| Hold white step key(s) + knob 4 | Accent the selected drum: right ON, left OFF |
+| PRESETS | Move the step cursor |
+| EDIT | Clear the selected drum at the cursor; other drums stay |
+| REC + external MIDI pads | Overdub hits live, quantised to the track clock |
+| SEQ again | DETAIL: step chance/condition, ratchets, nudge and velocity |
+
+The key lights show the selected drum's hits and the play position. The displayed page stays
+where you are editing during playback. SAVE held undoes the last grid gesture. The rhythm is
+kept by the existing project/set-list autosave; stop and let autosave finish before powering off.
+
+All eight kit lanes can be programmed on one step. The synth and drums still share eight audio
+voices, so dense beats can steal ringing voices. Closed hats retain the kit's open-hat choke.
+The 909 grid uses its middle tom and ride; record other toms/crash with MIDI or the ordinary
+keyboard on another page. Existing exact GM-note patterns are preserved. Their old accent flag
+still applies to the whole step; editing a legacy note's accent retains that behaviour.
+
+Saved songs stay the same size and older FOR4 songs load normally. **Older firmware does not
+play/store these new lane bits**: keep a backup before downgrading. User sound presets keep the
+kit, while projects and set-list songs keep the full beat.
+
 ### The set list: twelve songs
 
 Beside the four PROJECT slots (as they were), the FM-1 keeps a set list of twelve songs. A song is everything a project

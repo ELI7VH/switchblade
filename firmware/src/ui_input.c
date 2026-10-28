@@ -184,8 +184,8 @@ static uint32_t midi_leds(const track_t *t)
 static uint32_t play_leds(void)
 {
     const track_t *t = TSEL;
-    uint8_t s[4 + ARP_SND];
-    uint32_t n = t->seq_arp ? 0u : t->seq_n < 4u ? t->seq_n : 4u, i, k, note, used = 0, m = 0, hit;   /* (WaveLoop: */
+    uint8_t s[12 + ARP_SND];
+    uint32_t n = t->seq_arp ? 0u : t->seq_n < 12u ? t->seq_n : 12u, i, k, note, used = 0, m = 0, hit;   /* (WaveLoop: */
     uint32_t a = t->arp_n < ARP_SND ? t->arp_n : ARP_SND;                 /* the arp's chord sounds none of its own) */
     for (i = 0; i < n; i++)
         s[i] = t->seq_notes[i];
@@ -233,7 +233,7 @@ static uint32_t step_leds(void)
  * notes playing, over the idle glow */
 static int keys_own(void)
 {
-    return (name_on() && !ui.menu) || ui.layer;
+    return (name_on() && !ui.menu) || ui.layer || drum_grid_on();
 }
 
 /* Discussion #127 (1.2): MENU > SCALE LEDS ON, the keys of the selected track's scale (ROOT, SCALE), bit k = key k, as
@@ -297,7 +297,7 @@ static uint32_t key_leds(uint32_t *br)                 /* (*br: a layer's keys t
     uint32_t c;
     if (br)
         *br = 0;
-    c = name_on() && !ui.menu ? name_leds() : ui.layer ? layer_leds(br) :
+    c = name_on() && !ui.menu ? name_leds() : ui.layer ? layer_leds(br) : drum_grid_on() ? dg_leds() :
         arp_keys_on() ? (((fm1_in.notes & ~kb_layer) | play_leds()) & ~ARP_KEYS) | arp_leds() | op_leds(br) :   /* (ui_arp.c) */
                  (fm1_in.notes & ~kb_layer) | play_leds() | step_leds() | (song_keys_on() ? song_leds() : 0u);
     return c;
@@ -603,7 +603,7 @@ static uint64_t lock_held(void)
     const track_t *t = TSEL;
     uint32_t len = (uint32_t)t->p[P_SLEN], keys = fm1_in.notes & ~kb_layer;
     if (ui.home || ui.menu || ui.confirm || ui.layer || name_on() || !song.seq_mode || cur_page()->graph != GR_ROLL ||
-        !keys || detail_on())                           /* (DETAIL: its knobs are the step's own fields, sd_turn) */
+        !keys || detail_on() || drum_grid_on())                           /* (DETAIL: its knobs are the step's own fields, sd_turn) */
         return 0;
     return ui.entry_open && !live_rec_sel() && ui.cursor < len ? (uint64_t)1 << ui.cursor : 0u;
 }
@@ -741,6 +741,7 @@ static void step_edit(uint32_t slot, int32_t steps)
 {
     step_t *st = &TSEL->step[ui.cursor];
     uint32_t i;
+    if (drum_grid_on()) { dg_turn(slot, steps); return; }
     if (detail_on()) {                                    /* DETAIL (1.5.1): CHANCE RATCH NUDGE VEL */
         follow_hold();
         sd_turn(slot, steps);
@@ -1244,6 +1245,7 @@ static void layer_lock_input(uint32_t pressed);
 static int page_tap(uint32_t b)
 {
     uint32_t f;
+    if (b == B_EDIT && drum_grid_on()) { dg_clear(); return 1; }
     if (b == B_EDIT && detail_on()) {                    /* DETAIL (1.5.1): the step's CHANCE RATCH NUDGE VEL back */
         if (chain_busy())
             ui_message("STOP TO EDIT");
@@ -1307,7 +1309,7 @@ static void midi_take(void)
 /* an edit of the selected track in progress: a step held for a lock, a step being entered on the roll, a dialog */
 static int mf_busy(void)
 {
-    return lock_held() || (ui.entry_open && (fm1_in.notes & ~kb_layer)) || ui.confirm;
+    return (drum_grid_on() && dg.down) || lock_held() || (ui.entry_open && (fm1_in.notes & ~kb_layer)) || ui.confirm;
 }
 static int midi_follow(void)
 {
@@ -1656,7 +1658,10 @@ static void ui_input(void)
     song.grid = (uint8_t)keys_mode();                 /* (seq.c: what the keys are) */
     if (song.grid != 4u)
         ui.arp.down = ui.arp.made = ui.arp.moved = 0;   /* (WaveLoop: not on an ARP page, no row key is held for it) */
-    if (song.grid == 3u) {
+    if (song.grid != 5u) dg.down = dg.edited = 0;
+    if (song.grid == 5u) {
+        dg_keys(notes);
+    } else if (song.grid == 3u) {
         song_keys(notes);
     } else if (song.grid == 4u) {                       /* WaveLoop: an ARP page, the row keys (ui_arp.c) */
         arp_keys(notes);

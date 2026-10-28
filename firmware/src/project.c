@@ -221,7 +221,8 @@ static int proj_pack(project_store_t *out, const project_t *q)
                                                          * velocity 0..127, accents */
             b[pos++] = (uint8_t)(s->n | s->time << 3 | (s->flags & 3u) << 5);
             b[pos++] = (uint8_t)((s->vel > 127u ? 127u : s->vel) | (r & 1u) << 7);
-            b[pos++] = 0; b[pos++] = 0;                 /* (the retired DRUM grid's hits and accents) */
+            b[pos++] = q->t[t].engine == ENGI_DRUM ? s->hit : 0;
+            b[pos++] = q->t[t].engine == ENGI_DRUM ? s->acc & s->hit : 0; /* zero in older FOR4 songs */
             b[pos++] = (uint8_t)(s->probability | (r >> 1) << 7);
         }
     }
@@ -273,7 +274,8 @@ static int proj_unpack(project_t *q, const uint8_t *b, uint32_t st)
             meta = b[pos++];
             s->n = meta & 7u; s->time = (meta >> 3) & 3u; s->flags = (meta >> 5) & 3u;
             s->vel = b[pos] & 127u; meta |= (b[pos++] & 128u) << 1;      /* (RATCH bit 0 at bit 8 of meta) */
-            pos += 2u;                                  /* (the retired DRUM grid's hits and accents: not read) */
+            s->hit = q->t[t].engine == ENGI_DRUM ? b[pos] : 0; pos++;
+            s->acc = b[pos++] & s->hit;
             s->probability = b[pos] & 127u; meta |= (b[pos++] & 128u) << 2;   /* (bit 1 at bit 9) */
             if ((meta & 255u) > 127u || s->n > 4u || s->time > ST_REST || s->probability >= COND_FIRST + NCOND) return 0;
             step_set_ratchet(s, (meta >> 8) + 1u);
@@ -317,7 +319,7 @@ static void proj_steps(step_t *s)            /* a loaded sequence stays inside i
         if (s[i].n > 4u) s[i].n = 4;
         if (s[i].time > ST_REST) s[i].time = ST_REST;
         for (j = 0; j < 4u; j++) s[i].note[j] &= 127u;
-        s[i].hit = s[i].acc = 0;
+        s[i].acc &= s[i].hit;
     }
 }
 
@@ -329,6 +331,7 @@ static void proj_bound(project_t *q)
         proj_steps(q->t[t].step);
         for (i = 0; i < NSTEP; i++) {
             step_t *s = &q->t[t].step[i];
+            if (q->t[t].engine != ENGI_DRUM) s->hit = s->acc = 0;
             s->flags &= 3u | SF_RATCH | SF_NUDGE;
             s->vel &= 127u;
             if (s->probability >= COND_FIRST + NCOND) s->probability = 0;
@@ -457,7 +460,7 @@ static uint32_t proj_density(const proj_trk_t *t, uint8_t *n)
             const step_t *s = &t->step[i];
             if (s->time == ST_TIE)
                 w += 1u;
-            else if (s->time == ST_NOTE && s->n && step_chance(s))
+            else if (s->time == ST_NOTE && (s->n || s->hit) && step_chance(s))
                 w += (s->flags & SF_ACCENT) ? 3u : 2u;
         }
         w = (w + (i1 - i0) - 1u) / (i1 - i0);

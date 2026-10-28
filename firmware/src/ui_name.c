@@ -59,7 +59,7 @@ static void name_close(void)
 }
 /* the keys: 2 = NAME's (silent), 3 = SONG's A..D (ui.c song_keys_on), 4 = the ARP pages' row keys (ui_arp.c), 0 = notes
  * (seq.c keyboard_block reads song.grid) */
-static uint32_t keys_mode(void) { return name_on() ? 2u : song_keys_on() ? 3u : arp_keys_on() ? 4u : 0u; }
+static uint32_t keys_mode(void) { return name_on() ? 2u : song_keys_on() ? 3u : arp_keys_on() ? 4u : drum_grid_on() ? 5u : 0u; }
 
 static const char *nm_group(uint32_t p)                /* white key place p's characters */
 {

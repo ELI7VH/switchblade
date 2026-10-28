@@ -540,7 +540,7 @@ static void page_entered(void)
     ui.force = 1;
 }
 
-static int step_on(const step_t *st) { return st->time == ST_NOTE && st->n; }
+static int step_on(const step_t *st) { return st->time == ST_NOTE && (st->n || st->hit); }
 /* 1.5.1 (#199): a step whose CHANCE, RATCH or NUDGE is off its default: marked on the roll and the grid (ui_graph.c).
  * Not VEL: every recorded step has one */
 static int step_detailed(const step_t *st)
@@ -636,7 +636,7 @@ static void follow_hold(void)
 static void follow_poll(void)
 {
     uint32_t len = (uint32_t)TSEL->p[P_SLEN], want;
-    if (!song.playing || ui.home || ui.menu || ui.confirm || cur_page()->graph != GR_ROLL) {
+    if (!song.playing || ui.home || ui.menu || ui.confirm || TSEL->eng_req == ENGI_DRUM || cur_page()->graph != GR_ROLL) {
         follow.hold = 0;
         return;
     }
@@ -1558,6 +1558,7 @@ static void track_select(uint32_t i)
 
 #include "ui_events.c"                            /* SEQ > AUTOMATION: locks, events, CHANCE, RATCH as a list (an action page) */
 #include "midi_learn.c"                           /* MIDI LEARN (1.5): GLO + D4, a knob, a CC */
+#include "ui_drum.c"
 #include "ui_arp.c"                               /* WaveLoop: the ARP pages (SHAYPE's grid: the cursor, the row keys) */
 
 /* ---------------------------------------------------- action pages --- */

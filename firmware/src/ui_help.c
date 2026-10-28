@@ -63,6 +63,7 @@ static const char *help_page(void)
 {
     uint32_t i;
     const char *t;
+    if (drum_grid_on()) return "[KEYS]STEPS[K1]DRUM[K2]PAGE";
     if (ui.home)
         return H_HOME;
     t = cur_page()->title;

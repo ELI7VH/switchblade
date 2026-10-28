@@ -566,6 +566,7 @@ static int follow_test(void)
     {   /* a step held for a lock (step recording on SEQ > STEP): the selection stays until it is let go */
         track_t *t4 = &trk[3];
         uint32_t k4;
+        set_engine_of(t4, ENGI_WAVE); frame(); /* this test exercises melodic step-entry locks */
         menu_put(MI_MFOLLOW, 1);
         song.sel = 3;
         track_defaults_steps(t4);
