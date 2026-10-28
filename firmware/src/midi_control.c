@@ -518,6 +518,7 @@ static __attribute__((noinline)) void mout_block(uint32_t seq_n, uint32_t clock_
  * still), CC112's (fader buttons 1 / 2: 63 previous, 65 next machine, 64 their release), CC115's presses; done by
  * ui_input.c wl_encoder. Bytes 3..7 the knob card (ui_draw.c draw_knob_card): a count that moves on each change, the
  * track, the parameter (P_*, or KC_WHEEL: the mod wheel 0..127), its value (LSB first) */
+#define KC_LIVE 0xF0u /* four master-strip cards, CC20..23 */
 #define KC_WHEEL 0xFEu
 static volatile uint8_t *const wl_io;
 #define wl_enc_sound (wl_io[0])
@@ -636,8 +637,39 @@ static void __attribute__((noinline)) midi_cc_map(track_t *t, uint32_t cc, uint3
         midi_cc_set(t, (uint32_t)id, value);
 }
 
+/* Dedicated master CCs on channel 16 never become track edits or learned parameters. */
+static int sb_live_cc(uint32_t ch, uint32_t cc, uint32_t value)
+{
+    static uint8_t transport_down;
+    uint32_t old, now, bit;
+    if (ch != 15u) return 0;
+    if (cc == 120u || cc == 121u || cc == 123u) {
+        sb_repeat = sb_dirt = sb_delay = 0; sb_filter = 0; transport_down = 0;
+        return 0;
+    }
+    if (cc >= 20u && cc <= 23u) kc_note(song.sel, KC_LIVE + cc - 20u, (int32_t)value);
+    switch (cc) {
+    case 20: old=sb_repeat_fx(); sb_repeat=(uint8_t)value; now=sb_repeat_fx();
+        if (now != PF_N && (now != old || value >= 124u)) perf_ord[now]=++perf_seq;
+        return 1;
+    case 21: sb_dirt=(uint8_t)value; return 1;
+    case 22: sb_delay=(uint8_t)value; return 1;
+    case 23: sb_filter=(int8_t)(value < 63u ? -(int32_t)(63u-value)*100/63 : value > 64u ? (int32_t)(value-64u)*100/63 : 0); return 1;
+    case 106: case 107: case 108:
+        bit=1u<<(cc-106u); old=transport_down;
+        if(value>=64u)transport_down|=(uint8_t)bit; else transport_down&=(uint8_t)~bit;
+        if(value>=64u && !(old&bit)) {
+            if(cc==106u)transport_req=2; else if(cc==107u)transport_req=1;
+            else song.rec^=(uint8_t)(1u<<song.sel);
+        }
+        return 1;
+    default:return 0;
+    }
+}
+
 static void midi_control(uint32_t ch, uint32_t cc, uint32_t value)
 {
+    if (sb_live_cc(ch, cc, value)) return;
     midi_channel_t *c = midi_channel(ch);
     uint32_t i, mask;
     switch (cc) {
@@ -730,6 +762,7 @@ static volatile uint8_t *const mpc_io;
  * channel aftertouch, Program Change, so they stay free for other instruments. */
 static void __attribute__((noinline)) midi_event(uint32_t st, uint32_t ch, uint32_t d1, uint32_t d2)
 {
+    if (st == 0xB0u && sb_live_cc(ch, d1, d2)) return;
     if (song.g[G_ROUTE] != 1 && !midi_in_block(ch))
         return;
     if (st == 0x90u || st == 0x80u)

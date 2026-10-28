@@ -100,6 +100,24 @@ static volatile uint32_t perf_latched;   /* ISR: the effects latched (FX LATCH; 
 static volatile uint32_t perf_act;    /* ISR: .. running (a 1/16 one from its start on) */
 static uint32_t perf_ord[PF_N], perf_seq;   /* press order: the last pressed buffer effect plays */
 
+/* fm1-sb-live, channel 16 CC20..23: repeat, dirt, echo throw, bipolar filter. */
+static uint8_t sb_repeat, sb_dirt, sb_delay;
+static int8_t sb_filter;
+static int32_t sb_echo_send, sb_echo_mix;
+static uint32_t sb_echo_tail;
+static uint32_t sb_repeat_fx(void)
+{
+    return !sb_repeat ? PF_N : sb_repeat < 81u ? PF_R8 : sb_repeat < 113u ? PF_R16 : PF_R32;
+}
+static int32_t sb_filter_value(void) { return clamp(perf_k[0] + sb_filter, -100, 100); }
+static int sb_live_on(void) { return sb_repeat || sb_dirt || sb_filter || sb_delay || sb_echo_tail || sb_echo_send || sb_echo_mix; }
+static void sb_echo_tick(uint32_t n)
+{
+    if (sb_delay) sb_echo_tail = 16u * DLY_LEN;
+    else sb_echo_tail = sb_echo_tail > n ? sb_echo_tail - n : 0u;
+    sb_echo_send += clamp((int32_t)sb_delay * 160 - sb_echo_send, -(int32_t)n * 64, (int32_t)n * 64);
+    sb_echo_mix += clamp(sb_echo_tail ? 16384 - sb_echo_mix : -sb_echo_mix, -(int32_t)n * 64, (int32_t)n * 64);
+}
 /* the ZDF state-variable filter at cutoff index i (30 Hz * 2^(i / 7), 0..63: up to 15.4 kHz), k = 1:
  * a1 a2 a3 in Q14 (tools: g = tan(pi fc / fs), a1 = 1 / (1 + g (g + k)), a2 = g a1, a3 = g a2) */
 static const int16_t PF_SVF[64][3] = {
@@ -172,13 +190,13 @@ static void perf_map_put(uint8_t *b, uint32_t p, uint32_t e)
 
 /* the loop length of a REPEAT / REVERSE (1/8) at the tempo, 44.1 kHz samples; 0 = not one */
 static const uint8_t PF_DEN[PF_REV + 1] = {2, 4, 8, 2};
-static uint32_t perf_len(uint32_t e) { return e <= PF_REV ? beat_samples() / PF_DEN[e] : 0u; }
+static uint32_t perf_len(uint32_t e) { return e <= PF_REV ? beat_samples() / (e == PF_R32 && sb_repeat >= 124u ? 16u : PF_DEN[e]) : 0u; }
 /* the effects that can run at the tempo: a REPEAT / REVERSE longer than the loop cannot */
 static uint32_t perf_avail(void)
 {
     uint32_t e, m = ~0u, b = beat_samples();
     for (e = PF_R8; e <= PF_REV; e++)
-        if (b > PB_MAX * PF_DEN[e])
+        if (b > PB_MAX * (e == PF_R32 && sb_repeat >= 124u ? 16u : PF_DEN[e]))
             m &= ~PF_BIT(e);
     return m;
 }
@@ -266,7 +284,7 @@ static void perf_buf_start(uint32_t e)
  * recorded switches with a cross-fade, anything else fades the old one out first */
 static void perf_buf_select(uint32_t e)
 {
-    if (e == pf.src && pf.next == PF_N)
+    if (e == pf.src && pf.next == PF_N && (e > PF_REV || pf.len == perf_len(e)))
         return;
     if (e != PF_N && pf.mode == BM_LOOP && pf.state && e <= PF_REV && pf.src != PF_N &&
         perf_len(e) <= 2u * pf.wr) {
@@ -298,10 +316,13 @@ static void perf_buf_select(uint32_t e)
  * Returns 1 when a stage has something to do */
 static __attribute__((noinline)) int perf_begin(uint32_t n)
 {
+    sb_echo_tick(n);
+    uint32_t live = sb_repeat_fx();
     uint32_t held = perf_kill ? 0u : (perf_held | perf_latched | (perf_solo ? (~(uint32_t)perf_solo & 15u) << PF_M1 : 0u)) & perf_avail();
+    if (live != PF_N) held |= PF_BIT(live) & perf_avail();
     uint32_t q, k, ph0, bnd;
     int32_t m;
-    if (!held && !pf.busy && !(perf_k[0] | perf_k[1] | perf_k[2])) {   /* idle: the clock only */
+    if (!held && !pf.busy && !(perf_k[0] | perf_k[1] | perf_k[2]) && !sb_live_on()) {   /* idle: the clock only */
         pf.ph += n;
         pf.sync = 0;
         perf_act = 0;
@@ -326,7 +347,7 @@ static __attribute__((noinline)) int perf_begin(uint32_t n)
     }
     perf_act = pf.act;
     /* the filters: LPF from open down over a bar while its key is held, KNOB 1 left; HPF up, KNOB 1 right */
-    m = perf_k[0];
+    m = sb_filter_value();
     {
         uint32_t bar = 16u * pf.P, t;
         int32_t lt = PF_TOP, ht = 0;
@@ -405,6 +426,7 @@ static __attribute__((noinline)) void perf_pre(const int32_t *ml, const int32_t 
             sd[i] += x;
             sr[i] += x;
         }
+        if (sb_echo_send) sd[i] += mulq15((ml[i] + mr[i]) >> 1, sb_echo_send);
     }
 }
 
@@ -738,11 +760,13 @@ static __attribute__((noinline)) void perf_phaser(int32_t *bl, int32_t *br, uint
     }
 }
 
+#include "sb_live_dirt.c"
+
 /* after the master level: the buffer effect, LPF, HPF, CRUSH on l / r (stereo, Q15) */
 static __attribute__((noinline)) void perf_block(int32_t *bl, int32_t *br, uint32_t n)
 {
     uint32_t i, a = pf.act0, sh, hold;
-    int32_t c = perf_k[1], lt, ht, ct;
+    int32_t c = perf_k[1], lt, ht, ct, sf = sb_filter_value();
     if (c)
         pf.cc = c;
     ct = c ? 32768 : 0;
@@ -759,7 +783,7 @@ static __attribute__((noinline)) void perf_block(int32_t *bl, int32_t *br, uint3
         }
         if (pf.mode != BM_NONE)
             perf_buf(&l, &r);
-        lt = (a & PF_BIT(PF_LPF)) || perf_k[0] < 0 || pf.lc < PF_TOP ? 32768 : 0;
+        lt = (a & PF_BIT(PF_LPF)) || sf < 0 || pf.lc < PF_TOP ? 32768 : 0;
         pf.la += clamp(lt - pf.la, -SL_SLOPE, SL_SLOPE);
         if (pf.la) {
             int32_t fl = pf_svf(clamp(l >> 2, -32767, 32767), &pf.lz[0], pf.lk, 0) << 2;
@@ -769,7 +793,7 @@ static __attribute__((noinline)) void perf_block(int32_t *bl, int32_t *br, uint3
         } else {
             pf.lz[0] = pf.lz[1] = pf.lz[2] = pf.lz[3] = 0;
         }
-        ht = (a & PF_BIT(PF_HPF)) || perf_k[0] > 0 || pf.hc > 0 ? 32768 : 0;
+        ht = (a & PF_BIT(PF_HPF)) || sf > 0 || pf.hc > 0 ? 32768 : 0;
         pf.ha += clamp(ht - pf.ha, -SL_SLOPE, SL_SLOPE);
         if (pf.ha) {
             int32_t fl = pf_svf(clamp(l >> 2, -32767, 32767), &pf.hz[0], pf.hk, 1) << 2;
@@ -798,6 +822,7 @@ static __attribute__((noinline)) void perf_block(int32_t *bl, int32_t *br, uint3
         perf_flanger(bl, br, n);
     if ((pf.act & PF_BIT(PF_PHS)) || pf.pw)
         perf_phaser(bl, br, n);
-    pf.busy = pf.act || pf.mode != BM_NONE || pf.w || pf.la || pf.ha || pf.cw || pf.td || pf.mute || pf.fw || pf.pw || pf.thr ||
-              pf.fn || perf_k[0] || perf_k[1] || perf_k[2];
+    if (sb_dirt || sb_dirt_wet) sb_dirt_block(bl, br, n);
+    pf.busy = sb_dirt_wet || pf.act || pf.mode != BM_NONE || pf.w || pf.la || pf.ha || pf.cw || pf.td || pf.mute || pf.fw || pf.pw || pf.thr ||
+              pf.fn || perf_k[0] || perf_k[1] || perf_k[2] || sb_live_on();
 }

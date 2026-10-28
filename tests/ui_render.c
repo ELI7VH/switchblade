@@ -2066,6 +2066,14 @@ int main(int argc, char **argv)
         fprintf(rep, "(self-test: %u findings above are expected)\n\n", nfind);
         nfind = 0;
     }
+    {   /* Live master cards: endpoints, neutral and the narrow repeat bands. */
+        uint32_t k,j; static const uint8_t values[]={0,1,63,64,80,81,112,113,123,124,127};
+        for(k=0;k<4;k++)for(j=0;j<NELEM(values);j++) {
+            char name[64];snprintf(name,sizeof name,"sb_live_%u_%u",k,values[j]);cur_name=name;
+            setup(S_HOME);machine_mode();ui.wl.on=1;ui.wl.t=fm1_ms;ui.wl.trk=0;ui.wl.id=KC_LIVE+k;ui.wl.v=values[j];
+            draw(S_HOME);lint();write_ppm(out,"MASTER",name);
+        }
+    }
     {   /* WaveLoop's DRUM sequencer: the actual firmware drawing, including held-hit cards. */
         uint32_t kit, large, held, high, i;
         for (high = 0; high < 2; high++) for (kit = 0; kit < 3; kit++) for (large = 0; large < 2; large++) for (held = 0; held < 2; held++) {

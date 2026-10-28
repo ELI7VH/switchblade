@@ -324,3 +324,5 @@ For longer phrases, choose a slower division: 64 steps at 1/16 spans 4 bars; at 
 128 steps at 1/16 now give **eight bars in 4/4**. See [128-step controls, save compatibility and validation](docs/128-STEPS.md).
 
 Held-note entry: on a melodic STEP page, arm REC while stopped, hold a note/chord and turn **K1 to stretch**. Release all keys to advance past its full length. [Controls and validation](docs/NOTE-STRETCH.md).
+
+MiniLab 3 live preset: [fm1-sb-live](controllers/README.md) — master stutter, level-compensated dirt, dub delay and DJ filter on K5–8. Requires v0.1-wl-live5.

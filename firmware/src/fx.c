@@ -603,6 +603,11 @@ static void fx_buses(const int32_t *cho_in, const int32_t *dly_in, const int32_t
     if (pf.ew1 && fb < THR_FB)
         fb += mulq16(THR_FB - fb, (uint32_t)pf.ew1 << 1);   /* ECHO THROW (perform.c): more feedback while held, 0.7
                                                              * at most (the loop's gain below 1: it never runs away) */
+    if (sb_echo_mix) {
+        int32_t target = sb_delay ? 9830 + (int32_t)sb_delay * 182 : fb;
+        if (sb_delay && fb < target) fb = target; /* reaches 1.005 at the top; delay's bounded feedback saturates */
+        if (dmix < sb_echo_mix) dmix = sb_echo_mix;
+    }
     for (i = 0; i < n; i++) {
         int32_t y = 0, x, r;
         /* chorus: modulated short delay, 5..15 ms */

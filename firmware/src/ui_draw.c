@@ -1497,7 +1497,18 @@ static void draw_knob_card(void)
     str_cpy(head, "T1 ", sizeof head);
     head[1] = (char)('1' + ui.wl.trk % NTRK);
     str_cpy(head + 3, ENGINES[t->eng_req % NENGINES]->name, sizeof head - 3);
-    if (ui.wl.id == KC_WHEEL) {                         /* the mod wheel: its vibrato (voice.c), as a share */
+    if (ui.wl.id >= KC_LIVE && ui.wl.id < KC_LIVE + 4u) {
+        static const char *const names[4] = {"STUTTER", "DRIVE / CRUSH", "DUB DELAY", "DJ FILTER"};
+        uint32_t k = ui.wl.id - KC_LIVE;
+        str_cpy(head, "MASTER", sizeof head); name = names[k];
+        if (k == 0u) str_cpy(val, !v ? "OFF" : v < 81 ? "1/8" : v < 113 ? "1/16" : v < 124 ? "1/32" : "1/64", sizeof val);
+        else if (k == 3u) {
+            v = v < 63 ? -(63-v)*100/63 : v > 64 ? (v-64)*100/63 : 0;
+            lo = -100; hi = 100;
+            if (!v) str_cpy(val, "OPEN", sizeof val); else { fmt_int(val,v<0?-v:v);unit=v<0?"LPF":"HPF"; }
+        } else if (!v) str_cpy(val,"OFF",sizeof val);
+        else {fmt_int(val,(v*100+63)/127);unit="%";}
+    } else if (ui.wl.id == KC_WHEEL) {                         /* the mod wheel: its vibrato (voice.c), as a share */
         name = "MOD WHEEL VIBRATO";
         fmt_int(val, (v * 100 + 63) / 127);
         unit = "%";

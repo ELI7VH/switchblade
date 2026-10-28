@@ -334,6 +334,7 @@ static void ed_motion_reply(uint32_t k, uint32_t rc, uint32_t kinds, uint32_t fu
 static int ed_args_ok(uint32_t cmd, const uint8_t *a, uint32_t n)
 {
     switch (cmd) {
+    case 82: return n == 0u; /* read-only live master-strip state */
     case ED_INFO: case ED_DUMP: case ED_PING:
     case ED_UI_STATE: case ED_UI_PALETTES: case ED_LEARN_GET: case ED_PALETTE_GET:
         return !n;
@@ -391,6 +392,8 @@ static void ed_handle(const uint8_t *f, uint32_t n)   /* f: the bytes between F0
     if (ed_learn_handle(cmd, a, na)) { ed_send(); return; }
     if (ed_palette_handle(cmd, a, na)) { ed_send(); return; }
     switch (cmd) {
+    case 82: /* fm1-sb-live: version, repeat/dirt/delay CC values, signed filter v14 */
+        ed_b(1); ed_b(sb_repeat); ed_b(sb_dirt); ed_b(sb_delay); ed_v(sb_filter); break;
     case ED_MOTION: {
         track_t *t = &trk[a[0]]; uint32_t rc = 0;
         if (na > 1u && (a[1] == 7u || a[1] == 8u)) {
