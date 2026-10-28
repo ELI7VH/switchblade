@@ -75,3 +75,17 @@ report and carry the full 6400-byte project.
   and rerun individually. Font metrics were rerun using the same RAQM-capable
   Python environment that generated the fonts. The existing host MOD incremental
   cost threshold still fails; its DSP and threshold were not changed.
+
+## Test-unit installation — 2026-10-28
+
+Installed `v0.1-wl-128a` on the connected FM1-TEST. The installer confirmed
+`FM-1_940` after reboot, and editor INFO returned `Switch Blade v0.1-wl-128`
+(the 24-byte name limit). All four tracks were set to 128 steps at 1/16,
+read back, and accepted final-step (index 127) queries. The fresh 3840-byte
+running-project backup restored through the legacy importer before those edits.
+A subsequent backup returned FOR5, 6400 bytes, with a valid CRC.
+
+Code commit: `201d86a`. Package SHA-256: `aad3594265cb10ae124cf94b6f8a6de91d7dc9733844b8ca909f76a6aa139f13`.
+Local receipt: `build/install-128-2026-10-28.json`; backup folders:
+`build/backup-pre-128-2026-10-28/` and `build/backup-post-128-2026-10-28/`.
+Software verification does not substitute for physical button use or listening.
