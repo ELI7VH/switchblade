@@ -530,6 +530,11 @@ static void engine_block(track_t *t)
             v->stage = 0;
             v->env = v->env_out = 0;
         }
+        if (t->step_drum != (t->eng_req == ENGI_DRUM)) {
+            for (i = 0; i < NSTEP; i++) t->step[i].hit = t->step[i].acc = 0;
+            t->step_drum = t->eng_req == ENGI_DRUM;
+            t->rh_n = 0;
+        }
         t->engine = eng_idx(t->eng_req);
         eng_mem_claim(t);                               /* its state region, before the waiting notes */
         t->xf_on = 0;

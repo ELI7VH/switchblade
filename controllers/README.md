@@ -3,7 +3,7 @@
 Import **fm1-sb-live.minilab3** in Arturia MIDI Control Center, select the User
 memory you want, then **Store To**. Select that program on the MiniLab.
 The native file imported successfully into MIDI Control Center 1.2.0.
-It requires the matching Switch Blade **v0.1-wl-live5** firmware for master effects.
+It requires the matching Switch Blade **v0.1-wl-live5 or newer** firmware for master effects.
 
 Connect MiniLab MIDI OUT to FM-1 MIDI IN. Use keyboard MIDI channel **16** to
 play the selected FM-1 track; pads stay on channel 4 for the drum track. Keep
@@ -57,3 +57,7 @@ Felucca / Switch Blade PERFORM and MIDI paths; preserve their GPL-3.0-only
 headers and credits. New master-strip integration is by Elijah Lucian / Lucian Labs.
 
 MIDI Control Center may move an imported file into its Templates directory. A copy is retained here and in the release bundle.
+
+In **v0.1-wl-hold6**, live-recorded synth releases follow your played hold time;
+start quantization and the MiniLab preset stay the same. See
+[played holds](../docs/PLAYED-HOLDS.md).

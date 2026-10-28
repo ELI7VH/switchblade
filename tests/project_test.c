@@ -55,8 +55,8 @@ int main(void)
     uint32_t i, k;
     int bad = 0, ok;
 
-    bad += check("identity: PROJ_MAGIC is \"FOR4\" (little-endian bytes F O R 4)", PROJ_MAGIC == 0x35524F46u &&
-                 !memcmp("FOR5", &(uint32_t){PROJ_MAGIC}, 4));
+    bad += check("identity: PROJ_MAGIC is \"FOR6\" (little-endian bytes F O R 6)", PROJ_MAGIC == 0x36524F46u &&
+                 !memcmp("FOR6", &(uint32_t){PROJ_MAGIC}, 4));
     bad += check("FOR4 fits one flash object, the retained cache in NOINIT", sizeof(project_store_t) <= 7936u && sizeof(project_store_t) == 6400u);
     bad += check("five machines (WaveLoop: DRUM the fifth): NENGINES 5, P_COUNT 112 (P_MOUT just before P_E0)",
                  NENGINES == 5u && ENGI_DRUM == 4u && P_COUNT == 112u && P_MOUT + 1u == P_E0);

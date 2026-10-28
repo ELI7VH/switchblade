@@ -557,13 +557,37 @@ static __attribute__((noinline)) int32_t rec_nudge(int32_t off, uint32_t period)
     return (off * NUDGE_DIV + (off < 0 ? -(int32_t)period / 2 : (int32_t)period / 2)) / (int32_t)(period ? period : 1u);
 }
 
+/* Finalize the elapsed hold, retaining grid-snapped starts. Ties are only visual /
+ * continuation cells; the recorded timer, rather than GATE, controls release. */
+static void rec_finish(track_t *t)
+{
+    uint32_t len = t->p[P_SLEN] > 0 ? (uint32_t)t->p[P_SLEN] : 1u;
+    uint32_t q = (t->rh_clock + 128u) >> 8;
+    q = q < 1u ? 1u : q > len * 256u ? len * 256u : q;
+    uint32_t period = div_samples((uint32_t)t->p[P_SDIV]);
+    uint32_t gate = (uint32_t)(((uint64_t)period * q + 128u) >> 8);
+    uint32_t ties = 0, span = step_samples(t, period, t->rh_start);
+    while (span < gate && ties + 1u < len) {
+        ties++;
+        span += step_samples(t, period, (t->rh_start + ties) % len);
+    }
+    step_set_hold_q8(&t->step[t->rh_start], q);
+    if (t->rh_ties > ties)
+        t->step[t->rh_last] = t->rh_bak;
+    for (uint32_t n = t->rh_ties + 1u; n <= ties; n++) {
+        step_t *s = &t->step[(t->rh_start + n) % len];
+        memset(s, 0, sizeof *s); s->time = ST_TIE;
+    }
+    t->rh_n = 0;
+}
+
 /* live recording: the note goes into the nearest step, as swung (the one playing, or
  * the next one when it is past the middle of the playing one). Overdub: a step that
  * holds notes gets this one added (a chord of up to 4; when full, the last note is
  * replaced); MONO / LEGATO / UNISON parts keep one note per step, as step entry does.
  * Held on (synth parts): each further step the sequencer enters while the note is
- * held becomes a TIE (rec_hold), up to the pattern length; a release before the middle
- * of the last one puts that step back (rec_release), so a short note stays one step.
+ * held becomes a TIE (rec_hold), up to the pattern length. The release stores
+ * elapsed time in Q8 steps, independently of the quantized note start.
  * A note recorded into another step ends the hold before (the step model ties the
  * notes of one step only). */
 static void rec_note(track_t *t, uint32_t note, uint32_t vel)
@@ -575,6 +599,7 @@ static void rec_note(track_t *t, uint32_t note, uint32_t vel)
     step_t *s;
     if (next)
         idx = (idx + 1u) % len;
+    if (t->engine != ENGI_DRUM && t->rh_n && t->rh_start != idx) rec_finish(t);
     s = &t->step[idx];
     /* the step's notes play later in this pass (it is the next one, not played early yet, or the one playing whose
      * nudge has not come yet): what sounds now must not play again there (rskip) */
@@ -616,6 +641,8 @@ static void rec_note(track_t *t, uint32_t note, uint32_t vel)
         t->rh_n = 0;
         t->rh_start = (uint8_t)idx;
         t->rh_ties = 0;
+        t->rh_clock = t->rh_remainder = 0;
+        step_set_hold_q8(s, 0);
     }
     for (k = 0; k < t->rh_n && t->rh_note[k] != note; k++)
         ;
@@ -631,7 +658,7 @@ static void rec_hold(track_t *t, uint32_t idx, uint32_t len)
     if (!t->rh_n || t->engine == ENGI_DRUM)
         return;
     if (!((song.rec >> trk_index(t)) & 1u) || t->rh_ties + 1u >= len) {
-        t->rh_n = 0;                                /* disarmed, or the whole pattern is this note */
+        rec_finish(t);                              /* disarmed, or a full-pattern hold */
         return;
     }
     if (idx == t->rh_start)
@@ -644,6 +671,7 @@ static void rec_hold(track_t *t, uint32_t idx, uint32_t len)
         s->note[k] = 0;
     s->n = 0;
     s->time = ST_TIE;
+    s->hit = s->acc = 0;
     s->flags = 0;
     s->vel = 0;
 }
@@ -657,9 +685,7 @@ static void rec_release(track_t *t, uint32_t note)
             t->rh_note[k++] = t->rh_note[i];
     if (k == t->rh_n || (t->rh_n = (uint8_t)k))
         return;                                     /* not one of them, or others still held */
-    if (t->rh_ties && t->seq_idx == t->rh_last &&
-        t->seq_pos < step_samples(t, div_samples((uint32_t)t->p[P_SDIV]), t->seq_idx) / 2u)
-        t->step[t->rh_last] = t->rh_bak;            /* released early in it: not held into this step */
+    rec_finish(t);
 }
 
 /* a note into armed track t in the count-in's last eighth: kept for step 1 (cin_flush); once each, 4 per track */
@@ -913,6 +939,7 @@ static void seq_release(track_t *t)
     t->seq_n = 0;
     t->seq_arp = 0;
     t->seq_hold = 0;
+    t->seq_timed = 0;
     t->slide_glide = 0;                             /* live MONO / LEG keys must not glide after it */
 }
 
@@ -934,7 +961,7 @@ static void seq_stop(void)
                 arp_silence(&trk[i]);
         }
         seq_release(&trk[i]);
-        trk[i].rh_n = 0;                           /* a recorded note held over the stop: as far as it got */
+        if (trk[i].rh_n) rec_finish(&trk[i]);
         trk[i].rat_left = 0;
         trk[i].nd_late = trk[i].nd_early = ND_NONE;   /* (a nudged step not played yet: not after the stop) */
         trk[i].nd_fired = 0;
@@ -1025,7 +1052,7 @@ static __attribute__((noinline)) void seq_step(track_t *t, const step_t *s, uint
         }
     }
     if (s->time == ST_TIE) {
-        if (t->seq_n) {
+        if (t->seq_n && !t->seq_timed) {
             t->seq_off = gate + period / 2u;
             t->seq_hold = (s->flags & SF_SLIDE) != 0 || next_tie;   /* chains hold at any GATE / swing */
         }
@@ -1035,6 +1062,8 @@ static __attribute__((noinline)) void seq_step(track_t *t, const step_t *s, uint
         seq_release(t);
         return;
     }
+    uint32_t timed = t->engine != ENGI_DRUM && hits == 1u ? step_hold_q8(s) : 0u;
+    if (timed) gate = (uint32_t)(((uint64_t)period * timed + 128u) >> 8);
     if (hits > 1u) {                                /* RATCH: the gate of a part, no slide or tie out */
         gate = step_samples(t, period, idx) / hits * (uint32_t)t->p[P_SGATE] / 128u;
         if (!(skip & SEQ_REP))
@@ -1071,7 +1100,8 @@ static __attribute__((noinline)) void seq_step(track_t *t, const step_t *s, uint
         }
     }
     if (t->p[P_AMODE] && t->engine != ENGI_DRUM) { /* WaveLoop: the ARP plays the step (its live-recorded notes too: */
-        seq_chord(t, nn, m, vel, gate, hits == 1u && ((s->flags & SF_SLIDE) != 0 || next_tie));   /* held anyway) */
+        seq_chord(t, nn, m, vel, gate, !timed && hits == 1u && ((s->flags & SF_SLIDE) != 0 || next_tie));   /* held anyway) */
+        t->seq_timed = timed != 0;
         return;
     }
     if (t->seq_arp) {                               /* (the ARP went off: its chord was no voice) */
@@ -1098,7 +1128,8 @@ static __attribute__((noinline)) void seq_step(track_t *t, const step_t *s, uint
         if (!((sk >> i) & 1u))
             t->seq_notes[t->seq_n++] = nn[i];
     t->seq_off = gate;
-    t->seq_hold = hits == 1u && ((s->flags & SF_SLIDE) != 0 || next_tie);   /* next step a TIE: keep the notes to it */
+    t->seq_timed = timed != 0;
+    t->seq_hold = !timed && hits == 1u && ((s->flags & SF_SLIDE) != 0 || next_tie);   /* next step a TIE: keep the notes to it */
 }
 
 /* MENU > CONTROL > STEP PREVIEW (1.2, Discussion #169): the UI asks for a step of a track to sound once (aud_req: step
@@ -1272,6 +1303,12 @@ static void seq_tick(track_t *t, uint32_t n)
     if (!song.playing)
         return;
     period = div_samples((uint32_t)t->p[P_SDIV]);
+    if (t->rh_n) {
+        uint64_t ticks = (uint64_t)n * 65536u + t->rh_remainder;
+        uint32_t whole = (uint32_t)(ticks / period);
+        t->rh_clock += whole;
+        t->rh_remainder = (uint32_t)(ticks - (uint64_t)whole * period);
+    }
     len = (uint32_t)t->p[P_SLEN];
     len = len ? len : 1u;
     t->seq_pos += n;

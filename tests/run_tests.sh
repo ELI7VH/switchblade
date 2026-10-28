@@ -376,6 +376,8 @@ if [ -f build/gen/felucca_tables.h ]; then
     run "fm1-sb-live: master routing, repeat bands, dirt level and delay tail" "$OUT/sb_live_test"
     $CC -O1 -w -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/sb_live_protocol_test" tests/sb_live_protocol_test.c -lm
     run "fm1-sb-live: read-only master state and project isolation" "$OUT/sb_live_protocol_test"
+    $CC -O1 -w -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/played_hold_test" tests/played_hold_test.c -lm
+    run "Played hold durations: quantized starts, fractional release, chords, arp and project migration" "$OUT/played_hold_test"
     $CC -O1 -w -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/note_stretch_test" tests/note_stretch_test.c -lm
     run "Held-note K1 length: panel/MIDI, release advance, chords, collisions and 128-step boundary" "$OUT/note_stretch_test"
     $CC -O1 -w -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/seq_128_test" tests/seq_128_test.c -lm

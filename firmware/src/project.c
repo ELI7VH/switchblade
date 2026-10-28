@@ -1,13 +1,16 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
-/* FOR5 projects: four tracks of 128 steps, 128 automation/lock records and
+/* FOR6 projects: four tracks of 128 steps, 128 automation/lock records and
  * per-track SHAYPE / drum state. The 6400-byte wire object is distinct from the
  * runtime structure. Storage extends each A/B base with one retired-sample sector.
  * Legacy FOR4 (3840 bytes, 64 steps) imports without changing its sounds or timing;
- * upper steps start empty. Older firmware cannot load newly saved FOR5 objects.
+ * upper steps start empty. FOR5 imports with its manual gate/tie timing.
+ * FOR6 stores synth hold duration in the otherwise unused lane bytes; old firmware
+ * cannot read new saves. The wire size and flash extents remain unchanged.
  * RAM slot caches live in .pool, are cleared at startup and reload from flash. */
 #define PROJ_LEGACY_MAGIC 0x34524F46u
-#define PROJ_MAGIC 0x35524F46u                 /* "FOR5", little-endian */
+#define PROJ_PREV_MAGIC 0x35524F46u
+#define PROJ_MAGIC 0x36524F46u                 /* "FOR6", little-endian */
 #ifndef SL_N
 #define SL_N 12u                               /* (storage.c: WaveLoop's set list) */
 #endif
@@ -98,7 +101,7 @@ static int proj_engines_ok(const project_t *q)
 }
 static int proj_import(project_t *q, const void *b, int n)
 {
-    if ((n == PROJ_STORE_SIZE && ((const uint32_t *)b)[0] == PROJ_MAGIC) ||
+    if ((n == PROJ_STORE_SIZE && (((const uint32_t *)b)[0] == PROJ_MAGIC || ((const uint32_t *)b)[0] == PROJ_PREV_MAGIC)) ||
         (n == 3840 && ((const uint32_t *)b)[0] == PROJ_LEGACY_MAGIC))
         return proj_unpack(q, b, (uint32_t)n) && proj_engines_ok(q);
     if (n == (int)sizeof *q && proj_ok((const project_t *)b)) {
@@ -220,8 +223,8 @@ static int proj_pack(project_store_t *out, const project_t *q)
                                                          * velocity 0..127, accents */
             b[pos++] = (uint8_t)(s->n | s->time << 3 | (s->flags & 3u) << 5);
             b[pos++] = (uint8_t)((s->vel > 127u ? 127u : s->vel) | (r & 1u) << 7);
-            b[pos++] = q->t[t].engine == ENGI_DRUM ? s->hit : 0;
-            b[pos++] = q->t[t].engine == ENGI_DRUM ? s->acc & s->hit : 0; /* zero in older FOR4 songs */
+            b[pos++] = q->t[t].engine == ENGI_DRUM ? s->hit : (uint8_t)step_hold_q8(s);
+            b[pos++] = q->t[t].engine == ENGI_DRUM ? s->acc & s->hit : (uint8_t)(step_hold_q8(s) >> 8); /* zero in older FOR4 songs */
             b[pos++] = (uint8_t)(s->probability | (r >> 1) << 7);
         }
     }
@@ -255,7 +258,7 @@ static int proj_unpack(project_t *q, const uint8_t *b, uint32_t st)
     uint32_t motion_size = old ? 388u : sizeof q->motion;
     uint32_t name_off = st - 4u - PROJ_NAME_LEN, end = name_off - NTRK * PROJ_FM6_PACKED;
     memcpy(&magic, b, 4); memcpy(&size, b + 4, 4); memcpy(&sum, b + st - 4u, 4);
-    if ((!old && st != PROJ_STORE_SIZE) || magic != (old ? PROJ_LEGACY_MAGIC : PROJ_MAGIC) || size != st || sum != proj_hash(b, st - 4u) ||
+    if ((!old && st != PROJ_STORE_SIZE) || (old ? magic != PROJ_LEGACY_MAGIC : magic != PROJ_MAGIC && magic != PROJ_PREV_MAGIC) || size != st || sum != proj_hash(b, st - 4u) ||
         np != P_COUNT || 68u + NTRK * (np + 2u + ns * 9u) + sizeof q->chain + motion_size > end)
         return 0;
     memset(q, 0, sizeof *q); q->magic = PROJ_MAGIC; q->size = sizeof *q;
@@ -275,8 +278,8 @@ static int proj_unpack(project_t *q, const uint8_t *b, uint32_t st)
             meta = b[pos++];
             s->n = meta & 7u; s->time = (meta >> 3) & 3u; s->flags = (meta >> 5) & 3u;
             s->vel = b[pos] & 127u; meta |= (b[pos++] & 128u) << 1;      /* (RATCH bit 0 at bit 8 of meta) */
-            s->hit = q->t[t].engine == ENGI_DRUM ? b[pos] : 0; pos++;
-            s->acc = b[pos++] & s->hit;
+            s->hit = q->t[t].engine == ENGI_DRUM || magic == PROJ_MAGIC ? b[pos] : 0; pos++;
+            s->acc = q->t[t].engine == ENGI_DRUM ? b[pos] & s->hit : magic == PROJ_MAGIC ? b[pos] : 0; pos++;
             s->probability = b[pos] & 127u; meta |= (b[pos++] & 128u) << 2;   /* (bit 1 at bit 9) */
             if ((meta & 255u) > 127u || s->n > 4u || s->time > ST_REST || s->probability >= COND_FIRST + NCOND) return 0;
             step_set_ratchet(s, (meta >> 8) + 1u);
@@ -335,7 +338,6 @@ static void proj_steps(step_t *s)            /* a loaded sequence stays inside i
         if (s[i].n > 4u) s[i].n = 4;
         if (s[i].time > ST_REST) s[i].time = ST_REST;
         for (j = 0; j < 4u; j++) s[i].note[j] &= 127u;
-        s[i].acc &= s[i].hit;
     }
 }
 
@@ -347,7 +349,8 @@ static void proj_bound(project_t *q)
         proj_steps(q->t[t].step);
         for (i = 0; i < NSTEP; i++) {
             step_t *s = &q->t[t].step[i];
-            if (q->t[t].engine != ENGI_DRUM) s->hit = s->acc = 0;
+            if (q->t[t].engine == ENGI_DRUM) s->acc &= s->hit;
+            else step_set_hold_q8(s, step_hold_q8(s));
             s->flags &= 3u | SF_RATCH | SF_NUDGE;
             s->vel &= 127u;
             if (s->probability >= COND_FIRST + NCOND) s->probability = 0;
@@ -615,6 +618,7 @@ static int project_restore_runtime(const project_t *input)
             t->p[i] = (int16_t)param_fit(d, s->p[i]);
         }
         t->preset = (uint8_t)(ENGINES[e]->npresets ? (s->preset == PROJ_DEF_SOUND ? 0u : s->preset) % ENGINES[e]->npresets : 0u);
+        t->step_drum = e == ENGI_DRUM;
         memcpy(t->step, s->step, sizeof t->step);
         proj_steps(t->step);
         if (ash_valid(&s->arp))                         /* WaveLoop: the ARP's pattern (the ISR is off) */

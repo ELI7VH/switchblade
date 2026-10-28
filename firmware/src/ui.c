@@ -573,6 +573,7 @@ static uint32_t note_len(const track_t *t, uint32_t i)
 }
 static uint32_t note_set_len(track_t *t, uint32_t i, uint32_t want)
 {
+    if (t->engine != ENGI_DRUM) step_set_hold_q8(&t->step[i], 0);
     uint32_t len = (uint32_t)clamp(t->p[P_SLEN], 1, NSTEP), n = note_len(t, i);
     for (; n > want && n > 1u; n--)
         step_clear(&t->step[i + n - 1u]);

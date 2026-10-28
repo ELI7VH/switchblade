@@ -19,3 +19,5 @@ for unit ownership, firmware safety and the FM-1 handoff queue.
 - Stopped, armed melodic step entry reserves held-note K1 for tie length. Release after stretching advances by note_len; other held knobs keep parameter locks. See `docs/NOTE-STRETCH.md`.
 
 - `fm1-sb-live` master controls reserve Ch16 CC20–23 (repeat/dirt/delay/filter). The preset is `controllers/fm1-sb-live.minilab3`; see `docs/FM1-SB-LIVE.md`. Read-only editor command 82 exposes their live values.
+
+- Live-recorded synth holds use FOR6 Q8 durations in the synth-only hit/acc bytes; FOR4/FOR5 import retains old timing. Read `docs/PLAYED-HOLDS.md` before changing gate/tie playback or project encoding.

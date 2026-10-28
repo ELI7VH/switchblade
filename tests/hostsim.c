@@ -547,16 +547,16 @@ static int rec_test(void)
     t3->p[P_VOICE] = V_MONO;
     t2->p[P_SLEN] = 4;
     t3->p[P_SSWING] = 50;                           /* odd steps start 0.2 step late */
-    put_step(t1, 5, 1, (const uint8_t[]){48}, ST_NOTE, 0);   /* an older take: put back by an early release */
+    put_step(t1, 5, 1, (const uint8_t[]){48}, ST_NOTE, 0);   /* an older take: replaced by the recorded hold */
     song.rec = 0x07u;
     transport_req = 1;
-    /* (a) held 3.3 steps from step 2: 2 NOTE, 3 4 TIE, 5 (released early in it) as before */
+    /* (a) held 3.2 steps from step 2: NOTE, three TIE cells, fractional release */
     rec_run_to(t1, 2, 10);
     input_on(t1, 60, 100);
     rec_run_to(t1, 5, 30);
     input_off(t1, 60);
     ok_len = rec_step_is(t1, 2, ST_NOTE, 1, 60) && rec_step_is(t1, 3, ST_TIE, 0, 0) && rec_step_is(t1, 4, ST_TIE, 0, 0) &&
-             rec_step_is(t1, 5, ST_NOTE, 1, 48);
+             rec_step_is(t1, 5, ST_TIE, 0, 0) && step_hold_q8(&t1->step[2]) > 3u * 256u;
     /* (b) released after 0.3 step: one step */
     rec_run_to(t1, 8, 5);
     input_on(t1, 62, 100);
@@ -613,7 +613,7 @@ static int rec_test(void)
     rec_run_to(t3, 14, 50);
     ok_mono = rec_step_is(t3, 10, ST_NOTE, 1, 60) && rec_step_is(t3, 11, ST_TIE, 0, 0) && rec_step_is(t3, 12, ST_NOTE, 1, 62) &&
               rec_step_is(t3, 13, ST_TIE, 0, 0) && t3->step[14].time != ST_TIE;
-    printf("tracks: recording lengths: held 3.3 steps -> NOTE TIE TIE (the 4th step put back) %s; 0.3 step -> one "
+    printf("tracks: recording lengths: held 3.2 steps -> NOTE TIE TIE TIE, fractional release %s; 0.3 step -> one "
            "step %s; past the middle of the next -> NOTE TIE %s\n", ok_len ? "ok" : "FAIL", ok_short ? "ok" : "FAIL",
            ok_half ? "ok" : "FAIL");
     printf("tracks: recording lengths: a chord ties until its last key %s; capped at LEN 4 %s; MONO legato A..B -> "

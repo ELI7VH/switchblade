@@ -22,7 +22,8 @@ Automation places use nine bits: `track << 7 | step`.
 
 Legacy FOR4 (3840 bytes) loads with its existing first 64 steps, timing, sounds,
 drum masks and converted automation addresses; upper steps initialize empty.
-New saves use FOR5. Older firmware cannot read FOR5: export a backup before a
+The 128-step build originally saved FOR5; current builds save same-sized FOR6
+for [played hold timing](PLAYED-HOLDS.md). Older firmware cannot read FOR6: export a backup before a
 downgrade. No automatic conversion back to a shorter format is provided.
 
 The four RAM project caches move from retained NOINIT to zeroed POOL and reload

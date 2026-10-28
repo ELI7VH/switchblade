@@ -217,9 +217,18 @@ typedef struct {                 /* acid-style step: up to 4 notes (POLY), time,
     uint8_t time;                /* ST_NOTE / ST_TIE / ST_REST */
     uint8_t flags;               /* SF_ACCENT | SF_SLIDE | SF_RATCH */
     uint8_t vel;
-    uint8_t hit, acc;            /* DRUM: eight kit lanes and their accents; notes[] keeps legacy/variant hits */
+    uint8_t hit, acc;            /* DRUM: lanes/accents. Synth: recorded Q8 hold; notes[] carries pitches. */
     uint8_t probability;         /* 0 = legacy 100%; 1..100 = percent, 101 = silent; 1.5.5: 102..112 a condition */
 } step_t;
+/* Synth-only recorded duration: Q8 steps; zero retains manual GATE/TIE behavior.
+ * DRUM uses the same two bytes as lane masks. No extra project/flash space. */
+static uint32_t step_hold_q8(const step_t *s) {
+    uint32_t q = s->hit | (uint32_t)s->acc << 8;
+    return s->time == ST_NOTE && s->n && q <= NSTEP * 256u ? q : 0u;
+}
+static void step_set_hold_q8(step_t *s, uint32_t q) {
+    s->hit = (uint8_t)q; s->acc = (uint8_t)(q >> 8);
+}
 
 /* Probability keeps zero-initialized and legacy patterns at 100%. */
 /* 1.5.5 (#209): CONDITIONS, in the chance byte's free values (no format change): COND_FIRST + c - 1 is condition c
@@ -337,6 +346,8 @@ typedef struct track {
     uint8_t slide_glide;         /* next legato note glides (slide) */
     uint8_t rat_left;            /* RATCH: repeats of the playing step still to come (seq.c seq_ratchet) */
     uint32_t seq_off;
+    uint8_t step_drum;           /* interpretation of step hit/acc, updated on project restore */
+    uint8_t seq_timed;           /* recorded release timer spans TIE steps */
     uint8_t seq_active;          /* any step programmed */
     uint8_t rskip_idx;           /* live recording put notes into the step about to play: */
     uint8_t rskip_n, rskip[12];  /* do not trigger them again there (they sound already) */
@@ -346,6 +357,7 @@ typedef struct track {
     uint8_t nd_fired;            /* that step + 1 once it played early (its start then plays nothing), 0 = none */
     /* live recording of held notes (seq.c rec_hold): the steps they are held into become TIEs */
     uint8_t rh_n, rh_note[4];    /* recorded notes still held, 0 = none */
+    uint32_t rh_clock, rh_remainder;           /* held time in Q16 steps, independent of onset snapping */
     uint8_t rh_start;            /* the step they were recorded into */
     uint8_t rh_ties;             /* TIE steps written after it */
     uint8_t rh_last;             /* the last of them; rh_bak: what it held (an early release puts it back) */
