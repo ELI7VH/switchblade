@@ -53,3 +53,20 @@ and confirmed `FM-1_940`. A fresh editor query returned `Switch Blade v0.1-wl-dr
 Track 4 was selected, with kit/preset 2 (909). Raw replies are retained in
 `build/install-test-unit-2026-10-28.json`. Physical control use and listening are not
 verified by this handshake. The separate main Switch Blade and GHOULBOX units were untouched.
+
+## Sequence-length update installed (2026-10-28)
+
+Installed `v0.1-wl-len2` on the connected Switch Blade test unit. Both length knobs
+now offer 2, 4, 8, 16, 32, 48, 64 steps (feature commit `0f6e28c`). The focused
+length suite passes 26 checks; the drum suite passes 33. Target build passes memory
+and interrupt checks. Original drum synthesis is unchanged.
+
+Before installation, all eight objects exposed by the backup API passed CRC checks
+in `build/backup-pre-lengths-2026-10-28/`; this API does not expose separate setlist
+song objects. The same eight objects passed after reboot, and the current project
+is byte-identical. Installation confirmed identity `FM-1_940`; live editor INFO
+reports `Switch Blade v0.1-wl-len` (24-byte name limit).
+
+Package SHA-256: `16fb97678847ac3badac7bf16e559e1366ec5e82bf5e4a9d47ab25d85eb6f4c3`.
+Local receipt: `build/install-lengths-2026-10-28.json`. Physical knob operation
+has not been verified by this software handshake.
