@@ -49,3 +49,23 @@ This is live state; no raw flash address or write operation is exposed.
   alignment failures. Firmware build passes memory and interrupt checks.
 
 Hardware MIDI readback/install evidence, when available, is recorded below.
+
+## Installed test unit
+
+The connected FM1-TEST was observed stopped (CLOCK OUT enabled, no playback or
+note events for three seconds), backed up and updated to `v0.1-wl-live5` on
+2026-10-28. After reboot, INFO identified `Switch Blade v0.1-wl-liv` (24-byte
+limit). The latest pre-update running project was restored instead of the boot
+autosave and verified byte-identical by a fresh CRC-checked backup.
+
+The live endpoint returned the four neutral controls. A stopped-transport probe
+then sent Ch16 CC20=124, CC21=71, CC22=43, CC23=0 and read back repeat 124, dirt
+71, delay 43 and filter -100. All controls were restored to their initial neutral
+values. This verifies the shared MIDI handler over USB; the user's physical
+MiniLab DIN gestures and listening remain separate.
+
+Local receipt: `build/install-live5-2026-10-28.json`.
+Package SHA-256: `f78b6eda9579e75a5b72709556bc1fa3c8950b021eac816f774466770b07771f`.
+The user confirmed loading the MiniLab preset and a direct MIDI cable connection.
+Backup bundle: `build/fm1-sb-live.zip`, with the preset, firmware, license texts
+and pinned corresponding-source link/hash manifest.
