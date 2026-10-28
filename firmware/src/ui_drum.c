@@ -99,7 +99,7 @@ static void dg_turn(uint32_t slot, int32_t steps)
         uint32_t bank = (uint32_t)clamp((int32_t)ui.bank + steps, 0, (t->p[P_SLEN] - 1) / 16);
         cursor_set((int32_t)(bank * 16u));
     } else {
-        uint32_t id = slot == 2u ? P_SLEN : P_SSWING;
+        uint32_t id = slot == 2u ? P_SLEN : P_SDIV;
         step_undo_take(t, 0x8100u | slot);
         t->p[id] = (int16_t)param_turn(&TP[id], t->p[id], steps);
         if (ui.cursor >= (uint32_t)t->p[P_SLEN]) cursor_set(t->p[P_SLEN] - 1);

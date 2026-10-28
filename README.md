@@ -100,7 +100,8 @@ Changing kits keeps the rhythm; names follow the kit (for example CR78's MARAC/C
 | Knob 1 / an external MIDI pad | Pick the drum to edit |
 | Knob 2 | Page 1–4, within the pattern length |
 | Knob 3 | Pattern length |
-| Knob 4 | Swing |
+| Knob 4 | Step division: 1/32 through 4BAR, including triplets |
+| Hold SEQ + knob 3 | Swing |
 | Hold white step key(s) + knob 3 | Set those steps' velocity (shared by their unaccented hits) |
 | Hold white step key(s) + knob 4 | Accent the selected drum: right ON, left OFF |
 | PRESETS | Move the step cursor |
@@ -317,3 +318,5 @@ Install at your own risk.
 GPL-3.0-only, as Felucca: [LICENSE](LICENSE).
 
 Sequence length knobs offer **2, 4, 8, 16, 32, 48, 64** steps: hold SEQ + K1 for melodic tracks, or K3 on the drum grid with no step held. Older songs retain their saved lengths until edited.
+
+For longer phrases, choose a slower division: 64 steps at 1/16 spans 4 bars; at 1/8 it spans 8 bars; at 1/4 it spans 16 bars (4/4). Regular tracks use hold SEQ + K2 for the same division control.

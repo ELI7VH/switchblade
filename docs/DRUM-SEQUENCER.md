@@ -70,3 +70,16 @@ reports `Switch Blade v0.1-wl-len` (24-byte name limit).
 Package SHA-256: `16fb97678847ac3badac7bf16e559e1366ec5e82bf5e4a9d47ab25d85eb6f4c3`.
 Local receipt: `build/install-lengths-2026-10-28.json`. Physical knob operation
 has not been verified by this software handshake.
+
+## Direct step-division control
+
+`v0.1-wl-div3` puts DIV on the drum grid's K4 (no step held). It uses the
+native musical division order, from 4BAR through 1/32 including 8T/16T.
+Holding steps keeps K4's accent gesture. Swing remains hold SEQ + K3;
+regular tracks keep hold SEQ + K2 for division. Old songs retain their stored
+rate, and changing division leaves the notes, hits and swing intact.
+
+64 steps span 4 bars at 1/16, 8 bars at 1/8, or 16 bars at 1/4 in 4/4.
+This trades step resolution for phrase duration; it does not add steps.
+The combined length/division host test passes 35 checks and the drum suite
+passes 33. Target build passes memory and interrupt checks.

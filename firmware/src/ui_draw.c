@@ -1145,8 +1145,8 @@ static void draw_columns(void)
         fmt_int(val, dg.down ? (st->vel ? st->vel : 96) : TSEL->p[P_SLEN]);
         draw_column(2, dg.down ? "VEL" : "LEN", val, "", VAL(2u), -1, ICON_AUTO);
         if (dg.down) str_cpy(val, ((st->acc >> dg_lane()) & 1u) || (st->flags & SF_ACCENT) ? "ON" : "OFF", sizeof val);
-        else fmt_int(val, TSEL->p[P_SSWING]);
-        draw_column(3, dg.down ? "ACC" : "SWING", val, "", VAL(3u), -1, ICON_AUTO);
+        else str_cpy(val, N_DIV[clamp(TSEL->p[P_SDIV], 0, 9)], sizeof val);
+        draw_column(3, dg.down ? "ACC" : "DIV", val, "", VAL(3u), -1, ICON_AUTO);
         return;
     }
     if (cur_page()->scope == SC_STEP) {

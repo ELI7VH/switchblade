@@ -29,5 +29,19 @@ int main(void)
     dg_turn(2,1); CHECK(TSEL->p[P_SLEN]==48);
     dg_turn(2,1); CHECK(TSEL->p[P_SLEN]==64);
     dg_turn(2,-6); CHECK(TSEL->p[P_SLEN]==2);
+    TSEL->p[P_SDIV]=2; TSEL->p[P_SSWING]=23;
+    TSEL->step[0].hit=3;
+    dg_turn(3,-2); CHECK(TSEL->p[P_SDIV]==1); /* 16 -> 8T -> 8 */
+    CHECK(abs((int)div_samples(1)-2*(int)div_samples(2))<=1); /* integer sample rounding */
+    CHECK(TSEL->p[P_SSWING]==23 && TSEL->step[0].hit==3);
+    dg_turn(3,-1); CHECK(TSEL->p[P_SDIV]==0); /* quarter */
+    CHECK(abs((int)div_samples(0)-4*(int)div_samples(2))<=3);
+    dg_turn(3,-100); CHECK(TSEL->p[P_SDIV]==9); /* 4BAR */
+    dg_turn(3,100); CHECK(TSEL->p[P_SDIV]==3); /* 1/32 */
+    dg_turn(3,-1); CHECK(TSEL->p[P_SDIV]==5); /* 16T */
+    btn_down(B_SEQ); frames(500);
+    TSEL->p[P_SSWING]=23; turn(EN_K3,1);
+    CHECK(TSEL->p[P_SSWING]==24);
+    btn_up(B_SEQ); frame();
     printf("sequence length: %d checks passed\n",count); return 0;
 }
