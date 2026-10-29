@@ -43,3 +43,17 @@ own recovery archive. FM1-GHOUL remains excluded from flashing.
 Validation: `python3 tests/fm1_snapshot_test.py` covers split-sector payloads,
 corrupt/torn-copy fallback, generation wrap, empty records, old payload sizes,
 all 34 distinct extension sectors and truncated snapshots.
+
+## Song transfer bridge (xfr11)
+
+xfr11 advertises explicit backup IDs 32..43 for the twelve setlist slots.
+Each uses the existing validated project import, CRC and A/B storage commit;
+zero-length records clear only that musical slot. No raw addresses are accepted.
+LIST/GET preserve the captured runtime while reading stored songs. Runtime PUT
+also selects its stored song number and saves the startup snapshot immediately
+(RESTORE LAST must be ON). Restore settings, banks and slots first, then the
+authoritative running object last. Read back every object before returning to
+the exact glo10 package if that is the requested installation.
+
+The SHOW recovery archive retains its older firmware name and last recorded
+source separately; no matching original firmware binary was available.

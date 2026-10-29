@@ -177,13 +177,13 @@ int main(void)
 
     reset();
     trk[0].step[0] = (step_t){{60}, 1, ST_NOTE, 0, 96, 0, 0};
-    bad += check("LIST captures the runtime: 8 objects (ids 0..7), runtime 3840 B (FUN10)",
-                 list(0, &len, &crc) == 0 && rep[2] == 8u && len == sizeof(project_store_t) && len == PROJ_STORE_SIZE &&
+    bad += check("LIST captures the runtime: 20 objects (0..7 and twelve songs), runtime FOR6",
+                 list(0, &len, &crc) == 0 && rep[2] == 20u && len == sizeof(project_store_t) && len == PROJ_STORE_SIZE &&
                  crc == st_crc32(ED_BK_RAW, len));
     {
         uint32_t i, ok = 1;
         for (i = 0; i < 8u; i++) ok &= rep[3 + i * 11u] == i;
-        bad += check("  .. listed in order 0..7, no retired id (8, 9, 32..34)", ok);
+        bad += check("  .. listed in order 0..7, plus twelve setlist IDs", ok);
     }
     bad += check("an empty project slot lists as length 0", list(2, &len, &crc) == 0 && len == 0);
     bad += check("GET of the runtime copy", get(0, 0, 64) == 0);
@@ -306,12 +306,12 @@ int main(void)
     }
     {   /* the retired ids (8 the FM6 bank, 9 the user presets' FM6 patches, 32..34 the user sample slots) and any
          * other past 7: refused at begin (1), nothing written */
-        static const uint8_t RETIRED[] = {8, 9, 10, 32, 33, 34, 127};
+        static const uint8_t RETIRED[] = {8, 9, 10, 31, 44, 127};
         uint32_t ok = 1;
         before = erases;
         for (uint32_t k = 0; k < sizeof RETIRED; k++)
             ok &= put_begin(RETIRED[k], 0, st_crc32(0, 0)) == 1u && put_begin(RETIRED[k], 64, 0) == 1u;
-        bad += check("PUT of ids 8, 9, 10, 32..34, 127 refused (1), nothing written", ok && erases == before);
+        bad += check("PUT of ids 8, 9, 10, 31, 44, 127 refused (1), nothing written", ok && erases == before);
         ok = !list(0, &len, &crc);                    /* (a fresh capture: GET's only refusal is the id) */
         for (uint32_t k = 0; k < sizeof RETIRED; k++)
             ok &= get(RETIRED[k], 0, 16) == 1u;
@@ -338,6 +338,34 @@ int main(void)
     bad += check("the runtime object restores the tracks",
                  put_all(0, &st, sizeof st, st_crc32(&st, sizeof st)) == 0 && trk[2].step[5].note[0] == 67u &&
                  trk[2].p[P_LEVEL] == 77);
+
+    /* Twelve explicit musical slots, with CRC, malformed and flash-failure guards. */
+    reset();
+    project_capture(&proj_scratch);
+    proj_scratch.rsv = 2;
+    proj_scratch.sum = proj_sum(&proj_scratch);
+    proj_pack(&st, &proj_scratch);
+    for (uint32_t id = 32; id < 44; id++) {
+        before = erases;
+        bad += check("song CRC failure performs no erase", put_all(id, &st, sizeof st, 0) == 2 && erases == before);
+        bad += check("song restores through A/B storage", put_all(id, &st, sizeof st, st_crc32(&st, sizeof st)) == 0 &&
+            st_load(OBJ_SONG0 + id - 32, &v6, sizeof v6) == sizeof v6 && !memcmp(&v6, &st, sizeof st));
+        bad += check("LIST song reads retain captured runtime staging", list(0, &len, &crc) == 0 &&
+            crc == st_crc32(ED_BK_RAW, len) && get(0, 0, 64) == 0 && get(id, 0, 64) == 0);
+        bad += check("song can be cleared", put_all(id, 0, 0, 0) == 0 && !sl_has(id - 32));
+    }
+    before = erases;
+    st.raw[200] ^= 1;
+    bad += check("malformed song project rejected before erase", put_all(32, &st, sizeof st, st_crc32(&st, sizeof st)) == 2 && erases == before);
+    st.raw[200] ^= 1;
+    song.playing = 1;
+    bad += check("song restore refuses playing transport", put_begin(32, sizeof st, st_crc32(&st, sizeof st)) == 3 && erases == before);
+    song.playing = 0;
+    erase_error = 1;
+    bad += check("song flash failure reported", put_all(32, &st, sizeof st, st_crc32(&st, sizeof st)) == 4);
+    erase_error = 0;
+    bad += check("runtime restore selects original song and persists startup", put_all(0, &st, sizeof st, st_crc32(&st, sizeof st)) == 0 && sl_cur == 1 &&
+        st_load(OBJ_AUTOSAVE, &v6, sizeof v6) == sizeof v6 && !memcmp(&v6, &st, sizeof st));
 
     /* user preset banks: unknown record versions are kept as bytes */
     reset();
