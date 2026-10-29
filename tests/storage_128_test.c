@@ -12,12 +12,24 @@ int main(void)
         uint32_t obj=k<4?OBJ_PROJECT0+k:k==4?OBJ_AUTOSAVE:OBJ_SONG0+k-5;
         uint32_t x=st_extra(obj,c);
         ok &= x>=0xB8000 && x<0xDA000;
+        ok &= FL_STORE_OK(x, 4096u) && FL_RANGE_OK(x, 4096u);
+        ok &= FL_STORE_OK(st_sector(obj,c), 4096u);
         for(uint32_t j=0;j<k*2+c;j++) {
             uint32_t q=j/2, other=q<4?OBJ_PROJECT0+q:q==4?OBJ_AUTOSAVE:OBJ_SONG0+q-5;
             ok &= x!=st_extra(other,j%2);
         }
     }
     if(!ok)return 1;
+    if (FL_STORE_OK(0xDA000u,4096u) || FL_STORE_OK(0xDB000u,4096u) ||
+        FL_STORE_OK(0x9F000u,4096u) || FL_STORE_OK(0xE0000u,4096u) ||
+        FL_STORE_OK(0xB7FFFu,4097u) || FL_STORE_OK(0xD9FFFu,2u) ||
+        FL_STORE_OK(0xFFFFFFF0u,4096u)) return 8;
+    /* Real target guards apply to the emulator: every object, both A/B copies. */
+    for(k=0;k<17;k++) {
+        uint32_t obj=k<4?OBJ_PROJECT0+k:k==4?OBJ_AUTOSAVE:OBJ_SONG0+k-5;
+        if(st_save(obj,a,sizeof a) || st_save(obj,b,sizeof b) ||
+           st_load(obj,got,sizeof got)!=sizeof b || memcmp(b,got,sizeof b))return 9;
+    }
     if(st_save(OBJ_SONG0,a,sizeof a))return 2;
     off[0]=st_sector(OBJ_SONG0,0);off[1]=st_sector(OBJ_SONG0,1);
     off[2]=st_extra(OBJ_SONG0,0);off[3]=st_extra(OBJ_SONG0,1);
@@ -34,6 +46,6 @@ int main(void)
     nor[st_extra(OBJ_SONG0,1)]^=1;
     if(st_load(OBJ_SONG0,got,sizeof got)!=sizeof a || memcmp(a,got,sizeof a))return 6;
     if(st_save(OBJ_SETTINGS,b,sizeof b)==0 || st_save(OBJ_UPRESET0,b,sizeof b)==0)return 7;
-    printf("extended storage: 34 unique extension sectors; %u power cuts preserve old data; CRC fallback passes\n",cut);
+    printf("extended storage: target guards, 17 object saves, 34 extension sectors; %u power cuts preserve old data; CRC fallback passes\n",cut);
     return 0;
 }

@@ -15,8 +15,10 @@ static int erase_error, write_protected;
 static uint32_t io_calls;
 
 static int st_read(uint32_t off, void *dst, uint32_t n) { io_calls++; memcpy(dst, nor + off, n); return 0; }
+#include "../firmware/hal/fm1_flash_regions.h"
 static int st_erase(uint32_t off)
 {
+    if (!FL_STORE_OK(off, 4096u)) return -8;
     io_calls++;
     if (erase_error) return -8;
     if (!write_protected) memset(nor + off, 0xFF, 4096);
@@ -26,6 +28,7 @@ static int st_prog(uint32_t off, const void *src, uint32_t n)
 {
     const uint8_t *s = src;
     uint32_t i;
+    if (!FL_STORE_OK(off, n)) return -8;
     io_calls++;
     if (fail_after == 0)
         return -9;

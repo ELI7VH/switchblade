@@ -1525,6 +1525,10 @@ static void ui_input(void)
         if (ui.menu) {
             menu_close();
         } else {
+            if (name_on() && nm.kind == NK_SONG && nm.dirty) {
+                name_ok();
+                if (nm.dirty) { ui_message("WAIT TO SAVE"); return; }
+            }
             ui.menu = 1;                                /* (at the tab and row it was left at) */
             ui.confirm = 0;                             /* (a clear dialog is cancelled, NAME too) */
             name_close();
@@ -1542,8 +1546,15 @@ static void ui_input(void)
             menu_input(oct);
         return;
     }
-    if (name_on() && !ui.confirm) {                     /* NAME: the keys type, KNOB 1 / 2, OCT+ / OCT- (ui_name.c); */
-        if (ui.save_t0)                                 /* SAVE does nothing */
+    if (name_on() && !ui.confirm) {
+        if (nm.kind == NK_SONG && (home == BT_TAP || save == BT_TAP)) {
+            name_ok();
+            if (nm.dirty) { ui_message(transport_busy() ? "STOP TO SAVE" : "WAIT TO SAVE"); return; }
+            name_close();
+            if (home == BT_TAP) go_home(); else open_family(FAM_SAVE);
+            return;
+        }                     /* NAME: the keys type, KNOB 1 / 2, OCT+ / OCT- (ui_name.c); */
+        if (ui.save_t0 && nm.kind != NK_SONG)            /* preset naming keeps SAVE inert */
             ui.save_t0 |= 2u;
         if (((pressed >> panel.btn[B_PLAY]) & 1u) && (song.playing || chain_busy() || seq_counting()))
             transport_req = 2;                          /* PLAY stops a transport started meanwhile (MIDI Start, the

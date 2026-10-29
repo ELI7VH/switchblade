@@ -125,8 +125,7 @@ kit, while projects and set-list songs keep the full beat.
 
 ### The set list: twelve songs
 
-Beside the four PROJECT slots (as they were), the FM-1 keeps a set list of twelve songs. A song is everything a project
-holds: every track's sound and steps, the drums' own values, the song chain, the automation, the name.
+The FM-1 keeps a set list of twelve songs. A song holds: every track's sound and steps, the drums' own values, the song chain, the automation, the name.
 
 - **The music you are playing is always a song**, and it keeps itself: when the autosave writes (stopped, nothing
   sounding, a change, idle 10 s; MENU > SYSTEM > RESTORE LAST), the song is written too, tweaks and all. At power-on
@@ -136,14 +135,14 @@ holds: every track's sound and steps, the drums' own values, the song chain, the
   (playing: STOP TO CHANGE SONG). The song you leave is saved first if it changed, the one you arrive at is the music,
   and the top bar names it.
 - **Hold OCT+ on HOME** (0.7 s) to copy this song into the next free song; the copy is what you play from then on,
-  unnamed (its number tells it apart; a name you give it saving to a PROJECT slot is the song's too). Twelve songs:
-  SET LIST FULL.
+  unnamed. Name it on **SAVE > SONG NAME**. Twelve songs: SET LIST FULL.
 - **HOME's bottom line** shows SONG 3/12 and the song's name (SONG --/12: the set list is full and this music is new).
 - **The octave moved off HOME:** on every other page OCT- / OCT+ shift the octave as before (MIXER is one tap of HOME
   away, and the header shows the octave). Both together still put it back to 0, HOME included. On the ARP pages an OP
   key held makes OCT its shift, as before.
-- Loading a PROJECT slot (SAVE > PROJECT) puts that project into the song you are in; saving one leaves the songs as
-  they are.
+- **SAVE > SONG NAME** opens the name editor directly. Type, then pause for three seconds: the name saves
+  automatically. K1 moves, K2 changes a character, K3 makes a random name. The draft stays pending during playback.
+  See [song naming and save repair](docs/SONG-NAMING.md).
 - RESTORE LAST OFF: no song writes itself while idle (stepping away still saves it) and none comes back at power-on.
 - The order is the songs' numbers; rearranging them is for later. The songs live in flash at 0xA0000..0xB7FFF (A/B
   sectors each, the retired user sample slots); the app's flash writes are now held to the areas it uses.

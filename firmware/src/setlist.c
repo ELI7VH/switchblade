@@ -87,11 +87,11 @@ static void sl_autosaved(uint32_t sig)
 #endif
 }
 /* the autosave holds the music now (a song stepped to: power-on comes back to it); RESTORE LAST OFF: none */
-static void sl_autosave_now(void)
+static int sl_autosave_now(void)
 {
 #if FELUCCA_FLASH
-    if (!flash_ok || (ui_prefs & PREF_RESTORE_OFF))
-        return;
+    if (!flash_ok) return 1;
+    if (ui_prefs & PREF_RESTORE_OFF) return 0;
     project_capture(&proj_scratch);
     proj_wire_gen++;
     if (proj_pack(&proj_wire, &proj_scratch) && st_save(OBJ_AUTOSAVE, &proj_wire, sizeof proj_wire) == 0) {
@@ -99,8 +99,11 @@ static void sl_autosave_now(void)
         as.last = as.t = fm1_ms;
         as.wrote = 1;
         as.err = 0;
+        return 0;
     }
+    as.err = 1;
 #endif
+    return 1;
 }
 
 /* power-on (project.c autosave_boot): song (1..SL_N) the restored music was, 0 none */
@@ -228,4 +231,22 @@ static void song_dupe(void)
     sl_autosave_now();
     sl_say("COPY");
     ui.force = 1;
+}
+
+/* The current setlist song's name, not a project-slot rename. Keep the draft on
+ * failure; commit the song first, then its startup snapshot. Main loop, quiet. */
+static int song_name_save(const char *name)
+{
+    char was[PROJ_NAME_LEN + 1u]; uint8_t prior = sl_cur;
+    if (!autosave_quiet()) return 1;
+    if (sl_cur >= SL_N) sl_cur = (uint8_t)sl_free_from(0);
+    if (sl_cur >= SL_N) { ui_message("SET LIST FULL"); return 1; }
+    str_cpy(was,proj_name,sizeof was); str_cpy(proj_name,name,sizeof proj_name);
+    if (sl_write(sl_cur)) {
+        str_cpy(proj_name,was,sizeof proj_name); sl_cur = prior;
+        ui_message("SONG SAVE ERROR"); return 1;
+    }
+    if (sl_autosave_now()) { ui_message("SONG RESUME ERROR"); return 1; }
+    ui.force = 1;
+    return 0;
 }

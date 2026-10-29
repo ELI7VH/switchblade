@@ -24,7 +24,7 @@
  *                takes it whole, then the keys edit it as any other).
  *   LEDs         every key that types or edits is lit; the key whose letters are being cycled blinks.
  * Spaces at either end are dropped when it is written; an empty name: USER the automatic one, PROJECT none. */
-enum { NK_NONE, NK_USER_SAVE, NK_USER_RENAME, NK_PROJ_SAVE, NK_PROJ_RENAME };
+enum { NK_NONE, NK_USER_SAVE, NK_USER_RENAME, NK_PROJ_SAVE, NK_PROJ_RENAME, NK_SONG };
 #define NM_LEN 12u
 #define NM_TAP_MS 800u                                 /* multi-tap: the next letter within this */
 #define NM_REP_MS 450u                                 /* a held arrow / DELETE repeats after this, */
@@ -45,6 +45,9 @@ static struct {
     uint32_t t, rep_t;                                 /* fm1_ms of the last tap; of the next repeat */
     uint8_t cat;                                       /* USER: the category (CAT_BASS..CAT_ACID) KNOB 3 sets */
     uint32_t rnd;                                      /* PROJECT: KNOB 3's random names (xorshift; 0 = not seeded) */
+    uint8_t dirty, saved_ok;
+    uint32_t edited;
+    char saved[NM_LEN + 1u];
     uint32_t sig;                                      /* drawn-state cache */
     char s[NM_LEN + 1u];
     char ph[NM_LEN + 1u];                              /* what an empty name saves as / shows ("PROJECT A") */
@@ -98,6 +101,10 @@ static void name_open(uint32_t kind, uint32_t slot)
         else
             str_cpy(b, nm.ph, sizeof b);
         nm.cat = (uint8_t)(kind == NK_USER_RENAME ? up_cat(slot) : track_cat(TSEL));
+    } else if (kind == NK_SONG) {
+        const char *ignored; char label[24];
+        sl_line(label, &ignored); str_cpy(nm.ph, label, sizeof nm.ph);
+        project_cur_name(b);
     } else {
         str_cpy(nm.ph, "PROJECT A", sizeof nm.ph);
         nm.ph[8] = (char)('A' + (slot & 3u));
@@ -108,7 +115,14 @@ static void name_open(uint32_t kind, uint32_t slot)
     }
     str_cpy(nm.s, b, sizeof nm.s);
     nm.len = nm.cur = (uint8_t)str_len(nm.s);
+    str_cpy(nm.saved, nm.s, sizeof nm.saved); nm.dirty = nm.saved_ok = 0; nm.edited = fm1_ms;
     ui.force = 1;
+}
+
+static void song_name_open(void) { name_open(NK_SONG, 0); }
+static void song_name_page(uint32_t graph) {
+    if (graph == GR_SONGNAME) song_name_open();
+    else if (nm.kind == NK_SONG) name_close();
 }
 
 /* SAVE > USER / PROJECT, EDIT: rename the selected slot */
@@ -257,6 +271,14 @@ static void name_ok(void)
         ui_message("STOP TO SAVE");
         return;
     }
+    if (nm.kind == NK_SONG) {
+        if (!nm.dirty) return;
+        if (!autosave_quiet()) return;
+        nm.edited = fm1_ms; /* failed writes retry after another idle interval */
+        if (song_name_save(b)) { ui.force = 1; return; }
+        str_cpy(nm.saved, nm.s, sizeof nm.saved); nm.dirty = 0; nm.saved_ok = 1;
+        ui_message("NAME SAVED"); return;
+    }
     switch (nm.kind) {
     case NK_USER_SAVE:
         up_ui_named(2, nm.slot, b, nm.cat);
@@ -279,6 +301,8 @@ static void name_input(uint32_t notes, uint32_t oct)
 {
     uint32_t k;
     int32_t s;
+    uint32_t touched = notes || nm.rep;
+    char was[NM_LEN + 1u]; str_cpy(was, nm.s, sizeof was);
     song.grid = 2;                                     /* (already: keys_mode) */
     if (nm.key && fm1_ms - nm.t >= NM_TAP_MS)          /* 0.8 s without a tap: the letter is kept */
         nm_commit();
@@ -302,9 +326,19 @@ static void name_input(uint32_t notes, uint32_t oct)
         nm.rep_t = fm1_ms + NM_RATE_MS;
     }
     for (k = 0; k < 3u; k++)
-        if ((s = panel_enc(EN_K1 + k)) != 0)
-            nm_knob(k, s);
+        if ((s = panel_enc(EN_K1 + k)) != 0) { touched = 1; nm_knob(k, s); }
     enc_drop();                                        /* the other knobs do nothing here */
+    if (nm.kind == NK_SONG) {
+        if (touched) nm.edited = fm1_ms;
+        if (!str_eq(was,nm.s)) { nm.edited = fm1_ms; nm.dirty = !str_eq(nm.s,nm.saved); nm.saved_ok = 0; ui.force = 1; }
+        if (nm.dirty && fm1_ms - nm.edited >= 3000u) name_ok();
+        if (oct) {
+            name_ok();
+            if (!nm.dirty) { name_close(); go_home(); }
+            else ui_message(transport_busy() ? "STOP TO SAVE" : "WAIT TO SAVE");
+        }
+        return;
+    }
     if (oct & 2u)
         name_ok();
     else if (oct & 1u)
@@ -433,13 +467,18 @@ static void nm_draw_foot(void)
     khint_t a[3], b[3];
     int ok = !transport_busy();
     a[0] = (khint_t){KC_OCTUP, nm.kind == NK_USER_SAVE || nm.kind == NK_PROJ_SAVE ? "SAVE" : "RENAME"};
-    a[1] = (khint_t){KC_OCTDN, "CANCEL"};
+    a[1] = (khint_t){KC_OCTDN, nm.kind == NK_SONG ? "BACK" : "CANCEL"};
     a[2] = (khint_t){KC_K3, nm.kind <= NK_USER_RENAME ? "CATEGORY" : "RANDOM"};   /* (1.2: the category, a random name) */
     b[0] = (khint_t){KC_K1, "MOVE"};
     b[1] = (khint_t){KC_K2, "CHAR"};
     b[2] = (khint_t){KC_KEYS, "TYPE"};
     cv_begin(240, H_FOOT, T_BG);
-    cv_key_row(8, 232, 2, a, 3, ok ? 7u : 6u, T_BG);
+    if (nm.kind == NK_SONG) {
+        a[0] = (khint_t){KC_OCTDN, "BACK"};
+        a[1] = (khint_t){KC_K3, "RANDOM"};
+        cv_key_row(8, 155, 2, a, 2, 3u, T_BG);
+        cv_text_on(160, 2, &AF_S, nm.dirty ? (transport_busy() ? "PENDING" : "EDITING") : nm.saved_ok ? "SAVED" : "AUTO", T_MID, T_BG);
+    } else cv_key_row(8, 232, 2, a, 3, ok ? 7u : 6u, T_BG);
     cv_key_row(8, 232, 21, b, 3, 7u, T_BG);
     cv_blit(0, Y_FOOT);
 }
@@ -447,7 +486,7 @@ static void name_draw(void)
 {
     uint8_t st[8] = {nm.kind, nm.slot, nm.len, nm.cur, nm.num, nm.key, nm.tap, nm.cat};
     uint32_t sig = fnv(fnv(2166136261u, st, sizeof st), nm.s, sizeof nm.s) + ux.gen * 7919u +
-                   (uint32_t)transport_busy() * 104729u;
+                   (uint32_t)transport_busy() * 104729u + nm.dirty * 13007u;
     if (ui.force) {
         draw_frame();
         nm.sig = ~sig;

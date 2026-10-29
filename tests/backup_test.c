@@ -20,13 +20,15 @@ static void lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint1
 #include "../firmware/src/panel.c"
 #include "../firmware/src/ui.c"
 static void panel_setup(void) {}
+static void song_name_page(uint32_t graph) { (void)graph; }
 
 static uint8_t nor[0x100000], flash_ok = 1;
 static int erase_error;
 static uint32_t erases;
 static int st_read(uint32_t off, void *dst, uint32_t n) { memcpy(dst, nor + off, n); return 0; }
-static int st_erase(uint32_t off) { if (erase_error) return -8; memset(nor + off, 0xFF, 4096); erases++; return 0; }
-static int st_prog(uint32_t off, const void *src, uint32_t n) { memcpy(nor + off, src, n); return 0; }
+#include "../firmware/hal/fm1_flash_regions.h"
+static int st_erase(uint32_t off) { if (!FL_STORE_OK(off, 4096u)) return -8; if (erase_error) return -8; memset(nor + off, 0xFF, 4096); erases++; return 0; }
+static int st_prog(uint32_t off, const void *src, uint32_t n) { if (!FL_STORE_OK(off, n)) return -8; memcpy(nor + off, src, n); return 0; }
 static uint32_t irq_save(void) { return 0; }
 static void irq_restore(uint32_t f) { (void)f; }
 static uint32_t fl_jedec_ram(void) { return 0; }

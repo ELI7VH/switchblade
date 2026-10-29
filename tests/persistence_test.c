@@ -27,13 +27,16 @@ static void lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint1
 #include "../firmware/src/ui.c"
 #include "../firmware/src/menu_items.c"
 static void panel_setup(void) {}
+static void song_name_page(uint32_t graph) { (void)graph; }
 
 static uint8_t nor[0x100000], flash_ok = 1;
 static int erase_error, fail_after = -1;
 static uint32_t erases, as_erases;               /* (as_erases: the autosave's two sectors, 0xE5000 / 0xE6000) */
 static int st_read(uint32_t off, void *dst, uint32_t n) { memcpy(dst, nor + off, n); return 0; }
+#include "../firmware/hal/fm1_flash_regions.h"
 static int st_erase(uint32_t off)
 {
+    if (!FL_STORE_OK(off, 4096u)) return -8;
     erases++;
     as_erases += off >= 0xE5000u && off < 0xE7000u;
     if (erase_error) return -8;
@@ -44,6 +47,7 @@ static int st_prog(uint32_t off, const void *src, uint32_t n)
 {
     const uint8_t *s = src;
     uint32_t i;
+    if (!FL_STORE_OK(off, n)) return -8;
     if (fail_after == 0) return -9;
     if (fail_after > 0) fail_after--;
     for (i = 0; i < n; i++) nor[off + i] &= s[i];
@@ -390,6 +394,7 @@ static int setlist_test(void)
     return bad;
 }
 
+#ifndef PERSISTENCE_TEST_NO_MAIN
 int main(void)
 {
     int bad = 0, ok;
@@ -689,3 +694,5 @@ int main(void)
     printf("%s\n", bad ? "PERSISTENCE TEST FAILED" : "persistence test passed");
     return bad != 0;
 }
+
+#endif

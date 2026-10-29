@@ -767,7 +767,7 @@ static int test_save(void)
     press(B_SAVE);
     bad += check("1.2: SAVE again: PHRASES (the patterns, after the sounds)", cur_page()->graph == GR_PATS);
     press(B_SAVE);
-    bad += check("SAVE again still cycles to PROJECT", cur_page()->graph == GR_SLOTS);
+    bad += check("SAVE cycles to the song name editor", cur_page()->graph == GR_SONGNAME && nm.kind == NK_SONG);
     go_home();
     press(B_SAVE);
     bad += check("SAVE from HOME returns directly to USER, even after visiting PROJECT",
@@ -2524,7 +2524,7 @@ static int test_presets_knob(void)
                 sel_ok &= song.g[G_SLOT] == slot + 1 && same_snd && same_steps;
             } else if (g == GR_PATS) {
                 sel_ok &= pat_pick() == ppick + 1u && same_snd && same_steps;
-            } else if (g == GR_SONG) {
+            } else if (g == GR_SONG || g == GR_SONGNAME) {
                 sel_ok &= same_snd && same_steps && ui.page == i;
             } else if (g == GR_EVENTS) {               /* (AUTOMATION: its row, PLAY's to the first record's) */
                 sel_ok &= same_snd && same_steps && ui.page == i && ui.ev_row == 1u;
@@ -2568,7 +2568,7 @@ static int steps_but(const track_t *t, const step_t *ref, uint32_t at, const ste
 static uint32_t auto_cur(void) { uint16_t rw[EV_ROWS]; return ev_cur(rw, 0); }
 static int test_page_cycles(void)
 {
-    static const char *const SAVE_CYC[6] = {"USER", "PRESETS", "PHRASES", "PROJECT", "TOOLS", "USER"};   /* (1.5, #173) */
+    static const char *const SAVE_CYC[6] = {"USER", "PRESETS", "PHRASES", "SONG NAME", "TOOLS", "USER"};   /* (1.5, #173) */
     int bad = 0, ok = 1;
     uint32_t i, n0;
     step_t ref[NSTEP], want;
@@ -2725,7 +2725,9 @@ static int test_product_ux(void)
         if (!page_visible(i))
             continue;
         press(B_REC);
-        if (PAGES[i].graph == GR_SONG)
+        if (PAGES[i].graph == GR_SONGNAME)
+            ok &= name_on() && !song.rec && !transport_req;
+        else if (PAGES[i].graph == GR_SONG)
             ok &= song.rec == 0 && !transport_req && msg_is("[SEQ] TO RECORD");
         else if (PAGES[i].graph == GR_ROLL)            /* #133: STEP's roll arms step recording, stopped */
             ok &= song.rec == 1 && !transport_req && ui.page == i && !ui.home;
@@ -6336,7 +6338,7 @@ static int test_layer_knob_race(void)
         for (mode = 0; mode < 3u; mode++)
             for (k = 0; k < 4u; k++)
                 for (pg = 0; pg <= NPAGES; pg++) {
-                    if (pg < NPAGES && !page_visible(pg))
+                    if (pg < NPAGES && (!page_visible(pg) || PAGES[pg].graph == GR_SONGNAME))
                         continue;
                     if (mode == 2u && LB[l] == B_EDIT && pg < NPAGES &&   /* (EDIT's tap acts there: no lock) */
                         (PAGES[pg].graph == GR_USER || PAGES[pg].graph == GR_SLOTS || PAGES[pg].graph == GR_ROLL ||
@@ -6470,7 +6472,7 @@ static int test_seq_tools(void)
     for (i = 0; i <= NPAGES; i++) {
         ui_power_on();
         if (i == NPAGES) go_home(); else { ui.home = 0; ui.page = (uint8_t)i; page_entered(); }
-        if (i < NPAGES && !page_visible(i))
+        if (i < NPAGES && (!page_visible(i) || PAGES[i].graph == GR_SONGNAME))
             continue;
         frame();
         pg = ui.page;

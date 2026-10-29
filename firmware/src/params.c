@@ -456,7 +456,7 @@ enum { FAM_HOME, FAM_ENV, FAM_LFO, FAM_FX, FAM_SCL, FAM_EDIT, FAM_GLO, FAM_SAVE,
 enum { SC_TRACK, SC_GLOBAL, SC_ENGINE, SC_STEP, SC_TRK };   /* SC_TRK: the TRACKS page (ui_input.c tracks_edit) */
 enum { GR_NONE, GR_ADSR, GR_LFO, GR_STEPS, GR_ARP, GR_SCALE, GR_FX, GR_ROLL, GR_BROWSE, GR_SLOTS, GR_USER, GR_TRK,
        GR_SLCR, GR_MOD, GR_PATS, GR_SONG, GR_TOOLS, GR_CHORD, GR_EVENTS, GR_INS,
-       GR_BIG };   /* (GR_STEPS: SEQ TOOLS' knobs; GR_BIG: VOID FOUR's EDIT, four big cards, ui_big.c) */
+       GR_BIG, GR_SONGNAME };   /* (GR_STEPS: SEQ TOOLS' knobs; GR_BIG: VOID FOUR's EDIT, four big cards, ui_big.c) */
 
 typedef struct {
     const char *title;
@@ -500,7 +500,7 @@ static const page_t PAGES[] = {
     {"PRESETS", FAM_SAVE, SC_GLOBAL, GR_BROWSE, {0xFF, 0xFF, 0xFF, 0xFF}},   /* browser: PRESETS knob / KNOB 1 */
     {"PHRASES", FAM_SAVE, SC_GLOBAL, GR_PATS, {0xFF, 0xFF, 0xFF, 0xFF}},    /* pattern loader: PAT LOAD (ui.c pat_load);
                                                                              * the tap after PRESETS (up to 1.1.5 SEQ's) */
-    {"PROJECT", FAM_SAVE, SC_GLOBAL, GR_SLOTS, {G_SLOT, 0xFF, G_LOAD, G_SAVE}},
+    {"SONG NAME", FAM_SAVE, SC_GLOBAL, GR_SONGNAME, {0xFF, 0xFF, 0xFF, 0xFF}},
     {"TOOLS", FAM_SAVE, SC_GLOBAL, GR_TOOLS, {G_CLRSEQ, G_INITSND, 0xFF, 0xFF}},
     /* WaveLoop: the ARP is SHAYPE; its pattern's grid on every page (ui_graph.c graph_arp, ui_arp.c) */
     {"ARP", FAM_ARP, SC_TRACK, GR_ARP, {P_AMODE, P_APROB, P_ARATE, P_AOCT}},
@@ -515,6 +515,8 @@ static const page_t PAGES[] = {
      * GLO > GLOBAL; its TUNE is MENU > AUDIO's now), again HOME (ui.c home_tap) */
     {"MIXER", FAM_TRK, SC_TRK, GR_TRK, {0, 1, 2, 3}},
     {"CLOCK", FAM_TRK, SC_GLOBAL, GR_NONE, {G_BPM, G_SWING, G_CLOCK, 0xFF}},
+    /* Legacy editor/test access only; excluded from page navigation. */
+    {"PROJECT", FAM_SAVE, SC_GLOBAL, GR_SLOTS, {G_SLOT, 0xFF, G_LOAD, G_SAVE}},
 };
 #define NPAGES (sizeof(PAGES) / sizeof(PAGES[0]))
 static uint8_t mod_ui_slot;      /* the MOD page: the matrix slot (0..3) KNOB 2..4 edit */

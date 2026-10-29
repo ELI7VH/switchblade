@@ -29,6 +29,10 @@ static uint32_t up_cat(uint32_t k);
 static int project_save_as(uint32_t slot, const char *name);
 static void song_step(int dir);                  /* WaveLoop: the set list (setlist.c): HOME's OCT- / OCT+ */
 static void song_dupe(void);
+static void song_name_open(void);
+static void song_name_page(uint32_t graph);
+static int song_name_save(const char *name);
+static int autosave_quiet(void);
 static void sl_line(char *b, const char **name);
 static int project_name(uint32_t slot, char *b);
 static int project_info(uint32_t slot, char *b, uint32_t *len48, uint32_t *den, uint8_t *n);
@@ -445,6 +449,9 @@ static int page_visible(uint32_t i)
     return 1;
 }
 
+/* Keep legacy editor page IDs usable; physical page navigation uses the song editor. */
+static int page_navigable(uint32_t i) { return PAGES[i].graph != GR_SLOTS && page_visible(i); }
+
 static uint32_t page_first(uint32_t fam)
 {
     uint32_t i;
@@ -537,6 +544,7 @@ static void page_entered(void)
     ui.hot_t = 0;                                /* clear the previous page's emphasis */
     ui.act = pg->graph == GR_USER ? 4u : 0u;     /* the save screen is ready for OCT+ */
     ui.tl_clean = 0;
+    song_name_page(ui.home ? GR_NONE : pg->graph);
     help_start();
     ui.force = 1;
 }
@@ -677,7 +685,7 @@ static void open_family(uint32_t fam)
         uint32_t n, i = ui.page;
         for (n = 0; n < NPAGES; n++) {
             i = (i + 1u) % NPAGES;
-            if (PAGES[i].fam == fam && page_visible(i)) break;
+            if (PAGES[i].fam == fam && page_navigable(i)) break;
         }
         ui.page = (uint8_t)i;
     } else if (fam == FAM_SAVE) {
@@ -690,7 +698,7 @@ static void open_family(uint32_t fam)
                                                        * family go on to MACHINE 1, 2, ..) */
     } else {
         uint32_t i = ui.fam_last[fam];
-        ui.page = (uint8_t)(i && i < NPAGES && PAGES[i].fam == fam && page_visible(i) ? i : page_first(fam));
+        ui.page = (uint8_t)(i && i < NPAGES && PAGES[i].fam == fam && page_navigable(i) ? i : page_first(fam));
     }
     ui.fam_last[fam] = ui.page;
     ui.home = 0;
@@ -699,6 +707,7 @@ static void open_family(uint32_t fam)
 
 static void go_home(void)
 {
+    song_name_page(GR_NONE);
     ui.home = 1;
     ui.plk_src = 0;                              /* (parameter locks: HOME's four) */
     ui.entry_open = 0;
@@ -734,7 +743,7 @@ static void page_turn(int32_t dir)
     if (fam == FAM_TRK)
         ring[m++] = 0xFFu;
     for (i = 0; i < NPAGES; i++)
-        if (PAGES[i].fam == fam && page_visible(i)) {
+        if (PAGES[i].fam == fam && page_navigable(i)) {
             if (!ui.home && i == ui.page)
                 at = m;
             ring[m++] = (uint8_t)i;

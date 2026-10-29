@@ -38,7 +38,8 @@ static const struct { const char *title, *hint; } HELP_PAGE[] = {
     {"SONG", "[K1]SECTION[KEYS]A-D[PLAY]SONG"},
     {"USER", "[K1]SLOT[OCT+]SAVE[SAVE]PRESETS"},
     {"PRESETS", "[K2]ENGINE[K3]FAV[K4]LIST"},
-    {"PHRASES", "[K1]PHRASE[OCT+]LOAD[SAVE]PROJECT"},
+    {"PHRASES", "[K1]PHRASE[OCT+]LOAD[SAVE]NAME"},
+    {"SONG NAME", "[KEYS]TYPE[K2]CHAR: AUTO SAVE"},
     {"PROJECT", "[K2]ERASE[K4]SAVE[EDIT]NAME"},   /* (1.5.5, #199: ERASE) */
     {"TOOLS", "[K1]CLEAR[K2]INIT, CLEAN[OCT+]DO"},   /* (1.5.5, #190: KNOB 2 on, CLEAN INIT) */
     {"ARP", "[PRESETS]STEP[KEYS]ROWS[ARP]ARP 2"},   /* (WaveLoop: SHAYPE, ui_arp.c) */
