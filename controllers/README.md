@@ -11,7 +11,7 @@ FM-1 routing CH1–4 (channel 16 additionally follows the selected track).
 
 | Control | Action | MIDI |
 | --- | --- | --- |
-| K1–4 | Selected machine's four edit controls | Ch16 CC74,71,16,17 |
+| K1–4 | Attack, decay, sustain, release (selected track) | Ch16 CC73,75,79,72 |
 | K5 | Master repeat: OFF, 1/8, 1/16, 1/32, 1/64 | Ch16 CC20 |
 | K6 | Master drive / bitcrush with RMS-level compensation | Ch16 CC21 |
 | K7 | Dub delay throw; turn down to stop feeding, let echoes decay | Ch16 CC22 |
@@ -25,6 +25,9 @@ FM-1 routing CH1–4 (channel 16 additionally follows the selected track).
 | B6 / Play | Start | Ch16 CC107 gate |
 | B7 / Record | Toggle REC on selected track | Ch16 CC108 gate |
 | B8 / Tap | Reset master-strip controls | Ch16 CC121 |
+
+K1–4 control the synth amp envelope; use the FM-1 panel for its edit knobs.
+DRUM ignores these envelope CCs. NANO 303 uses decay only.
 
 ## Before playing
 

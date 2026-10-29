@@ -7,6 +7,10 @@ track parameters, master volume or project fields. The controller preset was
 imported into MIDI Control Center and its imported file checked against all eight
 encoder CC/channel assignments and the eight A-bank drum notes.
 
+MiniLab K1–4 now send amp ADSR (Ch16 CC73,75,79,72) for the selected track.
+This is a controller-preset update; existing firmware already handles these CCs.
+Re-import and Store To the MiniLab to apply it. K5–8 keep their master effects.
+
 K5 repeat uses the existing master PERFORM capture/crossfade path, including a
 1/64 override at values 124–127. Same-effect rate changes compare the actual
 loop length, allowing 1/32 <-> 1/64 crossfades without changing saved effect IDs.
