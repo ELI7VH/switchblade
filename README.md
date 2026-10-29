@@ -123,6 +123,12 @@ Saved songs stay the same size and older FOR4 songs load normally. **Older firmw
 play/store these new lane bits**: keep a backup before downgrading. User sound presets keep the
 kit, while projects and set-list songs keep the full beat.
 
+**HOME:** each plain track row shows its bank, patch and entire recorded sequence,
+including all 128 steps. See [HOME sequence overview](docs/HOME-SEQUENCES.md).
+
+**CLOCK 2/2: K4 METRO** selects OFF / REC / ON. It shares the saved metronome
+setting with MENU > AUDIO > CLICK and the REC layer.
+
 ### The set list: twelve songs
 
 The FM-1 keeps a set list of twelve songs. A song holds: every track's sound and steps, the drums' own values, the song chain, the automation, the name.

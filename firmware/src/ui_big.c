@@ -471,24 +471,8 @@ static void head_big(int32_t x, int32_t r)
 }
 
 /* ------------------------------------------------------------------ HOME --- */
-/* Switch Blade's HOME (ui_draw.c draw_columns, ui.home without a layer: big_home): a rack of four units, one per track, each
- * in the style of its machine, over the four knob values. Its knobs are the EDIT page's four (2026-10-20: CUT RES ENV + the
- * machine's own, ui.c home_param, ui_input.c home_turn); the dedicated encoders stay: ALGORITHM the track, PRESETS the sound,
- * SELECT the track's LEVEL.
- *
- *    0  header (draw_head): the track's cushion, the transport and the BPM (an LED), the battery
- *   24  four rack units, 40 px each (a canvas of its own): rack ears with two screws each side, a faceplate in its machine's
- *       look (OB-Z: black, wood cheeks, a blue pinstripe; WAVE: near black, an amber underline with its glow; ACID: brushed
- *       silver; DRIFT: dark, a red band), the track's number on an LED (large), the machine's badge, the sound's category, its
- *       name (M), its number in the machine's list on an LED, and an activity LED that lights while the track sounds (its
- *       meter, a MIDI IN note); the selected track has a white outline (1.5 px) round its faceplate; a muted track's unit is dim
- *  184  KNOB 1..4 (240 x 28, four 57 x 26 bevelled cells): CUTOFF RES ENV and the machine's own, the label (S) over the value
- *       (M) and its unit, as EDIT's cards format them (big_format); the knob just turned: its label and value in the accent; a
- *       control MOTION drives: its label in the theme colour
- *  212  footer (draw_foot, as EDIT's): the selected track's 16 steps, 28 px
- * The unit's colours are its machine's own palette (UI_MACHINE_PALS), not the selected track's. The old level bar of the sound
- * panel and the tabs' meters are gone: the activity LED shows that the track sounds, MIXER shows how loud. LINE (no SURF): the
- * cells are separated by rules instead of bevels. Each strip is drawn again only when what it shows changed (home_sig) */
+/* HOME: four flat track rows. Each shows bank/patch and the entire pattern,
+ * including all 128 steps. Existing knob controls and footer stay in place. */
 #ifndef HOME_HOOK
 #define HOME_HOOK(cat, num, name, face) ((void)0)       /* host: the selected unit's category, number and name (face 2: M) */
 #endif
@@ -534,83 +518,84 @@ static void home_sound_of(const track_t *t, char *cat, char *num, char *name)
     (void)total;
 }
 
-/* the colours of a unit: its machine's palette's tokens */
-static uint16_t hu_mid(const ui_pal_t *p, int pct) { return ux_mix(p->bg, p->text, pct); }
+#define HS_X 26
+#define HS_W 208
+#define HS_Y 17
+#define HS_H 18
+/* The preview scales the whole track, not just its selected 16-step page. */
+static void home_sequence(const track_t *t, uint32_t len, uint16_t ink, uint16_t bg)
+{
+    const step_t *steps = seq_steps(t);
+    uint32_t i, j, lo = 127, hi = 0, drum = t->eng_req == ENGI_DRUM;
+    for (i = 0; i < len; i++) if (steps[i].time == ST_NOTE)
+        for (j = 0; j < steps[i].n && j < 4u; j++) {
+            uint32_t n = steps[i].note[j];
+            if (n < lo) lo = n; if (n > hi) hi = n;
+        }
+    if (hi < lo) lo = 48, hi = 60;
+    if (hi - lo < 12u) hi = lo + 12u;
+    for (i = 0; i < len; i += 16u)
+        cv_rect(HS_X + (int32_t)(i * HS_W / len), HS_Y, 1, HS_H, ux_mix(bg, T_TEXT, 10));
+    if (song.playing && t->seq_idx < len)
+        cv_rect(HS_X + (int32_t)(t->seq_idx * HS_W / len), HS_Y, 1, HS_H, ux_mix(bg, T_ACCENT, 45));
+    for (i = 0; i < len; i++) {
+        const step_t *st = &steps[i];
+        uint32_t x = i * HS_W / len, x1 = (i + 1u) * HS_W / len;
+        if (st->time != ST_NOTE) continue;
+        if (drum) {
+            uint32_t hits = st->hit;
+            for (j = 0; j < st->n && j < 4u; j++) hits |= 1u << drum_lane(st->note[j]);
+            for (j = 0; j < 8u; j++) if ((hits >> j) & 1u)
+                cv_rect(HS_X + (int32_t)x, HS_Y + (int32_t)j * 2, x1 > x ? x1 - x : 1u, 1,
+                        ((st->acc >> j) & 1u) ? T_ACCENT : ink);
+        } else if (st->n) {
+            uint32_t n = 1, q = step_hold_q8(st), w;
+            while (n < len && steps[(i + n) % len].time == ST_TIE) n++;
+            if (!q) q = n * 256u;
+            w = ((i * 256u + q) * HS_W / (len * 256u)) - x;
+            if (!w) w = 1;
+            for (j = 0; j < st->n && j < 4u; j++) {
+                int32_t y = HS_Y + HS_H - 2 - (int32_t)((st->note[j] - lo) * (HS_H - 3u) / (hi - lo));
+                cv_rect(HS_X + (int32_t)x, y, w > HS_W - x ? HS_W - x : w, 2, ink);
+                if (w > HS_W - x) cv_rect(HS_X, y, w - (HS_W - x), 2, ink);
+            }
+        }
+    }
+}
 
-/* unit c (240 x 40) */
 static void home_unit(uint32_t c)
 {
     track_t *t = &trk[c];
-    uint32_t e = t->eng_req % NENGINES, sel = c == song.sel, mute = t->p[P_MUTE] != 0, lit = (uint32_t)midi_lit(c), sig, act;
-    const ui_pal_t *p = &UI_MACHINE_PALS[e];
-    int32_t m = mute ? 0 : meter_px(t->peak), y0 = HOME_TY + (int32_t)c * HU_H, bw, nx;
-    char cat[16], num[16], name[16], d[2] = {(char)('1' + c), 0}, pn[4];
-    uint16_t fill = e == ENGI_ACID ? p->text : p->theme, light = ux_luma(p->text) > ux_luma(p->bg) ? p->text : p->bg,
-             ink = ux_luma(fill) > 150u ? (light == p->text ? p->bg : p->text) : light,
-             tx = mute ? hu_mid(p, 45) : p->text, ear = ux_mix(T_BG, T_TEXT, 16);
+    uint32_t e = t->eng_req % NENGINES, sel = c == song.sel, mute = t->p[P_MUTE] != 0;
+    uint32_t len = (uint32_t)clamp(t->p[P_SLEN], 1, NSTEP), sig;
+    int32_t m = mute ? 0 : meter_px(t->peak);
+    char cat[16], num[16], name[16], bank[20], d[2] = {(char)('1' + c), 0};
+    uint16_t bg = sel && !ux.style ? T_SURF : T_BG, ink = mute ? T_DIM : T_TEXT;
     t->peak = 0;
-    if (m < ts.meter[c] - 1)
-        m = ts.meter[c] - 1;                            /* (falls as the MIXER's: ~2 dB a frame) */
+    if (m < ts.meter[c] - 1) m = ts.meter[c] - 1;
     ts.meter[c] = (uint8_t)(m < 0 ? 0 : m);
-    act = !mute && (ts.meter[c] >= 3 || lit);
     home_sound_of(t, cat, num, name);
-    sig = str_hash(str_hash(str_hash(1u + sel + mute * 2u + act * 4u + ux.gen * 8u + ux.style * 7919u + e * 977u, cat), num), name);
-    if (!ui.force && sig == home_sig[c])
-        return;
+    str_cpy(bank, user_of(t) < UP_SLOTS ? "USER" : ENGINES[e]->name, sizeof bank);
+    str_cpy(bank + str_len(bank), " ", 2);
+    { char n[3] = {num[num[0] == 'S' ? 5 : 0],num[num[0] == 'S' ? 6 : 1],0}; str_cpy(bank + str_len(bank),n,3); }
+    sig = str_hash(str_hash(1u + sel + mute * 2u + ux.gen * 8u + ux.style * 7919u + e * 977u, bank), name);
+    sig = fnv(sig, seq_steps(t), len * sizeof(step_t));
+    sig ^= len * 104729u + (song.playing ? (t->seq_idx + 1u) * 40503u : 0u) +
+           ((song.rec >> c) & 1u) * 15485863u + (uint32_t)(ts.meter[c] >= 3 || midi_lit(c)) * 3571u;
+    if (!ui.force && sig == home_sig[c]) return;
     home_sig[c] = sig;
-    cv_begin(240, HU_H, T_BG);
-    if (ux.style)                                       /* LINE: a rule over each unit (under the header, between the units) */
-        cv_rect(RULE_X0, 0, RULE_W, 1, T_RULE);
-    cv_rect(0, 1, HU_FX, 38, ear);                      /* the rack ears, two screws each */
-    cv_rect(HU_FX + HU_FW, 1, 240 - HU_FX - HU_FW, 38, ear);
-    ctl_screw(6, 8, ux_mix(ear, T_TEXT, 45), T_BG);
-    ctl_screw(6, 31, ux_mix(ear, T_TEXT, 45), T_BG);
-    ctl_screw(233, 8, ux_mix(ear, T_TEXT, 45), T_BG);
-    ctl_screw(233, 31, ux_mix(ear, T_TEXT, 45), T_BG);
-    if (e == ENGI_ACID)                                 /* the faceplate */
-        ctl_brushed_c(HU_FX, HU_FW, y0 + 1, 38, p->bg, p->surf);
-    else
-        cv_rect(HU_FX, 1, HU_FW, 38, p->bg);
-    if (e == ENGI_OBX) {                                /* the OB-6: wood cheeks, a blue pinstripe */
-        ctl_wood(HU_FX + 2, 3, 6, 34, HU_FX + 2, y0 + 3);
-        ctl_wood(HU_FX + HU_FW - 8, 3, 6, 34, HU_FX + HU_FW - 8, y0 + 3);
-        cv_rect(HU_FX + 8, 36, HU_FW - 16, 1, ux_mix(p->bg, p->theme, 75));
-    } else if (e == ENGI_WAVE) {                        /* the plugin: an amber underline and its glow */
-        cv_rect(HU_FX + 2, 34, HU_FW - 4, 1, ux_mix(p->bg, p->theme, 14));
-        cv_rect(HU_FX + 2, 35, HU_FW - 4, 1, ux_mix(p->bg, p->theme, 36));
-        cv_rect(HU_FX + 2, 36, HU_FW - 4, 1, p->theme);
-    } else if (e == ENGI_DRIFT) {                       /* the Juno: a red band across the top */
-        cv_rect(HU_FX + 2, 2, HU_FW - 4, 3, p->theme);
-    } else if (e == ENGI_DRUM) {                        /* WaveLoop: the 808, its step keys' four colours along the bottom */
-        static const uint16_t K808[4] = {RGB(0xd8, 0x3a, 0x22), RGB(0xff, 0x70, 0x2c), RGB(0xff, 0xd2, 0x40),
-                                         RGB(0xe8, 0xe0, 0xc8)};
-        int32_t q = (HU_FW - 4) / 4, j;
-        for (j = 0; j < 4; j++)
-            cv_rect(HU_FX + 2 + j * q, 36, q - 1, 2, K808[j]);
-    }
-    cv_led(HU_LX, HU_LY, LED_L, 1u, d, p->bg, LED_ON);  /* the track's number */
-    bw = ink_w(&AF_S, ENGINES[e]->name) + 14;           /* the badge */
-    cv_rrect(HU_BX, HU_BY, bw, HU_BH, 4, mute ? ux_mix(fill, p->bg, 55) : fill, p->bg);
-    GFX_HOOK_ALIGN(HU_BX, HU_BY, HU_BX + bw, HU_BY + HU_BH, AL_HV, "rack badge label centred");
-    cv_text_in(HU_BX, HU_BY + CAP_IN(S, HU_BH), bw, &AF_S, ENGINES[e]->name, ink, mute ? ux_mix(fill, p->bg, 55) : fill);
-    nx = HU_BX + bw + 8;
-    GFX_HOOK_ALIGN(0, HU_BY, 0, HU_BY + HU_BH, AL_V, "rack category on its badge's line");
-    cv_text_fit(nx, HU_BY + CAP_IN(S, HU_BH), &AF_S, cat, hu_mid(p, 70), p->bg, HU_PX - 6 - nx);
-    GFX_HOOK_ALIGN(0, HU_NY, 0, HU_NY + AF_M_CAP_H, AL_V, "rack name on its band");
-    cv_free_text(HU_BX, HU_NY - AF_M_CAP_Y, &AF_M, name, tx, p->bg, HU_PX - 6 - HU_BX);
-    pn[0] = num[0]; pn[1] = num[1]; pn[2] = 0;
-    if (num[0] == 'S') {                                /* a user preset: "SLOT 07" -> "07" */
-        pn[0] = num[5]; pn[1] = num[6];
-    }
-    cv_led(HU_PX, HU_BY, LED_S, 2u, pn, p->bg, LED_ON);
-    cv_disc(HU_AX * 8 + 4, HU_AY * 8 + 4, 24, act ? p->accent : hu_mid(p, 15));
-    if (sel) {                                          /* the white outline, 1.5 px: a line and a half-line inside it */
-        uint16_t o2 = ux_mix(p->bg, T_TEXT, 55);
-        cv_frame(HU_FX, 1, HU_FW, 38, T_TEXT);
-        cv_frame(HU_FX + 1, 2, HU_FW - 2, 36, o2);
-        HOME_HOOK(cat, num, name, 2);
-    }
-    cv_blit(0, (uint32_t)y0);
+    cv_begin(240, HU_H, bg);
+    if (ux.style) cv_rect(RULE_X0, 0, RULE_W, 1, T_RULE);
+    cv_rect(4, HU_H - 1, 232, 1, T_RULE);
+    if (sel) cv_rect(2, 2, 3, HU_H - 5, T_THEME);
+    cv_text_on(9, 3, &AF_M, d, mute ? T_DIM : ts.meter[c] >= 3 || midi_lit(c) ? T_ACCENT : T_MID, bg);
+    if ((song.rec >> c) & 1u) cv_rect(11, 22, 4, 4, T_ACCENT);
+    { char count[8]; fmt_int(count, (int32_t)len); cv_text_on(5, 24, &AF_S, count, T_DIM, bg); }
+    cv_text_fit(HS_X, 2, &AF_S, bank, mute ? T_DIM : T_THEME, bg, 74);
+    cv_free_text(103, 1, &AF_M, name, ink, bg, 131);
+    home_sequence(t, len, mute ? T_DIM : sel ? T_THEME : T_TEXT, bg);
+    if (sel) HOME_HOOK(cat, num, name, 2);
+    cv_blit(0, HOME_TY + c * HU_H);
 }
 
 /* HOME's cell labels: EDIT's (big_label), short enough for a 57 px cell */

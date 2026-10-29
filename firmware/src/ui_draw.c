@@ -1194,6 +1194,11 @@ static void draw_columns(void)
     for (c = 0; c < 4u; c++) {
         int16_t *vp;
         const param_desc_t *d = page_desc(cur_page(), c, &vp);
+        if (clock_click_col(cur_page(), c)) {
+            fmt_named = 1;
+            draw_column(c, "METRO", CLOCK_CLICK_N[rp_get(RP_CLICK)], "", VAL(c), -1, ICON_AUTO);
+            continue;
+        }
         if (cur_page()->graph == GR_SLOTS && c == 1u) {   /* PROJECT: ERASE (1.5.5, #199) */
             draw_act_column(1, "ERASE", graph_project_used((uint32_t)song.g[G_SLOT] - 1u) ? T_THEME : T_DIM, ICON_AUTO);
             continue;
@@ -1487,6 +1492,7 @@ static const char *kc_name(const track_t *t, uint32_t id)   /* what parameter id
 }
 static void draw_knob_card(void)
 {
+    const uint32_t card_y = ui.home ? 64u : KCARD_Y, card_h = ui.home ? 100u : KCARD_H;
     const track_t *t = &trk[ui.wl.trk % NTRK];
     const aafont_t *vf = &AF_L, *nf = &AF_M;
     const char *unit = "", *name;
@@ -1534,10 +1540,10 @@ static void draw_knob_card(void)
         vf = &AF_M;
     if (text_w(nf, name) > bw)
         nf = &AF_S;
-    cv_begin(KCARD_W, KCARD_H, T_BG);
+    cv_begin(KCARD_W, card_h, T_BG);
     if (ux.style)                                       /* LINE: no card, a 1 px rule round it (as the dialog) */
-        cv_rrect(0, 0, KCARD_W, KCARD_H, 8, T_RULE, T_BG);
-    cv_rrect(!!ux.style, !!ux.style, KCARD_W - 2 * !!ux.style, KCARD_H - 2 * !!ux.style, 8 - !!ux.style, T_SURF,
+        cv_rrect(0, 0, KCARD_W, card_h, 8, T_RULE, T_BG);
+    cv_rrect(!!ux.style, !!ux.style, KCARD_W - 2 * !!ux.style, card_h - 2 * !!ux.style, 8 - !!ux.style, T_SURF,
              ux.style ? T_RULE : T_BG);
     cv_text_in(0, 6, KCARD_W, &AF_S, head, T_MID, T_SURF);
     cv_text_in(0, 22, KCARD_W, nf, name, T_TEXT, T_SURF);
@@ -1546,17 +1552,17 @@ static void draw_knob_card(void)
     x = cv_text_on(x, vf == &AF_L ? 43 : 52, vf, val, T_THEME, T_SURF);
     if (unit[0])
         cv_text_on(x + 4, vf == &AF_L ? 59 : 55, &AF_S, unit, T_MID, T_SURF);
-    cv_rect(12, KCARD_H - 12, bw, 4, T_LINE);              /* the bar: from the bottom, a bipolar value from its middle */
+    cv_rect(12, card_h - 12, bw, 4, T_LINE);              /* the bar: from the bottom, a bipolar value from its middle */
     if (hi > lo) {
         int32_t p = (clamp(v, lo, hi) - lo) * bw / (hi - lo), z = lo < 0 && hi > 0 ? -lo * bw / (hi - lo) : 0;
         f0 = p < z ? p : z;
         f1 = p < z ? z : p;
         if (f1 - f0 < 2)                                /* (at the middle: a mark) */
             f1 = f0 + 2;
-        cv_rect(12 + f0, KCARD_H - 12, f1 - f0, 4, T_THEME);
+        cv_rect(12 + f0, card_h - 12, f1 - f0, 4, T_THEME);
     }
-    GFX_HOOK_COVER(KCARD_X, KCARD_Y, KCARD_X + KCARD_W, KCARD_Y + KCARD_H);
-    cv_blit(KCARD_X, KCARD_Y);
+    GFX_HOOK_COVER(KCARD_X, card_y, KCARD_X + KCARD_W, card_y + card_h);
+    cv_blit(KCARD_X, card_y);
 }
 static void ui_draw_page(uint32_t counting);
 static void ui_draw(void)

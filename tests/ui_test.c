@@ -3728,7 +3728,7 @@ static int test_home_big(void)
         ui_power_on(); go_home(); song.sel = 0; apply_preset(9); ui.force = 1; frame();
         bad += check("  the panel: category, number 10 / 32, the name", str_eq(home_cat, CAT_NAME[preset_cat(ENGI_OBX, 9)]) &&
                      str_eq(home_num, "10 / 32") && str_eq(home_name, ENGINES[ENGI_OBX]->presets[9].name));
-        bad += check("  .. the name in M (the rack unit's face)", home_face == 2);
+        bad += check("  .. the patch name stays in M", home_face == 2);
         ok = 1;
         for (k = 0; k < 4u; k++) {
             int16_t *vp;
@@ -3757,92 +3757,18 @@ static int test_home_big(void)
  * number and the sound's number on LEDs, the activity LED lit while the track sounds, the four cells under them. */
 static int test_rack(void)
 {
-    static const uint8_t ENG[4] = {ENGI_OBX, ENGI_WAVE, ENGI_ACID, ENGI_DRIFT};
-    int bad = 0, ok;
-    uint32_t c, i, x, wood = 0, shades = 0;
-    uint16_t seen[8];
-    ui_power_on(); go_home();
-    for (c = 0; c < NTRK; c++) set_engine_of(&trk[c], ENG[c]);
-    song.sel = 1; ui.force = 1; frame(); frame();
-    /* the faceplates: OB-Z's wood cheeks (grained), WAVE's amber underline, ACID's brushed shades, DRIFT's red band */
-    for (i = 0; i < 38u; i++) {
-        uint16_t px = swap16(host_screen[(24 + 1 + i) * 240 + 16]);
-        uint32_t t;
-        for (t = 0; t <= 16u && px != ctl_blend(WOOD_LO, WOOD_HI, t); t++) ;
-        wood += t <= 16u;
-    }
-    ok = wood >= 34u;
-    ok &= scr_count(20, 24 + 40 + 30, 220, 24 + 40 + 40, UI_MACHINE_PALS[ENGI_WAVE].theme) >= 200u;     /* WAVE's underline (row 36 of its unit) */
-    for (i = 0, x = 0; i < 38u; i++) {
-        uint16_t px = host_screen[(24 + 80 + 1 + i) * 240 + 150];
-        uint32_t j;
-        for (j = 0; j < x && seen[j] != px; j++) ;
-        if (j == x && x < 8u) seen[x++] = px;
-    }
-    shades = x;
-    ok &= shades >= 3u;                                                                                  /* ACID's brushed rows */
-    ok &= scr_count(20, 24 + 120 + 2, 220, 24 + 120 + 6, UI_MACHINE_PALS[ENGI_DRIFT].theme) >= 500u;   /* DRIFT's red band (3 rows of 212) */
-    bad += check("HOME: four rack units, each in its machine's look: OB-Z's grained wood, WAVE's amber underline, ACID's brushed silver, DRIFT's red band", ok);
-    /* the selected track: the white outline round its faceplate only */
-    ok = 1;
-    for (c = 0; c < NTRK; c++) {
-        uint32_t n = scr_count(12, 24 + 40 * (int32_t)c + 1, 228, 24 + 40 * (int32_t)c + 2, T_TEXT);      /* its top edge */
-        ok &= c == song.sel ? n >= 200u : n < 20u;
-    }
-    bad += check("  the selected track's unit is outlined in white, the others are not", ok);
-    song.sel = 3; ui.force = 1; frame();
-    ok = scr_count(12, 24 + 40 * 3 + 1, 228, 24 + 40 * 3 + 2, T_TEXT) >= 200u && scr_count(12, 24 + 40 + 1, 228, 24 + 40 + 2, T_TEXT) < 20u;
-    bad += check("  selecting another track moves the outline", ok);
-    /* the LEDs: the track's number (a large digit) and the sound's number (two small ones), lit */
-    {
-        uint32_t lit = 0, want, d;
-        for (c = 0, ok = 1; c < NTRK; c++) {
-            lit = scr_count(HU_LX, 24 + 40 * (int32_t)c + HU_LY, HU_LX + 19, 24 + 40 * (int32_t)c + HU_LY + 24, LED_ON);
-            d = 1u + c;
-            want = 0;
-            {   /* the digit's segments from its mask: large (11 x 18, t 2): a g d = 7 x 2 each, verticals 6 x 2 */
-                uint32_t m = led_mask((char)('0' + d));
-                want = ((m & LED_A) ? 14u : 0u) + ((m & LED_G) ? 14u : 0u) + ((m & LED_D) ? 14u : 0u) +
-                       ((m & (LED_F | LED_B | LED_E | LED_C)) ? 0u : 0u);
-                want += 12u * (((m & LED_F) != 0) + ((m & LED_B) != 0) + ((m & LED_E) != 0) + ((m & LED_C) != 0));
-            }
-            ok &= lit == want;
-        }
-        bad += check("  the track's number is a large LED digit (1 .. 4), its segments lit", ok);
-        {
-            uint32_t m1 = led_mask('0'), m2 = led_mask('1');
-            lit = scr_count(HU_PX, 24 + HU_BY, HU_PX + 22, 24 + HU_BY + 15, LED_ON);
-            (void)m1; (void)m2;
-            ok = lit > 8u;
-            bad += check("  the sound's number is a two-digit LED", ok);
-        }
-    }
-    /* the activity LED: lit while the track sounds, dark after */
-    {
-        const ui_pal_t *p = &UI_MACHINE_PALS[ENGI_WAVE];
-        uint32_t on, off;
-        ui.force = 1; frame(); frame();
-        off = scr_count(HU_AX - 3, 24 + 40 + HU_AY - 3, HU_AX + 4, 24 + 40 + HU_AY + 4, p->accent);
-        trk[1].peak = 30000; frame();
-        on = scr_count(HU_AX - 3, 24 + 40 + HU_AY - 3, HU_AX + 4, 24 + 40 + HU_AY + 4, p->accent);
-        frames(700);
-        ok = off == 0u && on > 12u && scr_count(HU_AX - 3, 24 + 40 + HU_AY - 3, HU_AX + 4, 24 + 40 + HU_AY + 4, p->accent) == 0u;
-        if (!ok) printf("    activity: off %u on %u after %u\n", off, on, scr_count(HU_AX - 3, 24 + 40 + HU_AY - 3, HU_AX + 4, 24 + 40 + HU_AY + 4, p->accent));
-        bad += check("  the activity LED lights while the track sounds (its meter) and goes out after", ok);
-    }
-    {   /* the footer: OB-Z's cheeks only under EDIT, not under HOME */
-        uint32_t w_home = 0, w_edit = 0, y;
-        ui_power_on(); go_home(); set_engine_of(TSEL, ENGI_OBX); ui.force = 1; frame(); frame();
-        for (y = 214; y < 238u; y++) w_home += host_screen[y * 240 + 0] != host_screen[y * 240 + 120] && host_screen[y * 240 + 0] != swap16(T_BG) ? 1u : 0u;
-        press(B_EDIT); frames(320); ui.force = 1; frame();
-        for (y = 214; y < 238u; y++) {
-            uint16_t px = swap16(host_screen[y * 240 + 0]);
-            uint32_t t;
-            for (t = 0; t <= 16u && px != ctl_blend(WOOD_LO, WOOD_HI, t); t++) ;
-            w_edit += t <= 16u;
-        }
-        bad += check("  OB-Z's wood cheeks reach the footer under EDIT, not under HOME", w_home == 0u && w_edit >= 20u);
-    }
+    int bad=0; uint32_t before,after; ui_power_on();go_home();
+    for(unsigned c=0;c<NTRK;c++){track_defaults_steps(&trk[c]);trk[c].p[P_SLEN]=128;}
+    frame();before=home_sig[0];
+    trk[0].step[127]=(step_t){{72},1,ST_NOTE,0,96};frame();after=home_sig[0];
+    bad+=check("HOME: final step 128 changes its full-pattern preview",before!=after);
+    bad+=check("HOME: final step ink reaches the right edge of its own row",scr_count(HS_X+HS_W-2,HOME_TY+HS_Y,HS_X+HS_W,HOME_TY+HS_Y+HS_H,T_THEME)>0);
+    before=home_sig[0];trk[0].p[P_SLEN]=64;frame();bad+=check("HOME: changing length rescales the full track",before!=home_sig[0]);
+    trk[0].p[P_SLEN]=128;song.playing=1;trk[0].seq_idx=127;frame();
+    before=home_sig[0];trk[0].seq_idx=0;frame();bad+=check("HOME: playhead follows the full pattern",before!=home_sig[0]);song.playing=0;
+    song.sel=3;set_engine_of(TSEL,ENGI_DRUM);frame();track_defaults_steps(TSEL);TSEL->p[P_SLEN]=128;
+    TSEL->step[127].time=ST_NOTE;TSEL->step[127].hit=128;frame();
+    bad+=check("HOME: drum lane eight at step 128 remains visible",scr_count(HS_X+HS_W-2,HOME_TY+3*HU_H+HS_Y+14,HS_X+HS_W,HOME_TY+3*HU_H+HS_Y+15,T_THEME)>0);
     return bad;
 }
 
@@ -8084,7 +8010,7 @@ static int test_style(void)
     frame();
     ok = ui_style == ST_FLAT && ux.style == ST_FLAT && ux.surf != ux.bg;
     ui.force = 1; frame();
-    ok &= host_screen[rule] == swap16(T_BG) || host_screen[rule] == swap16(OB_STRIPE);   /* (OB-Z's trim: a stripe on that row) */
+    ok &= host_screen[rule] == swap16(T_BG) || host_screen[rule] == swap16(T_SURF);   /* (OB-Z's trim: a stripe on that row) */
     hold(B_HOME); ui.menu_sel = MI_STYLE;
     ok &= ui.menu == 1u && str_eq(MI_NAME[MI_STYLE], "STYLE");
     turn(EN_K1, 1); ok &= ui_style == ST_LINE && ux.style == ST_LINE && ux.surf == ux.bg;

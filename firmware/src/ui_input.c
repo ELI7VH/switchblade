@@ -897,6 +897,13 @@ static void edit_param(uint32_t slot, int32_t steps)
         mod_ui_slot = (uint8_t)clamp((int32_t)mod_ui_slot + (steps > 0 ? 1 : -1), 0, 3);
         return;
     }
+    if (clock_click_col(pg, slot)) {
+        uint32_t mode = (uint32_t)clamp((int32_t)rp_get(RP_CLICK) + steps, 0, 2);
+        if (mode != rp_get(RP_CLICK)) {
+            rp_put(RP_CLICK, mode); settings_later(); ui.force = 1;
+        }
+        return;
+    }
     d = page_desc(pg, slot, &vp);
     if (!d || !vp || d->max == d->min)
         return;
@@ -1759,7 +1766,7 @@ static void ui_input(void)
         }
         if (ui.home || pg->scope == SC_STEP || pg->scope == SC_TRK || page_desc(pg, k, &hv) ||
             ((pg->graph == GR_USER || pg->graph == GR_MOD || pg->graph == GR_PATS) && k == 0u)
-            || pg->graph == GR_SONG) {                  /* (not an empty column) */
+            || pg->graph == GR_SONG || clock_click_col(pg, k)) { /* (not an empty column) */
             ui.hot_col = (uint8_t)k;
             ui.hot_t = 40;
         }

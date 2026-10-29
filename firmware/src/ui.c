@@ -118,6 +118,12 @@ static void rp_put(uint32_t f, uint32_t v)
     ui_rec_prefs = (uint8_t)((ui_rec_prefs & ~(3u << (2u * f))) | st << (2u * f));
     rp_apply();
 }
+/* CLOCK (HOME's second page): its spare K4 controls the existing saved click mode. */
+static const char *const CLOCK_CLICK_N[3] = {"OFF", "REC", "ON"};
+static int clock_click_col(const page_t *pg, uint32_t col) {
+    return pg->fam == FAM_TRK && pg->id[0] == G_BPM && pg->id[3] == 0xFFu &&
+           str_eq(pg->title, "CLOCK") && col == 3u;
+}
 /* MENU > STYLE (ui_menu.c): ST_FLAT ST_LINE (gfx.c) in another byte no engine uses, saved with the settings;
  * 0 in older ones = FLAT; 2, the retired PIXEL (1.0.1), reads as LINE; anything else unknown as FLAT (settings_persist.c). gfx.c draws from its copy, ux.style
  * (ui_draw.c style_apply) */
