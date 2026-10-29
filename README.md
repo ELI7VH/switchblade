@@ -129,6 +129,9 @@ including all 128 steps. See [HOME sequence overview](docs/HOME-SEQUENCES.md).
 **CLOCK 2/2: K4 METRO** selects OFF / REC / ON. It shares the saved metronome
 setting with MENU > AUDIO > CLICK and the REC layer.
 
+For a unit transfer, use the [full installation snapshot](docs/FULL-SNAPSHOT.md),
+which also captures the twelve song slots omitted by the basic editor backup.
+
 ### The set list: twelve songs
 
 The FM-1 keeps a set list of twelve songs. A song holds: every track's sound and steps, the drums' own values, the song chain, the automation, the name.
