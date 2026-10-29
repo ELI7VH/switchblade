@@ -1452,7 +1452,8 @@ static void style_apply(void)
  * kc_note: the CC map, MIDI LEARN, the mod wheel) or the FM-1's on HOME (ui.c kc_knob: KNOB 1..4, SELECT's VOLUME), shows
  * a card over the middle of the page: the track and its machine, what the knob does in words, the value (L when the face has its
  * glyphs, else M) with its unit, a bar (a bipolar one from its middle). It goes KCARD_MS after the last move: ui_draw_page
- * notices that before it draws (a full redraw then gives the page back whole); drawn last in the frame, over the page.
+ * notices that before it draws (a full redraw then gives the page back whole). While active only the card is blitted;
+ * the underlying page remains frozen, avoiding erase/redraw flicker during playback.
  * Not over the MENU, a dialog, NAME or a layer's map (they have the screen; the time runs on) */
 #define KCARD_MS 800u
 #define KCARD_X 16
@@ -1631,6 +1632,14 @@ static void ui_draw_page(uint32_t counting)
         if (ui.bpm_t)
             ui.bpm_t--;
         ui.force = 0;
+        return;
+    }
+    /* Parameter feedback owns the LCD until its idle timeout. Drawing the animated
+     * page first erases the card between strip blits (visible flicker during PLAY).
+     * Keep any pending full redraw for dismissal; higher-priority screens above
+     * still take over normally. No framebuffer or audio/transport changes. */
+    if (ui.wl.on) {
+        draw_knob_card();
         return;
     }
     if (!ui.home && !page_visible(ui.page)) {          /* an engine's page (FILTER, FLT ENV) on a track of another

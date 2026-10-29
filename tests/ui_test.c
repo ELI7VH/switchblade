@@ -123,11 +123,14 @@ static void host_pw_log(uint32_t s)
 static void lcd_power(uint32_t s) { host_pw_log(s); }
 static void lcd_wake_now(void) { host_pw_log(3u); }
 /* (the HOME oscilloscope's buffer, scope_buf: fx.c, with hostsim.c) */
+static uint32_t host_card_only, host_card_outside, host_card_y, host_card_bottom;
 static uint32_t host_blit_rows;                    /* rows blitted (what a frame draws) */
 static void lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint16_t *p)
 {
     uint32_t i, j;
     host_blit_rows += h;
+    if (host_card_only && (x < 16u || x + w > 224u || y < host_card_y || y + h > host_card_bottom))
+        host_card_outside++;
     for (j = 0; j < h && y + j < 240u; j++)
         for (i = 0; i < w && x + i < 240u; i++) host_put((y + j) * 240u + x + i, p[j * w + i]);
 }
@@ -2167,13 +2170,14 @@ static int test_soak_cards(void)
         host_ticks += 16000u + SOAK_RND(3u) * 4000u;
         ui_input();
         if (song.playing || transport_req) events_block(FS * 16u / 1000u);
+        uint32_t rendered_hot = ui.hot_t;              /* draw uses this value, then decrements the timer */
         ui_draw();
         quiet++;
-        if (ui.menu || ui.layer || ui.confirm || name_on() || ui.uboot)
+        if (ui.menu || ui.layer || ui.confirm || name_on() || ui.uboot || ui.wl.on)
             continue;                                   /* (the cards are not drawn) */
         for (c = 0; c < 5u; c++)
             old += ui.roll[c].from[0] && (uint8_t)(ui.frame - ui.roll[c].t0) >= ROLL_FRAMES;
-        if (quiet > 45u && !ui.hot_t && !ui.bpm_t && !ui.msg_t && SOAK_RND(8u) == 0u) {
+        if (quiet > 45u && !rendered_hot && !ui.bpm_t && !ui.msg_t && SOAK_RND(8u) == 0u) {
             for (c = 0; c < 5u && !ui.roll[c].from[0]; c++) {}
             if (c < 5u)
                 continue;
@@ -2810,6 +2814,7 @@ static int test_product_ux(void)
         ui_power_on(); go_home(); frame();
         ok = !card_motion(2) && !card_motion(1);
         song.rec = 1; seq_start(); go_home(); turn(EN_K3, 1); frame();   /* (VOID FOUR: HOME's KNOB 3, EDIT's ENV) */
+        frames(KCARD_MS + 32u);                         /* background motion marker appears after popup dismissal */
         ok &= card_motion(2) && !card_motion(1) && !card_motion(0) && !card_motion(3);
         bad += check("MOTION: a recorded knob marks its HOME card (and no other)", ok && motion_count(TSEL) == 1);
         song.rec = 0; press(B_PLAY); events_block(32); frame();
@@ -9134,6 +9139,17 @@ static int test_knob_card(void)
     frame();
     bad += check("WaveLoop knob card: a CC74 turn draws it over HOME (T1 CUTOFF)", ui.wl.on && ui.wl.trk == 0u &&
                  ui.wl.id == P_E4 && kc_drawn(shot) > 40 && str_eq(kc_name(&trk[0], ui.wl.id), "CUTOFF"));
+    host_card_only = 1; host_card_outside = 0; host_card_y = 64; host_card_bottom = 164;
+    song.playing = 1;
+    for (i = 0; i < 12u; i++) {
+        midi_control(0, 74, 80u + i);
+        ui.force = 1;                                  /* moving meters/playheads and a pending page redraw */
+        frame();
+    }
+    host_card_only = 0;
+    bad += check("  while playing and turning, only popup rectangle is blitted; full redraw retained",
+                 !host_card_outside && ui.wl.on && ui.force && song.playing);
+    song.playing = 0;
     for (i = 0; i < KCARD_MS / 16u - 10u; i++)
         frame();
     midi_control(0, 74, 90);                             /* (a move before it went: the time starts again) */
@@ -9159,6 +9175,18 @@ static int test_knob_card(void)
     ok = ui.wl.on && ui.wl.id == KC_AT && ui.wl.v == 64 && ui.wl.trk == 0u && kc_drawn(shot) > 40;
     frames(KCARD_MS + 100u);
     bad += check("  the pressure (aftertouch) shows as T1 AFTERTOUCH 64", ok && !ui.wl.on);
+    go_page(GR_TRK); frame();
+    host_card_only = 1; host_card_outside = 0; host_card_y = 70; host_card_bottom = 162;
+    midi_control(0, 7, 80); frame();
+    midi_control(0, 73, 90); frame();
+    host_card_only = 0;
+    bad += check("  fader and ADSR popup on a parameter page never blit the background",
+                 ui.wl.on && ui.wl.id == P_ATK && !host_card_outside);
+    frames(KCARD_MS + 32u);
+    memcpy(shot, host_screen, sizeof shot);
+    ui.force = 1; ui_draw();
+    bad += check("  parameter page returns whole after fader/ADSR idle timeout",
+                 !ui.wl.on && !memcmp(shot, host_screen, sizeof shot));
     return bad;
 }
 int main(void)
