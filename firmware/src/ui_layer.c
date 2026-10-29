@@ -58,7 +58,7 @@ typedef struct {
 static const layer_t LAYERS[LAYER_N] = {
     {0, 0, 0, "", {{0, 0}, {0, 0}, {0, 0}}},
     {B_FX, LK_HOLD, FAM_HOME, "[FX] HOLD", {{KC_KEYS, "EFFECTS"}, {KC_K14, "MACROS"}, {0, 0}}},   /* (LET GO: the header's HOLD) */
-    {B_GLO, LK_SET, FAM_HOME, "[GLO] SET", {{KC_PLAY, "RESTART"}, {KC_OCTDN, "UNDO"}, {KC_GLO, "DONE"}}},
+    {B_GLO, LK_SET, FAM_HOME, "[GLO] SET", {{KC_OCTDN, "PREV"}, {KC_OCTUP, "NEXT/COPY"}, {KC_GLO, "DONE"}}},
     {B_SCL, LK_SET, FAM_SCL, "[SCL] SET", {{KC_KEYS, "ROOT"}, {KC_OCTDN, "UNDO"}, {KC_SCL, "DONE"}}},
     {B_EDIT, LK_SET, FAM_HOME, "[EDIT] SET", {{KC_KEYS, "ENGINE"}, {KC_OCTDN, "UNDO"}, {KC_EDIT, "DONE"}}},
     {B_SEQ, LK_SET, FAM_SEQ, "[SEQ] TOOLS", {{KC_KEYS, "TOOLS"}, {KC_OCTDN, "UNDO"}, {KC_SEQ, "DONE"}}},
@@ -175,6 +175,41 @@ static void layer_let_go(uint32_t quiet)
     ui.ly_t0 = 0;
     ui.ly = 0;
     ui.lock = 0;
+}
+
+static void layer_opened(uint32_t l);
+
+/* Physical GLOBAL + OCT: previous/next song, hold OCT+ 0.7 s to copy.
+ * Capture before the layer's UNDO and the normal pitch octave handlers. Releasing
+ * GLOBAL early cancels, and both OCTs cancel; neither leaks into pitch/actions. */
+static int song_oct_on(void)
+{
+    return layer_allowed() && ui.ly == LAYER_GLO && (fm1_in.buttons & ly_bit(LAYER_GLO)) && !(ui.ly_t0 & LY_DEAD);
+}
+static uint32_t song_oct(uint32_t pressed, uint32_t now)
+{
+    uint32_t dn=1u<<panel.btn[B_OCTDN],up=1u<<panel.btn[B_OCTUP];
+    uint32_t held=((fm1_in.buttons&dn)!=0u)|((fm1_in.buttons&up)!=0u)<<1;
+    uint32_t edges=((pressed&dn)!=0u)|((pressed&up)!=0u)<<1;
+    int here=song_oct_on();
+    if (!ui.song_oct_keys) {
+        if (!here || !edges) return pressed;
+        ui.song_oct_keys=(uint8_t)edges;ui.song_oct_flags=edges==3u;ui.song_oct_t=now;
+        if (!(ui.ly_t0 & LY_OPEN)) {ui.ly_t0|=LY_OPEN|LY_COMBO;layer_opened(LAYER_GLO);}
+        else ui.ly_t0|=LY_COMBO;
+    }
+    if (!here) ui.song_oct_flags|=2u;
+    if (held==3u) ui.song_oct_flags|=1u;
+    if (!ui.song_oct_flags && (held&ui.song_oct_keys) && ui.song_oct_keys==2u &&
+        now-ui.song_oct_t>700u*1000u*FM1_TICKS_PER_US) {
+        ui.song_oct_flags|=1u;song_dupe();
+    }
+    if (!ui.song_oct_flags && !(held&ui.song_oct_keys)) {
+        ui.song_oct_flags|=1u;song_step(ui.song_oct_keys==1u?-1:1);
+    }
+    if (!held) ui.song_oct_keys=ui.song_oct_flags=0;
+    lys.oct=0; /* no leftover SET-layer UNDO on release */
+    return pressed&~(dn|up);
 }
 
 /* WaveLoop: the OP keys are SHIFT on the ARP pages: the black keys F#3 G#3 A#3 C#4 D#4 (OP1..OP5 on the stock FM-1's
@@ -1144,9 +1179,9 @@ static void draw_layer(void)
     if (ui.force) {                                     /* the footer: what the keys, knobs and buttons do */
         cv_begin(240, H_FOOT, T_BG);
         const khint_t *ft = l == LAYER_FX && fx_key_held() ? FX_KEY_FOOT : l == LAYER_FX && perf_latch_on ? FX_LATCH_FOOT :
-                            l == LAYER_GLO && ui.lock == LAYER_GLO ? GLO_LOCK_FOOT : l == LAYER_SEQ && eu.on ? EU_FOOT :
+                            l == LAYER_GLO && ui.lock == LAYER_GLO && !song_oct_on() ? GLO_LOCK_FOOT : l == LAYER_SEQ && eu.on ? EU_FOOT :
                             LAYERS[l].foot;
-        int h = help_on() && help_row(l == LAYER_SEQ && eu.on ? H_EUCLID : HELP_LAYER[l], 21);   /* 1.5, HELP ON: a
+        int h = help_on() && help_row(l == LAYER_SEQ && eu.on ? H_EUCLID : (l == LAYER_GLO && song_oct_on() ? "[OCT+]HOLD: COPY[PLAY]RESTART" : HELP_LAYER[l]), 21);   /* 1.5, HELP ON: a
                                                          * second row, what this one does not say */
         cv_key_row(8, 232, h ? 2 : 9, ft, ft[2].act ? 3u : 2u, 7u, T_BG);
         cv_blit(0, Y_FOOT);

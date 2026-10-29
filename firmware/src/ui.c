@@ -177,6 +177,8 @@ static struct {
     uint8_t act;                 /* action pages: the column whose action OCT+ does, + 1; 0 = none (act_col) */
     uint8_t tl_clean;            /* SAVE > TOOLS: KNOB 2 turned on past INIT, CLEAN INIT picked (1.5.5, #190) */
     uint32_t rec_t0;             /* REC press time: a tap arms (btn_hold, no hold: held, REC opens its layer) */
+    uint32_t song_oct_t;
+    uint8_t song_oct_keys, song_oct_flags; /* captured GLOBAL+OCT gesture; reset with UI */
     uint32_t save_t0;           /* SAVE press time (btn_hold: held = UNDO) */
     uint8_t confirm;             /* the OCT- / OCT+ dialog: CF_*, 0 = none */
     uint8_t confirm_trk;         /* the track it clears, the slot it overwrites */

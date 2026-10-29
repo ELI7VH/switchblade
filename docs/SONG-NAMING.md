@@ -13,8 +13,8 @@ idle interval. Song names are at most 12 characters. Existing internal A–D
 slots and song-chain references remain compatible; physical SAVE navigation
 uses the song-name editor instead of the slot screen.
 
-HOME's OCT−/OCT+ still switch setlist songs, and holding OCT+ copies the current
-song into the next free slot. Naming saves the current song, without needing
+Hold GLOBAL + OCT−/OCT+ to switch setlist songs; hold GLOBAL + OCT+ for 0.7 seconds
+to copy the current song into the next free slot. Naming saves the current song, without needing
 an A–D slot. RESTORE LAST remains the startup/autosave preference in the menu.
 
 ## Save failure

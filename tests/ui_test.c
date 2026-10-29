@@ -876,46 +876,31 @@ static uint32_t oct_leds_seen(int all)            /* over 1 s: the OCT LED bits 
     return all ? every : any;
 }
 
-/* WaveLoop: HOME's OCT- / OCT+ are the set list's (setlist.c; the songs themselves: persistence_test.c, flash there): a tap
- * steps (here, no flash: "NO SONGS YET"), OCT+ held copies (no flash: the save fails, said), both: the octave back to 0;
- * never the octave; playing: STOP TO CHANGE SONG; with SCL held OCT- is the layer's (UNDO), as before */
+/* Song controls require the physical GLOBAL modifier; plain HOME OCT changes pitch. */
 static int test_home_songs(void)
 {
-    int bad = 0, ok;
-    uint32_t k;
-    ui_power_on();
-    go_home(); frame();
-    song.octave = 1;
-    ui.msg_t = 0;
-    press(B_OCTUP);
-    ok = song.octave == 1 && msg_is("NO SONGS YET");
-    ui.msg_t = 0;
-    press(B_OCTDN);
-    ok &= song.octave == 1 && msg_is("NO SONGS YET");
-    bad += check("HOME (WaveLoop): OCT- / OCT+ tapped step the set list's songs (none yet), the octave stays", ok);
-    ui.msg_t = 0;
-    btn_down(B_OCTUP);
-    for (k = 0; k < 30u; k++)
-        frame();                                          /* (0.48 s: not yet) */
-    ok = !ui.msg_t;
-    for (k = 0; k < 20u; k++)
-        frame();                                          /* (0.8 s: the copy) */
-    ok &= msg_is("SONG SAVE ERROR");
-    ui.msg_t = 0;
-    btn_up(B_OCTUP); frame();
-    ok &= !ui.msg_t && song.octave == 1;
-    bad += check("  OCT+ held 0.7 s: the copy (no flash here: its error said), once; let go: no step", ok);
-    btn_down(B_OCTUP); frame(); btn_down(B_OCTDN); frame(); btn_up(B_OCTUP); frame(); btn_up(B_OCTDN); frame();
-    bad += check("  both together: the octave back to 0, no song", song.octave == 0 && !ui.msg_t);
-    song.playing = 1;
-    press(B_OCTUP);
-    ok = msg_is("STOP TO CHANGE SONG");
-    song.playing = 0;
-    go_title("MIXER");
-    press(B_OCTUP);
-    ok &= song.octave == 1;
-    song.octave = 0;
-    bad += check("  playing: STOP TO CHANGE SONG; MIXER (a tap of HOME away): OCT+ the octave, as on every other page", ok);
+    int bad=0,ok;uint32_t k;ui_power_on();go_home();frame();song.octave=1;ui.msg_t=0;
+    press(B_OCTUP);ok=song.octave==2&&!ui.msg_t;press(B_OCTDN);ok&=song.octave==1&&!ui.msg_t;
+    bad+=check("HOME: unmodified OCT buttons change pitch, never songs",ok);
+    btn_down(B_GLO);frame();press(B_OCTUP);ok=song.octave==1&&msg_is("NO SONGS YET");
+    ui.msg_t=0;press(B_OCTDN);ok&=song.octave==1&&msg_is("NO SONGS YET");
+    btn_up(B_GLO);frame();ok&=ui.home&&!ui.layer;
+    bad+=check("GLOBAL+OCT: repeated next/previous while held, no pitch change or page tap",ok);
+    ui.msg_t=0;btn_down(B_GLO);frame();btn_down(B_OCTUP);
+    for(k=0;k<30;k++)frame();ok=!ui.msg_t;
+    for(k=0;k<20;k++)frame();ok&=msg_is("SONG SAVE ERROR"); /* no flash in this harness */
+    ui.msg_t=0;frames(1000);ok&=!ui.msg_t;btn_up(B_OCTUP);frame();btn_up(B_GLO);frame();
+    bad+=check("GLOBAL+OCT+ held: one copy after 0.7s, no next-song action on release",ok&&!ui.msg_t&&song.octave==1);
+    ui.msg_t=0;btn_down(B_GLO);frame();btn_down(B_OCTUP);frame();btn_up(B_GLO);frame();btn_up(B_OCTUP);frame();
+    bad+=check("Releasing GLOBAL first cancels the song gesture without leaking pitch",song.octave==1&&!ui.msg_t);
+    btn_down(B_GLO);frame();btn_down(B_OCTDN);btn_down(B_OCTUP);frame();btn_up(B_OCTDN);btn_up(B_OCTUP);frame();btn_up(B_GLO);frame();
+    bad+=check("GLOBAL+both OCTs cancels without changing song or octave",song.octave==1&&!ui.msg_t);
+    song.playing=1;btn_down(B_GLO);frame();press(B_OCTUP);ok=msg_is("STOP TO CHANGE SONG")&&song.octave==1;
+    btn_up(B_GLO);frame();song.playing=0;bad+=check("GLOBAL song change while playing remains refused",ok);
+    go_title("ENV");ui.msg_t=0;btn_down(B_GLO);frame();press(B_OCTDN);ok=msg_is("NO SONGS YET")&&song.octave==1;
+    btn_up(B_GLO);frame();bad+=check("GLOBAL song navigation also works away from HOME",ok&&str_eq(cur_page()->title,"ENV"));
+    go_home();ui.msg_t=0;btn_down(B_OCTDN);btn_down(B_OCTUP);frame();btn_up(B_OCTDN);btn_up(B_OCTUP);frame();
+    bad+=check("Unmodified both OCTs still reset pitch to zero",song.octave==0&&!ui.msg_t);
     return bad;
 }
 
@@ -3988,10 +3973,11 @@ static int test_quick_layers(void)
         key_down(black(0)); frame(); key_up(black(0)); frame();
         ok &= trk[0].p[P_MUTE] == 1 && song.octave == 0;
         oct_back();
-        ok &= trk[2].p[P_LEVEL] == l2 && !trk[0].p[P_MUTE] && song.octave == 0 && ui.layer == LAYER_GLO;
+        ok &= trk[2].p[P_LEVEL] == l2 - 10 && trk[0].p[P_MUTE] && song.octave == 0 && ui.layer == LAYER_GLO;
         btn_up(B_GLO); frame();
-        bad += check("GLO KNOB 3: T3 LEVEL from any page; OCT-: mutes and levels as it opened, no octave", ok &&
+        bad += check("GLO KNOB 3: T3 LEVEL; OCT- song navigation retains the edited mix", ok &&
                      str_eq(cur_page()->title, "ENV"));
+        trk[2].p[P_LEVEL]=l2;trk[0].p[P_MUTE]=0;
     }
     song.playing = 1; transport_req = 0;
     btn_down(B_GLO); frame(); press(B_PLAY);
@@ -4249,7 +4235,7 @@ static int test_bughunt_ui(void)
             ui_power_on();
             song.octave = 1;                            /* (outside: OCT+ lit) */
             btn_down(LB[i]); frames(500);
-            ok &= layer_set_open() && oct_leds_seen(1) == 1u && oct_leds_seen(0) == 1u;
+            ok &= layer_set_open() && oct_leds_seen(1) == (LB[i]==B_GLO?3u:1u) && oct_leds_seen(0) == (LB[i]==B_GLO?3u:1u);
             btn_up(LB[i]); frame();
             ok &= oct_leds() == 2u;
         }
@@ -7175,11 +7161,11 @@ static int test_fx_latch(void)
     btn_down(B_GLO); frame(); btn_down(B_OCTDN); frame();          /* a SET layer the same: GLO + OCT- quick */
     ok &= ui.layer == LAYER_GLO;
     btn_up(B_OCTDN); frame();
-    ok &= song.octave == 0 && msg_is("MIX PUT BACK");
+    ok &= song.octave == 0 && msg_is("NO SONGS YET");
     btn_up(B_GLO); frame();
     ok &= ui.home && !ui.layer;
     bad += check("  FX LATCH OFF: FX + OCT- quick / held shifts the octave (no page); FX tap: the FX page; "
-                 "GLO + OCT- quick: put back, no octave", ok);
+                 "GLO + OCT- quick: previous song, no octave", ok);
     fx_latch = 1;
     frame();
     btn_down(B_FX); key_down(lpf); frame(); key_up(lpf); frame(); btn_up(B_FX); frame();
@@ -7781,9 +7767,9 @@ static int test_bpm_lock(void)
     turn(EN_SELECT, -5);
     ok &= song.g[G_BPM] == b0 - 2;
     oct_back();
-    ok &= song.g[G_BPM] == b0 + 3;                                    /* (OCT-: the tempo as this layer opened) */
+    ok &= song.g[G_BPM] == b0 - 2;                                    /* song navigation must not undo the tempo */
     btn_up(B_GLO); frame();
-    bad += check("#58 BPM LOCK ON: GLO + SELECT sets the tempo (a combo: the map, no GLO page; OCT- puts it back)",
+    bad += check("#58 BPM LOCK ON: GLO + SELECT sets tempo; song navigation does not undo it",
                  ok && ui.page == page);
     song.g[G_BPM] = 100;
     btn_down(B_GLO); frame();
@@ -9127,10 +9113,10 @@ static int test_arp_ops(void)
     c = key_leds(&br);
     ok &= !(br & OP_KEYS);
     press(B_OCTUP);
-    ok &= song.octave == oct && t->p[P_AXOCT] == 0;     /* (WaveLoop: HOME's OCT+ is the set list's: playing, a message) */
+    ok &= song.octave == oct+1 && t->p[P_AXOCT] == 0;   /* HOME uses normal octave controls */
     key_up(OP_KEY[2]); frame();
     song.octave = oct;
-    bad += check("  on HOME they are notes: A#3 sounds and records, no breathing, OCT+ no shift (the set list's)",
+    bad += check("  on HOME OP keys are notes; OCT+ changes pitch, not ARP or song",
                  ok && notes_in(t) > n);
     song.rec = 0; song.playing = 0;
     return bad;

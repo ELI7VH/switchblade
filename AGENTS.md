@@ -23,3 +23,5 @@ for unit ownership, firmware safety and the FM-1 handoff queue.
 - Live-recorded synth holds use FOR6 Q8 durations in the synth-only hit/acc bytes; FOR4/FOR5 import retains old timing. Read `docs/PLAYED-HOLDS.md` before changing gate/tie playback or project encoding.
 
 - Target storage guards and host NOR tests share `hal/fm1_flash_regions.h`. Extended saves require B8000..D9FFF; never widen the entire retired-sample range. SAVE > SONG NAME debounces for 3 s; see `docs/SONG-NAMING.md`.
+
+- Song switching/copying requires physical GLOBAL + OCT; plain HOME OCT changes pitch. See `docs/GLOBAL-SONGS.md`; capture song gestures before SET-layer UNDO, ARP OP shifts, action taps and pitch handlers.

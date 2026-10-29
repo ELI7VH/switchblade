@@ -51,7 +51,7 @@ static const struct { const char *title, *hint; } HELP_PAGE[] = {
     {"MIXER", "[K4]MUTE[ALGO]TRACK[HOME]CLOCK"},
     {"CLOCK", "[K1]TEMPO[GLO]HOLD: TAP"},   /* (2026-10-20: SELECT is the LEVEL) */
 };
-#define H_HOME "[OCT-]SONG[OCT+]SONG, HOLD: COPY"   /* (WaveLoop: OCT- / OCT+ the set list's songs, setlist.c) */
+#define H_HOME "[GLO]HOLD: SONG[OCT-]OCT[OCT+]OCT"   /* (WaveLoop: OCT- / OCT+ the set list's songs, setlist.c) */
 /* a layer's (LAYER_*): what its footer row (LAYERS[].foot) does not say */
 static const char *const HELP_LAYER[LAYER_N] = {
     "", "[KEYS]BLACK: MUTES[FX]2 TAPS: LOCK", "[KEYS]SOLO MUTE FILL TAP[K1-4]LEVELS", "[KEYS]ROOT[K1-4]ROOT SCL CHORD",
