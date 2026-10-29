@@ -9,6 +9,11 @@ Connect MiniLab MIDI OUT to FM-1 MIDI IN. Use keyboard MIDI channel **16** to
 play the selected FM-1 track; pads stay on channel 4 for the drum track. Keep
 FM-1 routing CH1–4 (channel 16 additionally follows the selected track).
 
+Preset uploads preserve the MiniLab’s global keyboard channel. Set its keyboard
+channel to **16** too, and confirm it after a restart; otherwise the keys can
+play a different track from the knobs. A track faded to zero will then appear
+silent even though MIDI notes are arriving.
+
 | Control | Action | MIDI |
 | --- | --- | --- |
 | K1–4 | Attack, decay, sustain, release (selected track) | Ch16 CC73,75,79,72 |
