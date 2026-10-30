@@ -119,5 +119,15 @@ send into a separate loop, with its enable tested once per block. Native
 are unchanged; new buffer/send/finish helpers have explicit baselines. All final
 target checks pass. These static checks are not live CPU/headroom measurements.
 
-Built and tested, not installed yet. TEST remains grid13 until stopped playback,
-fresh backup, installation and reboot/readback verification are completed.
+Installed on **FM1-TEST, 2026-10-30**, with explicit stopped/install approval.
+Before installation, all 20 musical/settings objects were CRC-validated and raw
+storage was read twice identically. After reboot, serial and editor report
+`v0.1-wlchain14`; all 8 logical objects and all 12 native song slots match the
+fresh backup byte for byte. No runtime restore was needed. Live strip controls
+were restored/read back too, including the user's filter value -28. Playback
+is stopped. Physical listening remains with Elijah. SHOW and GHOUL were untouched.
+
+Private archive: `~/Documents/FM1 Backups/FM1-TEST-pre-chain14-2026-10-30.zip`.
+Receipt: `build/install-chain14-2026-10-30.json`. Post-install readback:
+`~/Documents/FM1 Backups/FM1-TEST-post-chain14-2026-10-30/`.
+Installed source is `240bd0d`; package checksum above is unchanged.
