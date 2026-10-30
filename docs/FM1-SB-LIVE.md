@@ -131,3 +131,14 @@ Private archive: `~/Documents/FM1 Backups/FM1-TEST-pre-chain14-2026-10-30.zip`.
 Receipt: `build/install-chain14-2026-10-30.json`. Post-install readback:
 `~/Documents/FM1 Backups/FM1-TEST-post-chain14-2026-10-30/`.
 Installed source is `240bd0d`; package checksum above is unchanged.
+
+Installed on **FM1-SHOW, 2026-10-30**, at Elijah’s request. Connected glo10 was
+verified stopped; fresh SHOW recovery archive includes double-read storage.
+After chain14 reboot, all 8 logical objects and 12 native song slots match that
+backup byte for byte, including the two populated slots. Live FX match too; no
+song restore or TEST music copy was needed. SHOW remains stopped. TEST remains
+chain14 and GHOUL is unchanged. Physical listening remains with Elijah.
+
+Private backup: `~/Documents/FM1 Backups/FM1-SHOW-pre-chain14-2026-10-30.zip`.
+Receipt: `build/install-show-chain14-2026-10-30.json`; post-install evidence:
+`~/Documents/FM1 Backups/FM1-SHOW-post-chain14-2026-10-30/`.
