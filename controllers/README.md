@@ -38,6 +38,9 @@ DRUM ignores these envelope CCs. NANO 303 uses decay only.
 
 ## Before playing
 
+Master signal order in chain14: **K6 dirt → K5 stutter → K7 delay → K8 filter**.
+The MiniLab assignments stay the same; this order is implemented in firmware.
+
 Turn K5–7 to zero; centre K8 (values 63 or 64). These are live controls and
 are not saved into song/sound parameters. Channel 16 CC120/121/123 releases
 the master controls. MIDI Control Center Store To replaces the chosen User

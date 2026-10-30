@@ -57,3 +57,8 @@ d9_render_tom 2736
 d9_render_rim 4194
 d9_render_clap 171
 d9_render_smp 1432
+
+# chain14: relocated live buffer/delay-send stages and mixed-block finish.
+sb_buffer_block 12
+sb_echo_pre 11
+mix_finish 1895

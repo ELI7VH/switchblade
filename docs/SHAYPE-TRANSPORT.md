@@ -66,3 +66,10 @@ Private archive: `~/Documents/FM1 Backups/FM1-TEST-pre-grid13-2026-10-30.zip`.
 Receipt: `build/install-grid13-2026-10-30.json`. Post-install readback:
 `~/Documents/FM1 Backups/FM1-TEST-post-grid13-2026-10-30/`.
 Physical listening and knob-driven rate-change audition remain with Elijah.
+
+
+Validation correction (2026-10-30): the earlier target-budget summary above
+missed an existing `perf_pre` overage (39 against 26), unrelated to SHAYPE rate
+timing. It is corrected by chain14's block-level echo-send enable and separate
+loop; see `docs/FM1-SB-LIVE.md`. SHAYPE behavior, physical installation and
+song-preservation evidence above remain unchanged.

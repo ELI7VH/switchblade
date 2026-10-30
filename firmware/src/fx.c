@@ -1073,17 +1073,19 @@ static __attribute__((noinline)) void perf_master(int32_t *out, uint32_t n)
     }
 }
 
-static void mix_block(int32_t *out, uint32_t n)
+/* Finish a mixed block through the live serial chain and the native buses.
+ * The live delay send receives the dirt/stutter result; its return reaches the
+ * final master filter, never the stutter recorder or dirt processor. */
+static __attribute__((noinline)) void mix_finish(int32_t *out, uint32_t n, int perf)
 {
     uint32_t i;
-    int perf;
-    int32_t mg = fx_usb_fixed ? MASTER_FULL : (int32_t)song.master_q12;   /* (USB LEVEL FIXED: MASTER after) */
-    for (i = 0; i < n; i++)
-        send_c[i] = send_d[i] = send_r[i] = mix_l[i] = mix_r[i] = 0;
-    events_block(n);
-    perf = perf_begin(n);                               /* the FX hold layer at work (perform.c) */
-    for (i = 0; i < NPART; i++)
-        mix_part(&trk[i], n);
+    int32_t mg = fx_usb_fixed ? MASTER_FULL : (int32_t)song.master_q12;
+    sb_chain_prepared = sb_live_on() || sb_dirt_wet || (sb_chain_prepared && pf.busy);
+    if (sb_chain_prepared) {
+        if (sb_dirt || sb_dirt_wet)
+            sb_dirt_block(mix_l, mix_r, n);
+        sb_buffer_block(mix_l, mix_r, n);
+    }
     if (perf)
         perf_pre(mix_l, mix_r, send_d, send_r, n);
     fx_buses(send_c, send_d, send_r, wet, n);
@@ -1102,4 +1104,18 @@ static void mix_block(int32_t *out, uint32_t n)
         out[2u * i] = l;
         out[2u * i + 1u] = r;
     }
+}
+
+
+static void mix_block(int32_t *out, uint32_t n)
+{
+    uint32_t i;
+    int perf;
+    for (i = 0; i < n; i++)
+        send_c[i] = send_d[i] = send_r[i] = mix_l[i] = mix_r[i] = 0;
+    events_block(n);
+    perf = perf_begin(n);
+    for (i = 0; i < NPART; i++)
+        mix_part(&trk[i], n);
+    mix_finish(out, n, perf);
 }

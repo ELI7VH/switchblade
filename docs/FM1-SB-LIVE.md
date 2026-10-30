@@ -22,7 +22,7 @@ and dry fallback protect silent/degenerate blocks. Zero eventually bypasses the
 stage exactly. This is level compensation, not a claim that every altered timbre
 has identical perceived loudness or that the final limiter has no effect.
 
-K7 adds a smoothed mono dry-mix send to the native delay only. Feedback rises
+K7 adds a smoothed mono send to the native delay only (post-dirt/stutter in chain14). Feedback rises
 from the song's own setting towards a bounded slightly-above-unity loop at the
 end; native 16-bit feedback saturation bounds it. Turning down restores normal
 feedback and stops the extra send, retaining the delay return for its tail.
@@ -73,3 +73,51 @@ Package SHA-256: `f78b6eda9579e75a5b72709556bc1fa3c8950b021eac816f774466770b0777
 The user confirmed loading the MiniLab preset and a direct MIDI cable connection.
 Backup bundle: `build/fm1-sb-live.zip`, with the preset, firmware, license texts
 and pinned corresponding-source link/hash manifest.
+
+
+## Master signal order (chain14)
+
+The live strip processes **bitcrush/dirt → stutter → delay → DJ filter**.
+K6 is captured into K5's repeat, K7 receives the repeated result, and K8 also
+filters the delay return. Turning dirt after a loop is captured affects fresh
+input, while that frozen loop retains its captured timbre. Existing notes,
+controller CC assignments, songs and presets are unchanged.
+
+The live dirt and buffer stages run on the mixed tracks before the delay send;
+the delay/reverb/chorus buses then return ahead of the final master filter.
+Saved per-track sends remain parallel native buses. Native FX without live
+strip controls keep their previous placement. The live path remains selected
+until its effect fades/tails finish, avoiding an order change on release.
+No extra delay line or audio sample-rate change is introduced. Dirt retains its
+block-energy compensation and the final limiter remains in place.
+
+`tests/sb_chain_test.c` checks audio behavior: a captured crushed loop is
+unchanged when dirt is released, frozen audio feeds delay with fresh input
+silent, echoes remain audible over a silent frozen loop, and the final low-pass
+attenuates those echoes. Existing dirt RMS and silence tests remain.
+
+
+### chain14 build and checks — 2026-10-30
+
+Package: `build/switchblade-0.1-wlchain14.fwsc`, SHA-256
+`ff860ea504da43d3db2019706df74436fad011ededbedc0626a24573f502d94a`.
+Final order tests pass normally and with repository UBSan DSP-wrap exclusions;
+release returns to idle, full strip output stays bounded, and silence stays
+silent. Component tests (60 checks) and read-only protocol isolation pass.
+The broad host run retains all 157 golden renders with zero sound, health,
+voice/routing or regression CPU-budget failures. It is not a clean full-suite
+pass: the modulation-matrix incremental-cost threshold fails at about 6.0–6.1%
+against its 6% limit, also reproduced on unchanged pre-chain source. That
+threshold was not relaxed. An intermediate test-fixture initialization failure
+was corrected and the final order test rerun normally and under UBSan.
+
+Correction to the earlier grid13 target-budget report: its `perf_pre` loop was
+39 weighted instructions against an existing 26 baseline, so the earlier claim
+that every target budget passed was incorrect. chain14 moves the live echo
+send into a separate loop, with its enable tested once per block. Native
+`perf_pre` now measures 27 (within the original 10% tolerance). Existing budgets
+are unchanged; new buffer/send/finish helpers have explicit baselines. All final
+target checks pass. These static checks are not live CPU/headroom measurements.
+
+Built and tested, not installed yet. TEST remains grid13 until stopped playback,
+fresh backup, installation and reboot/readback verification are completed.

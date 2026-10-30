@@ -374,6 +374,8 @@ if [ -f build/gen/felucca_tables.h ]; then
     echo "== DRUM (WaveLoop): every kit's drums, the GM map and the keys, each drum its own, PAN / SEND, no ARP, the voice pool"
     $CC -O1 -w -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/sb_live_test" tests/sb_live_test.c -lm
     run "fm1-sb-live: master routing, repeat bands, dirt level and delay tail" "$OUT/sb_live_test"
+    $CC -O1 -w -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/sb_chain_test" tests/sb_chain_test.c -lm
+    run "fm1-sb-live signal order: bitcrush, stutter, delay, final filter" "$OUT/sb_chain_test"
     $CC -O1 -w -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/sb_live_protocol_test" tests/sb_live_protocol_test.c -lm
     run "fm1-sb-live: read-only master state and project isolation" "$OUT/sb_live_protocol_test"
     $CC -O1 -w -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/song_name_ui_test" tests/song_name_ui_test.c -lm

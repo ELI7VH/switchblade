@@ -413,6 +413,16 @@ static __attribute__((noinline)) void perf_mute_sd(uint32_t k, int32_t *b, int32
     pf.mg[k] = g;
 }
 
+/* K7: the post-dirt/stutter signal into the shared delay. The caller tests the
+ * enable once per block, keeping it out of the native THROW sample loop. */
+static __attribute__((noinline)) void sb_echo_pre(const int32_t *ml, const int32_t *mr, int32_t *sd, uint32_t n)
+{
+    uint32_t i;
+    int32_t send = sb_echo_send;
+    for (i = 0; i < n; i++)
+        sd[i] += mulq15((ml[i] + mr[i]) >> 1, send);
+}
+
 /* before the buses: THROW (KNOB 3) adds the dry mix to the delay and reverb sends */
 static __attribute__((noinline)) void perf_pre(const int32_t *ml, const int32_t *mr, int32_t *sd, int32_t *sr,
                                                uint32_t n)
@@ -426,8 +436,9 @@ static __attribute__((noinline)) void perf_pre(const int32_t *ml, const int32_t 
             sd[i] += x;
             sr[i] += x;
         }
-        if (sb_echo_send) sd[i] += mulq15((ml[i] + mr[i]) >> 1, sb_echo_send);
     }
+    if (sb_echo_send)
+        sb_echo_pre(ml, mr, sd, n);
 }
 
 /* REV THROW / ECHO THROW (1.5.1): track t's reverb / delay send towards full (127) while held, b its signal as its sends
@@ -762,26 +773,46 @@ static __attribute__((noinline)) void perf_phaser(int32_t *bl, int32_t *br, uint
 
 #include "sb_live_dirt.c"
 
+/* The live strip renders dirt and the buffer before the buses. Keep that path
+ * until its tails fade; native FX alone retain their existing post-bus order. */
+static uint8_t sb_chain_prepared;
+static __attribute__((noinline)) void sb_buffer_block(int32_t *bl, int32_t *br, uint32_t n)
+{
+    uint32_t i, a = pf.act0;
+    if (pf.split)
+        perf_switch(a);
+    pf.hfb += clamp(perf_k[3] * HB_FB - pf.hfb, -512, 512);
+    for (i = 0; i < n; i++) {
+        if (i == pf.split) {
+            a = pf.act;
+            perf_switch(a);
+        }
+        if (pf.mode != BM_NONE)
+            perf_buf(&bl[i], &br[i]);
+    }
+}
+
 /* after the master level: the buffer effect, LPF, HPF, CRUSH on l / r (stereo, Q15) */
 static __attribute__((noinline)) void perf_block(int32_t *bl, int32_t *br, uint32_t n)
 {
     uint32_t i, a = pf.act0, sh, hold;
+    int pre = sb_chain_prepared;
     int32_t c = perf_k[1], lt, ht, ct, sf = sb_filter_value();
     if (c)
         pf.cc = c;
     ct = c ? 32768 : 0;
     sh = 4u + (uint32_t)pf.cc * 7u / 100u;
     hold = sh - 3u;
-    if (pf.split)
+    if (!pre && pf.split)
         perf_switch(a);
-    pf.hfb += clamp(perf_k[3] * HB_FB - pf.hfb, -512, 512);   /* OCT UP / DN's shimmer glides (~40 ms) */
+    if (!pre) pf.hfb += clamp(perf_k[3] * HB_FB - pf.hfb, -512, 512);   /* OCT UP / DN's shimmer glides (~40 ms) */
     for (i = 0; i < n; i++) {
         int32_t l = bl[i], r = br[i];
         if (i == pf.split) {
             a = pf.act;
-            perf_switch(a);
+            if (!pre) perf_switch(a);
         }
-        if (pf.mode != BM_NONE)
+        if (!pre && pf.mode != BM_NONE)
             perf_buf(&l, &r);
         lt = (a & PF_BIT(PF_LPF)) || sf < 0 || pf.lc < PF_TOP ? 32768 : 0;
         pf.la += clamp(lt - pf.la, -SL_SLOPE, SL_SLOPE);
@@ -822,7 +853,6 @@ static __attribute__((noinline)) void perf_block(int32_t *bl, int32_t *br, uint3
         perf_flanger(bl, br, n);
     if ((pf.act & PF_BIT(PF_PHS)) || pf.pw)
         perf_phaser(bl, br, n);
-    if (sb_dirt || sb_dirt_wet) sb_dirt_block(bl, br, n);
     pf.busy = sb_dirt_wet || pf.act || pf.mode != BM_NONE || pf.w || pf.la || pf.ha || pf.cw || pf.td || pf.mute || pf.fw || pf.pw || pf.thr ||
               pf.fn || perf_k[0] || perf_k[1] || perf_k[2] || sb_live_on();
 }

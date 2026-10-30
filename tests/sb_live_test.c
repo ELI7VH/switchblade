@@ -3,12 +3,13 @@
 #include "ui_test.c"
 #define CHECK(x) do{if(!(x)){fprintf(stderr,"sb-live %d: %s\n",__LINE__,#x);return 1;}count++;}while(0)
 static void reset_live(void) {
- ui_power_on();sb_repeat=sb_dirt=sb_delay=0;sb_filter=0;sb_echo_send=sb_echo_mix=0;sb_echo_tail=0;
+ ui_power_on();sb_chain_prepared=0;sb_repeat=sb_dirt=sb_delay=0;sb_filter=0;sb_echo_send=sb_echo_mix=0;sb_echo_tail=0;
  sb_dirt_wet=0;sb_dirt_phase=0;sb_dirt_last[0]=sb_dirt_last[1]=0;
  memset(&pf,0,sizeof pf);pf.src=pf.next=PF_N;pf.lc=PF_TOP;
  perf_held=perf_latched=0;perf_kill=0;memset((void*)perf_k,0,sizeof perf_k);sl_lent=0;
 }
 static void cc(uint32_t n,uint32_t v){midi_event(0xB0,15,n,v);}
+#ifndef SB_LIVE_TEST_NO_MAIN
 int main(void) {
  int count=0;uint32_t i,b,j,k;static int32_t l[CTL],r[CTL];static project_t before,after;
  reset_live();project_capture(&before);
@@ -41,3 +42,5 @@ int main(void) {
  cc(20,127);cc(21,127);cc(23,127);cc(121,0);CHECK(!sb_repeat&&!sb_dirt&&!sb_delay&&!sb_filter);
  printf("sb-live: %d checks passed\n",count);return 0;
 }
+
+#endif
