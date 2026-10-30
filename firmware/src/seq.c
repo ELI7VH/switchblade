@@ -216,11 +216,62 @@ static uint32_t arp_period(const track_t *t)    /* a step of RATE in samples (th
 {
     return beat_samples() * 2u / ARP_RATE2[clamp(t->p[P_ARATE], 0, 7)];
 }
+/* All RATE grids run from PLAY, even with ARP off or no chord. Pattern/pass
+ * indices remain per track: changing RATE joins a clock, never restarts a pass.
+ * Cache periods; ordinary blocks only add/compare, with no new divides. */
+static struct { uint32_t pos, period; uint8_t odd, due; } arp_clock[8];
+static uint32_t arp_transport_beat;
+static uint8_t arp_transport_first;
+static struct { uint8_t rate, odd, wait; } arp_grid[NTRK];
+
+static __attribute__((noinline)) void arp_transport_sync(uint32_t n)
+{
+    uint32_t beat = beat_samples(), i;
+    if (!song.playing)
+        return;
+    if (!arp_transport_beat) { /* defensive: host audition without a PLAY request */
+        arp_transport_beat = beat;
+        arp_transport_first = 1;
+        for (i = 0; i < 8u; i++)
+            arp_clock[i].period = beat * 2u / ARP_RATE2[i];
+    }
+    if (beat != arp_transport_beat) {
+        uint32_t ratio = (beat << 12) / arp_transport_beat;
+        for (i = 0; i < 8u; i++) {
+            arp_clock[i].pos = song.g[G_CLOCK] ?
+                (uint32_t)(((uint64_t)arp_clock[i].pos * ratio + 2048u) >> 12) :
+                (uint32_t)((uint64_t)arp_clock[i].pos * beat / arp_transport_beat);
+            arp_clock[i].period = beat * 2u / ARP_RATE2[i];
+        }
+        for (i = 0; i < NTRK; i++)
+            if (!song.g[G_CLOCK] && trk[i].arp_pos < 0xFFFFFFFu)
+                trk[i].arp_pos = (uint32_t)((uint64_t)trk[i].arp_pos * beat / arp_transport_beat);
+        arp_transport_beat = beat;
+    }
+    for (i = 0; i < 8u; i++) {
+        arp_clock[i].due = arp_transport_first;
+        if (arp_transport_first)
+            continue;
+        arp_clock[i].pos += n;
+        if (arp_clock[i].pos >= arp_clock[i].period) {
+            arp_clock[i].pos -= arp_clock[i].period;
+            if (arp_clock[i].pos >= arp_clock[i].period)
+                arp_clock[i].pos = 0; /* tempo jump: no burst */
+            arp_clock[i].odd ^= 1u;
+            arp_clock[i].due = 1;
+        }
+    }
+    arp_transport_first = 0;
+}
+
 static void arp_restart(track_t *t)              /* the pattern from its first step, on this block */
 {
     t->arp_pos = 0xFFFFFFF;
     t->arp_idx = 0xFFFFFFFFu;
     t->arp_miss = 0;
+    arp_grid[trk_index(t)].rate = (uint8_t)clamp(t->p[P_ARATE], 0, 7);
+    arp_grid[trk_index(t)].odd = 1; /* first boundary enters even slot zero */
+    arp_grid[trk_index(t)].wait = 0;
 }
 /* the arp has a chord: keys or MIDI notes held, or the sequencer's chord (seq_chord) */
 static int arp_fed(const track_t *t) { return t->nheld || (t->seq_arp && t->seq_n); }
@@ -480,7 +531,7 @@ static __attribute__((noinline)) void arp_now(track_t *t, uint32_t period, uint3
  * NOW: a change of the live chord reaches it at once (arp_now) */
 static __attribute__((noinline)) void arp_block(track_t *t, uint32_t n)
 {
-    uint32_t period, len, k = trk_index(t);
+    uint32_t period, len, k = trk_index(t), changed = 0, edge = 0;
     int32_t sw;
     int fed = t->p[P_AMODE] && arp_fed(t), run;
     if (t->arp_n)
@@ -501,22 +552,37 @@ static __attribute__((noinline)) void arp_block(track_t *t, uint32_t n)
     }
     period = arp_period(t);
     sw = t->p[P_ASWING] * (int32_t)period / 250;
-    len = period + (uint32_t)((t->arp_idx & 1u) ? sw : -sw);
-    if (arp_att[k].n && arp_attach(t) == AA_NOW && arp_sig(t) != arp_att[k].sig) {
+    if (song.playing && arp_grid[k].rate != (uint32_t)clamp(t->p[P_ARATE], 0, 7)) {
+        uint32_t rate = (uint32_t)clamp(t->p[P_ARATE], 0, 7);
+        uint32_t phase = arp_clock[rate].pos + arp_clock[rate].odd * period;
+        uint32_t first = period - (uint32_t)sw;
+        arp_grid[k].rate = (uint8_t)rate;
+        arp_grid[k].odd = phase >= first;
+        t->arp_pos = phase >= first ? phase - first : phase;
+        edge = t->arp_pos == 0u && arp_clock[rate].due;
+        changed = arp_grid[k].wait = 1;
+        t->arp_miss = 0; /* do not replay the previous pattern step on the new grid */
+    }
+    len = period + (uint32_t)(song.playing ? (arp_grid[k].odd ? sw : -sw) : ((t->arp_idx & 1u) ? sw : -sw));
+    if (!arp_grid[k].wait && arp_att[k].n && arp_attach(t) == AA_NOW && arp_sig(t) != arp_att[k].sig) {
         arp_now(t, period, len);
         if (!arp_att[k].n && !fed && !song.playing)
             return;
     }
-    t->arp_pos += n;
-    if (t->arp_pos < len && t->arp_pos != 0xFFFFFFF + n) {
-        if (t->arp_miss && fed) {                    /* a chord into a step that started with none */
+    if (!changed)
+        t->arp_pos += n;
+    if (!edge && t->arp_pos < len && t->arp_pos != 0xFFFFFFF + n) {
+        if (!arp_grid[k].wait && t->arp_miss && fed) {                    /* a chord into a step that started with none */
             t->arp_miss = 0;
             if (t->arp_pos < len / 2u)
                 arp_fire(t, period, 0);              /* (in its first half: that step, late) */
         }
         return;
     }
-    t->arp_pos = t->arp_pos >= 0xFFFFFFF ? 0u : t->arp_pos - len;   /* (the remainder: on the grid) */
+    if (song.playing && !edge)
+        arp_grid[k].odd = t->arp_idx == 0xFFFFFFFFu ? 0u : !arp_grid[k].odd;
+    arp_grid[k].wait = 0;
+    t->arp_pos = edge || t->arp_pos >= 0xFFFFFFF ? 0u : t->arp_pos - len;   /* (the remainder: on the grid) */
     if (t->arp_pos >= period)
         t->arp_pos = 0;                              /* (a tempo jump: no burst of steps) */
     if (run && arp_fire(t, period, 1))
@@ -910,6 +976,11 @@ static void seq_start(void)
     uint32_t i;
     motion_begin();
     chain_start();
+    arp_transport_first = 1;
+    arp_transport_beat = beat_samples();
+    memset(arp_clock, 0, sizeof arp_clock);
+    for (i = 0; i < 8u; i++)
+        arp_clock[i].period = arp_transport_beat * 2u / ARP_RATE2[i];
     for (i = 0; i < NTRK; i++) {                   /* every track from its step 0, together */
         track_t *t = &trk[i];
         t->seq_idx = (uint16_t)(t->p[P_SLEN] - 1);
@@ -1556,6 +1627,7 @@ static void events_block(uint32_t n)
         cin_record();
     if (song.playing)
         click_tick(seq_n);
+    arp_transport_sync(clock_mode ? seq_n : n);
     for (i = 0; i < NPART; i++)
         arp_step(&trk[i], clock_mode ? seq_n : n, clock_mode && song.playing ? seq_n : n);
     beat_pos += clock_mode ? seq_n : n;               /* the beat the ARP LED flashes on (ui_leds) */

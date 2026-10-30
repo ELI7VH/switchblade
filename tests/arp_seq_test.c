@@ -1208,8 +1208,117 @@ static void soak(void)
                  ok && ev > 1000u);
 }
 
+/* RATE changes join the next absolute transport slot, preserving the pattern's
+ * step/pass. Expected boundaries use sample time, independently of arp_pos. */
+static void rate_grid(void)
+{
+    uint32_t from, to, swing, ok = 1, cases = 0;
+    for (from = 0; from < 8u; from++)
+        for (to = 0; to < 8u; to++)
+            for (swing = 0; swing <= 100u; swing += 50u) {
+                track_t *t = setup(factory("UP 4"), AD_UP, from, 75, 16);
+                uint32_t oldp = arp_period(t), p, first, pair, phase, odd, at, idx, fired = 0;
+                uint64_t next;
+                t->p[P_ASWING] = (int16_t)swing;
+                mi(0x90, 60, 100);
+                transport_req = 1;
+                blk1();
+                blks((7u * oldp + oldp / 3u) / CTL);
+                idx = t->arp_idx;
+                at = nblk * CTL;
+                t->p[P_ARATE] = (int16_t)to;
+                p = (uint32_t)FS * 60u / 120u * 2u / ARP_RATE2[to];
+                first = p - swing * p / 250u;
+                pair = 2u * p;
+                phase = at % pair;
+                if (from == to) { /* unchanged RATE must retain normal playback too */
+                    odd = phase < first ? 1u : 0u;
+                    next = at + (phase < first ? first - phase : pair - phase);
+                } else if (!phase || phase == first) {
+                    odd = phase == first;
+                    next = at;
+                } else {
+                    odd = phase < first ? 1u : 0u;
+                    next = at + (phase < first ? first - phase : pair - phase);
+                }
+                while (fired < 4u && ok) {
+                    uint32_t due = (uint32_t)((next + CTL - 1u) / CTL * CTL), before = t->arp_idx;
+                    at = nblk * CTL;
+                    blk1();
+                    if (at >= due) {
+                        idx++;
+                        fired++;
+                        next += odd ? pair - first : first;
+                        odd ^= 1u;
+                    }
+                    if (t->arp_idx != idx) {
+                        printf("    rate %u -> %u swing %u at %u due %u: idx %u -> %u want %u\n",
+                            from, to, swing, at, due, before, t->arp_idx, idx);
+                        ok = 0;
+                    }
+                }
+                mi(0x80, 60, 0); transport_req = 2; blks(2);
+                ok &= !cap_hanging() && !cap_open_offs && !mout_holding();
+                cases++;
+            }
+    bad += check("SHAYPE RATE: all 64 transitions, straight / swung transport slots, pattern/pass continues, no hanging notes", ok && cases == 192u);
+}
+
+/* A second track running the destination rate from PLAY is the external clock
+ * reference. Changing track 1 must join its next slot without copying its index. */
+static void rate_external(uint32_t wander)
+{
+    track_t *t = setup(factory("UP 4"), AD_UP, 3, 75, 64), *ref = &trk[1];
+    uint32_t i, at = 10u, changed = 0, joined = 0, ok = 1, swaps = 0;
+    ref->p[P_ARATE] = 5; ref->p[P_ASWING] = 0;
+    song.g[G_CLOCK] = 1; events_block(CTL);
+    fm1_ms = at; mi(0xFA, 0, 0); blk1();
+    for (i = 0; i < 192u; i++) {
+        at += wander ? 19u + (i / 24u) % 4u : (i % 6u == 5u ? 21u : 21u - (i % 2u));
+        mi(0xF8, 0, 0);
+        while (fm1_ms < at) {
+            uint32_t a = t->arp_idx, b = ref->arp_idx;
+            if (i == 49u && !changed) { t->p[P_ARATE] = 5; changed = 1; }
+            fm1_ms++; blk1();
+            if (changed) {
+                if (t->arp_idx != a) {
+                    ok &= ref->arp_idx != b && t->arp_idx == a + 1u;
+                    joined = 1; swaps++;
+                } else if (joined && ref->arp_idx != b) ok = 0;
+            }
+        }
+    }
+    mi(0xFC, 0, 0); blk1();
+    if (!ok) printf("    external rate join wander %u, joined %u, slots %u\n",wander,joined,swaps);
+    bad += check(wander ? "SHAYPE RATE: joins external grid while tempo wanders; pattern index never restarts"
+                       : "SHAYPE RATE: joins external grid; pattern index never restarts", ok && joined && swaps > 10u);
+}
+
+static void rate_waiting_clock(void)
+{
+    track_t *t = setup(factory("UP 4"), AD_UP, 5, 75, 16);
+    uint32_t i, ok = 1, idx;
+    song.g[G_CLOCK] = 1; events_block(CTL);
+    fm1_ms = 10; mi(0xFA, 0, 0); blk1();
+    idx = t->arp_idx;
+    /* No clock time has passed: RATE movement must not replay slot zero. */
+    for (i = 0; i < 8u; i++) {
+        t->p[P_ARATE] = (int16_t)i;
+        blk1(); ok &= t->arp_idx == idx;
+    }
+    mi(0xFC, 0, 0); blk1();
+    mi(0xFB, 0, 0); blk1(); ok &= t->arp_idx == idx;
+    mi(0xFA, 0, 0); blk1(); ok &= t->arp_idx == 0u;
+    mi(0xFC, 0, 0); blk1();
+    bad += check("SHAYPE RATE: awaiting MIDI clock does not retrigger; Continue keeps position, Start resets", ok);
+}
+
 int main(void)
 {
+    rate_waiting_clock();
+    rate_grid();
+    rate_external(0);
+    rate_external(1);
     parity(AA_NOTE);
     parity(AA_NOW);
     edges();

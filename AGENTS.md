@@ -25,3 +25,5 @@ for unit ownership, firmware safety and the FM-1 handoff queue.
 - Target storage guards and host NOR tests share `hal/fm1_flash_regions.h`. Extended saves require B8000..D9FFF; never widen the entire retired-sample range. SAVE > SONG NAME debounces for 3 s; see `docs/SONG-NAMING.md`.
 
 - Song switching/copying requires physical GLOBAL + OCT; plain HOME OCT changes pitch. See `docs/GLOBAL-SONGS.md`; capture song gestures before SET-layer UNDO, ARP OP shifts, action taps and pitch handlers.
+
+- SHAYPE RATE changes join transport clocks without resetting pattern/pass position. Runtime-only clocks live in `seq.c`; see `docs/SHAYPE-TRANSPORT.md` and the 192 transition / external-clock cases in `tests/arp_seq_test.c`.
