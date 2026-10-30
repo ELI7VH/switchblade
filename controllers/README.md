@@ -3,6 +3,8 @@
 Import **fm1-sb-live.minilab3** in Arturia MIDI Control Center, select the User
 memory you want, then **Store To**. Select that program on the MiniLab.
 The native file imported successfully into MIDI Control Center 1.2.0.
+After a CLI upload, switch to another program and back to the written User slot:
+stored readback alone does not establish which mapping the active controls use.
 It requires the matching Switch Blade **v0.1-wl-live5 or newer** firmware for master effects.
 
 Connect MiniLab MIDI OUT to FM-1 MIDI IN. Use keyboard MIDI channel **16** to
@@ -69,3 +71,20 @@ MIDI Control Center may move an imported file into its Templates directory. A co
 In **v0.1-wl-hold6**, live-recorded synth releases follow your played hold time;
 start quantization and the MiniLab preset stay the same. See
 [played holds](../docs/PLAYED-HOLDS.md).
+
+
+## Physical controller audit — 2026-10-30
+
+The standalone CLI reapplied all 319 fields to User 1 with `--rewrite`, stored
+and verified them. All five slots were backed up; User 2–5 and the global keyboard
+channel (16) were unchanged. The CLI now explicitly reports that the active
+program is not verified by readback and requests a program reload.
+
+Before reselecting User 1, knob output used a different CC set. After reloading,
+actual USB and FM-1 DIN captures observed all eight requested knob CCs on Ch16,
+CC7 faders on Ch1–4, and A/B pitches as piano notes. The isolated K6 capture had
+121 byte-identical Ch16 CC21 messages on both paths with no gaps or other
+messages. The broader fast fader sweep had one observer ring-read gap, so its
+complete DIN packet delivery is not claimed; every fader's CC/channel was seen.
+No synthetic knob events were used as physical evidence. Firmware was not
+changed during this audit. Public CLI commit: `a6f50f5` (26 unit tests pass).
