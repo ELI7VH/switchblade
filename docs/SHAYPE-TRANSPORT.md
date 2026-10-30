@@ -49,3 +49,20 @@ budget failures; other firmware checks pass. The suite invocation used
 failed under system Python's Pillow without libraqm; the identical check passes
 under `Felucca/.venv-build/bin/python` with libraqm. The full suite script itself
 therefore exited 1; the failed environmental check was rerun individually.
+
+## TEST installation — 2026-10-30
+
+Elijah confirmed TEST stopped and approved installation. An unresponsive USB
+connection recovered after the user's power cycle; the fresh backup captures
+what was loaded after that cycle, without substituting an older song version.
+
+Installed the exact package/hash above, then verified the rebooted serial
+version `v0.1-wlgrid13` and editor identity. All 20 exposed objects (8 logical
+objects and 12 native setlist slots), plus master-strip state, match the fresh
+pre-install backup byte for byte. No runtime restore was needed. Playback is
+stopped. SHOW remains glo10; GHOUL was untouched.
+
+Private archive: `~/Documents/FM1 Backups/FM1-TEST-pre-grid13-2026-10-30.zip`.
+Receipt: `build/install-grid13-2026-10-30.json`. Post-install readback:
+`~/Documents/FM1 Backups/FM1-TEST-post-grid13-2026-10-30/`.
+Physical listening and knob-driven rate-change audition remain with Elijah.
